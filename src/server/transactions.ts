@@ -12,7 +12,7 @@ import { buildGraduateTx } from "@/lib/dbc/graduate";
 import { buildCreateStreamCoinTx } from "@/lib/dbc/launch";
 import { loadPoolSnapshot, type PoolSnapshot } from "@/lib/dbc/pool";
 import { prepareTrade, quoteTrade, type TradeInput } from "@/lib/dbc/trade";
-import { type DammSnapshot, graduatedPoolAddress, loadDammSnapshot } from "@/lib/damm/pool";
+import { type DammSnapshot, graduatedPoolAddress, isCoinSolPool, loadDammSnapshot } from "@/lib/damm/pool";
 import { prepareDammTrade, quoteDammTrade } from "@/lib/damm/trade";
 import { buildClaimPoolFeesTx, lpPositionsOf } from "@/lib/damm/positions";
 import type { BuiltTx } from "@/lib/dbc/tx";
@@ -118,6 +118,8 @@ async function graduatedPool(snapshot: PoolSnapshot): Promise<DammSnapshot> {
   const address = graduatedPoolAddress(snapshot.config, snapshot.pool.poolState.baseMint);
   const pool = await loadDammSnapshot(getChain().connection, address);
   if (!pool) throw new UserError("This coin's Meteora pool isn't open yet. Try again in a moment.");
+  // Trade direction and price assume coin = token A, SOL = token B; never trade a pool that differs.
+  if (!isCoinSolPool(pool.state, snapshot.pool.poolState.baseMint)) throw new Error(`Unexpected Meteora pool layout at ${address.toBase58()}`);
   return pool;
 }
 

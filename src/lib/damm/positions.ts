@@ -4,7 +4,16 @@
  * the pool's trading fees. Whoever holds a position NFT can claim its fees; the liquidity itself
  * never unlocks.
  */
-import { CpAmm, getTokenProgram, getUnClaimLpFee, type PoolState, type PositionState } from "@meteora-ag/cp-amm-sdk";
+import {
+  CollectFeeMode,
+  CpAmm,
+  derivePositionAddress,
+  getAllPositionNftAccountByOwner,
+  getTokenProgram,
+  getUnClaimLpFee,
+  type PoolState,
+  type PositionState,
+} from "@meteora-ag/cp-amm-sdk";
 import { createCloseAccountInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
@@ -13,9 +22,22 @@ import { built, type BuiltTx } from "../dbc/tx";
 
 export type LpPosition = { position: PublicKey; positionNftAccount: PublicKey; positionState: PositionState };
 
-/** The positions `owner` holds in `pool` (found from the position NFTs in its wallet). Two RPC calls. */
+/** Position NFTs read per wallet: bounds the work one request can cause (a holder of more claims from Meteora). */
+const MAX_POSITION_NFTS = 50;
+
+/**
+ * The positions `owner` holds in `pool`, found from the position NFTs in its wallet (at most
+ * MAX_POSITION_NFTS of them). Exactly two RPC calls: the wallet's NFT accounts, then their positions.
+ */
 export async function lpPositionsOf(connection: Connection, pool: PublicKey, owner: PublicKey): Promise<LpPosition[]> {
-  return new CpAmm(connection).getUserPositionByPool(pool, owner);
+  const nfts = (await getAllPositionNftAccountByOwner(connection, owner)).slice(0, MAX_POSITION_NFTS);
+  if (nfts.length === 0) return [];
+  const addresses = nfts.map((nft) => derivePositionAddress(nft.positionNft));
+  const states = (await new CpAmm(connection)._program.account.position.fetchMultiple(addresses)) as (PositionState | null)[];
+  return nfts.flatMap((nft, i) => {
+    const positionState = states[i];
+    return positionState?.pool.equals(pool) ? [{ position: addresses[i], positionNftAccount: nft.positionNftAccount, positionState }] : [];
+  });
 }
 
 /** Fees the positions can claim now: the coin side (token A) and the SOL side (token B). */
@@ -53,7 +75,9 @@ export async function buildClaimPoolFeesTx(
   // first claim doesn't spend ~0.002 SOL of rent on an account that stays empty.
   const coinProgram = getTokenProgram(state.tokenAFlag);
   const coinAccount = getAssociatedTokenAddressSync(state.tokenAMint, owner, true, coinProgram);
-  const closeEmptyCoinAccount = fee.feeTokenA.isZero() && !(await connection.getAccountInfo(coinAccount));
+  // Only for pools that pay fees in SOL alone, so no coin fee can arrive between build and send.
+  const closeEmptyCoinAccount =
+    state.collectFeeMode === CollectFeeMode.OnlyB && fee.feeTokenA.isZero() && !(await connection.getAccountInfo(coinAccount));
   const tx = await new CpAmm(connection).claimPositionFee({
     owner,
     pool: pool.address,

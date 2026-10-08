@@ -53,7 +53,10 @@ async function run(step: string, action: string, wallet: Keypair, body: Record<s
   throw new Error(`${step}: no answer in 2 min ${sig}`);
 }
 
-type Detail = { coin: { status: string; progress: number; streamerUnclaimedSol: string }; holdings: { coins: string } | null };
+type Detail = {
+  coin: { status: string; progress: number; streamerUnclaimedSol: string; meteoraPool: string | null };
+  holdings: { coins: string; lpFees: { sol: string; coins: string } | null } | null;
+};
 const detail = (mint: string, wallet?: Keypair) => api<Detail>(`/api/coins/${mint}${wallet ? `?wallet=${wallet.publicKey.toBase58()}` : ""}`);
 async function waitFor(mint: string, what: string, ok: (d: Detail) => boolean, wallet?: Keypair) {
   for (let i = 0; i < 30; i++) {
@@ -91,6 +94,18 @@ await waitFor(mint, "graduated", (d) => d.coin.status === "graduated");
 await waitFor(mint, "fees to claim", (d) => Number(d.coin.streamerUnclaimedSol) > 0);
 await run("creator claims fees", "claim", creator, { mint });
 await waitFor(mint, "fees claimed", (d) => Number(d.coin.streamerUnclaimedSol) === 0);
+
+// After graduation: trade in the coin's Meteora DAMM v2 pool through the site, then claim the
+// pool fees on both LP position NFTs (the streamer's and the platform's).
+const beforePoolBuy = await waitFor(mint, "Meteora pool visible", (d) => Boolean(d.coin.meteoraPool), viewer);
+await run("buy 0.01 SOL in the Meteora pool", "trade", viewer, { mint, side: "buy", amount: "0.01" });
+const heldAfter = await waitFor(mint, "viewer's pool buy landed", (d) => Number(d.holdings?.coins ?? 0) > Number(beforePoolBuy.holdings?.coins ?? 0), viewer);
+await run("sell half in the Meteora pool", "trade", viewer, { mint, side: "sell", amount: (Number(heldAfter.holdings?.coins) / 2).toFixed(6) });
+for (const [who, wallet] of [["streamer", creator], ["partner", partner]] as const) {
+  const mine = await waitFor(mint, `${who} LP fees visible`, (d) => Number(d.holdings?.lpFees?.sol ?? 0) > 0, wallet);
+  console.log(`      ${who} LP fees before claim: ${mine.holdings?.lpFees?.sol} SOL`);
+  await run(`${who} claims LP pool fees`, "claim-lp", wallet, { mint });
+}
 
 console.log("\nALL STEPS CONFIRMED");
 for (const [step, sig] of signatures) console.log(`${step.padEnd(32)} https://explorer.solana.com/tx/${sig}?cluster=devnet`);

@@ -28,6 +28,9 @@ export function tradeFromTransaction(
   const quoteDelta = vaultAmount(tx.meta.postTokenBalances, quoteIndex).sub(vaultAmount(tx.meta.preTokenBalances, quoteIndex));
   const baseDelta = vaultAmount(tx.meta.postTokenBalances, baseIndex).sub(vaultAmount(tx.meta.preTokenBalances, baseIndex));
   if (quoteDelta.isZero() || baseDelta.isZero()) return null;
+  // A swap moves the vaults in opposite directions. Both up (graduation filling the new pool, or
+  // anyone adding liquidity) or both down (removing liquidity, a two-token fee claim) is not a trade.
+  if (quoteDelta.isNeg() === baseDelta.isNeg()) return null;
 
   const sol = lamportsToSol(quoteDelta.abs());
   const coins = baseUnitsToCoins(baseDelta.abs());

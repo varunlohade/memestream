@@ -70,7 +70,8 @@ async function withGraduatedPrices(connection: Connection, config: PoolConfig, v
   if (graduated.length === 0) return views;
   const addresses = graduated.map((v) => graduatedPoolAddress(config, new PublicKey(v.mint)));
   const states = await fetchDammPools(connection, addresses);
-  const priced = new Map(graduated.map((v, i) => [v.mint, withGraduatedPool(v, addresses[i], states[i])]));
+  const supply = Number(baseUnitsToCoins(config.preMigrationTokenSupply));
+  const priced = new Map(graduated.map((v, i) => [v.mint, withGraduatedPool(v, addresses[i], states[i], supply)]));
   return views.map((v) => priced.get(v.mint) ?? v);
 }
 
@@ -121,7 +122,7 @@ async function loadCoin(mint: string): Promise<{ coin: CoinView; venue: TradeVen
     // Live price and trades come from the Meteora pool; the curve froze at graduation.
     const damm = graduatedPoolAddress(config, pool.poolState.baseMint);
     const [state] = await fetchDammPools(connection, [damm]);
-    view = withGraduatedPool(view, damm, state);
+    view = withGraduatedPool(view, damm, state, Number(baseUnitsToCoins(config.preMigrationTokenSupply)));
     if (state) venue = { address: damm, vaults: { quote: state.tokenBVault, base: state.tokenAVault } };
   }
   const [coin] = await withMetadata(connection, [view]);
@@ -278,8 +279,14 @@ async function lpFeesOf(meteoraPool: string | null, owner: PublicKey): Promise<H
   if (!meteoraPool) return null;
   const { connection } = getChain();
   const pool = new PublicKey(meteoraPool);
-  const [positions, [state]] = await Promise.all([lpPositionsOf(connection, pool, owner), fetchDammPools(connection, [pool])]);
-  if (positions.length === 0 || !state) return null;
-  const { coins, lamports } = unclaimedPoolFees(state, positions);
-  return { sol: lamportsToSol(lamports), coins: baseUnitsToCoins(coins) };
+  try {
+    const [positions, [state]] = await Promise.all([lpPositionsOf(connection, pool, owner), fetchDammPools(connection, [pool])]);
+    if (positions.length === 0 || !state) return null;
+    const { coins, lamports } = unclaimedPoolFees(state, positions);
+    return { sol: lamportsToSol(lamports), coins: baseUnitsToCoins(coins) };
+  } catch (error) {
+    // A failed LP lookup must not break the coin page: the section is hidden until the next poll.
+    console.warn("LP fees unavailable:", (error as Error).message);
+    return null;
+  }
 }

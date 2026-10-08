@@ -59,11 +59,14 @@ export async function fetchDammPools(connection: Connection, addresses: PublicKe
 
 /**
  * A graduated coin's view with its live Meteora price: the curve's numbers froze at graduation.
- * Market cap keeps the curve's supply basis (the full supply never changes).
+ * `supplyCoins` is the coin's full supply (it never changes).
  */
-export function withGraduatedPool<T extends PoolView>(view: T, address: PublicKey, state: PoolState | null): T {
+export function withGraduatedPool<T extends PoolView>(view: T, address: PublicKey, state: PoolState | null, supplyCoins: number): T {
   if (!state) return { ...view, meteoraPool: address.toBase58() };
   const price = dammPriceInSol(state);
-  const supply = view.priceSol > 0 ? view.marketCapSol / view.priceSol : 0;
-  return { ...view, meteoraPool: address.toBase58(), priceSol: price, marketCapSol: price * supply };
+  return { ...view, meteoraPool: address.toBase58(), priceSol: price, marketCapSol: price * supplyCoins };
 }
+
+/** True if this is the coin's pool against SOL, as graduation makes it (coin = token A, SOL = token B). */
+export const isCoinSolPool = (state: PoolState, mint: PublicKey): boolean =>
+  state.tokenAMint.equals(mint) && state.tokenBMint.equals(QUOTE.mint);

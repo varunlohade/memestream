@@ -52,3 +52,8 @@ test("transactions that aren't swaps are skipped", () => {
   assert.equal(tradeFromTransaction(txMoving(1_000, 0), "sig", pool), null, "only SOL moved (a claim)");
   assert.equal(tradeFromTransaction(txMoving(1, -1), "sig", { ...pool, vaults: { quote: key(), base: vaults.base } }), null, "another pool");
 });
+
+test("liquidity moves are not trades: both vaults up (graduation, adding liquidity) or both down", () => {
+  assert.equal(tradeFromTransaction(txMoving(100_000_000, 200_000_000_000), "sig", pool), null, "both in");
+  assert.equal(tradeFromTransaction(txMoving(-1_000, -5_000), "sig", pool), null, "both out");
+});

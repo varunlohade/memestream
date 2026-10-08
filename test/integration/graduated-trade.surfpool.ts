@@ -124,3 +124,24 @@ test("the streamer sees their LP NFT's pool fees and claims them; a viewer can't
   const fees = Number(solToLamports(streamerView.holdings.lpFees.sol));
   assert.ok(gained > fees - 10_000 && gained <= fees, `gained ${gained} lamports for ${fees} lamports of fees`);
 });
+
+test("the platform's (partner's) LP NFT exists after graduation and the partner's claim pays it", async () => {
+  const { getCoinDetail } = await import("../../src/server/coins");
+  const view = await getCoinDetail(mint.toBase58(), partner.publicKey.toBase58());
+  assert.ok(view?.holdings?.lpFees, "graduation gave the partner an LP position");
+  const fees = Number(solToLamports(view.holdings.lpFees.sol));
+  assert.ok(fees > 0);
+  const before = await connection.getBalance(partner.publicKey);
+  const claim = await server.buildClaimPoolFeesForWallet({ wallet: partner.publicKey.toBase58(), mint: mint.toBase58() });
+  assert.equal((await signAndSend(claim, partner)).status, "confirmed");
+  const gained = (await connection.getBalance(partner.publicKey)) - before;
+  assert.ok(gained > fees - 10_000 && gained <= fees, `partner gained ${gained} lamports for ${fees} of fees`);
+});
+
+test("graduation itself (filling the new pool) never shows as a trade", async () => {
+  const { getCoinDetail } = await import("../../src/server/coins");
+  await new Promise((r) => setTimeout(r, 4_100)); // past the coin-detail cache
+  const detail = await getCoinDetail(mint.toBase58(), null);
+  assert.ok(detail);
+  assert.ok(!detail.trades.some((t) => t.wallet === partner.publicKey.toBase58()), "the graduating wallet made no trade");
+});

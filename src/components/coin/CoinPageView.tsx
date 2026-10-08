@@ -85,8 +85,10 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
   const { address } = useWallet();
   const { run: runTx, locked } = useTx();
   const [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
-  /** The running action's stage ("Check your wallet"...), shown on its button; null when idle. */
-  const [stage, setStage] = useState<string | null>(null);
+  /** The running action and its stage ("Check your wallet"...), shown on that action's button only. */
+  const [running, setRunning] = useState<{ action: string; stage: string } | null>(null);
+  const stage = running?.stage ?? null;
+  const labelFor = (action: string, idle: string) => (running?.action === action ? running.stage : idle);
   const isStreamer = address === coin.creator;
   const canClaim = isStreamer && Number(coin.streamerUnclaimedSol) > 0;
   const canGraduate = coin.status === "graduating" && Boolean(address);
@@ -99,13 +101,13 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
     if (!address) return;
     setStatus(null);
     try {
-      await runTx(action, `${ACTION_LABEL[action]} ${coin.symbol}`, { wallet: address, mint: coin.mint }, setStage);
+      await runTx(action, `${ACTION_LABEL[action]} ${coin.symbol}`, { wallet: address, mint: coin.mint }, (next) => setRunning({ action, stage: next }));
       setStatus({ error: false, text: successText });
       onDone();
     } catch (e) {
       setStatus({ error: true, text: (e as Error).message });
     } finally {
-      setStage(null);
+      setRunning(null);
     }
   };
 
@@ -116,7 +118,7 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
           <div className="lbl mute">Your earnings</div>
           <div className="cap num" style={{ fontSize: 34 }}>{formatSol(coin.streamerUnclaimedSol)} SOL</div>
           <button type="button" className="mbtn buy" disabled={!canClaim || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim", "Earnings sent to your wallet")}>
-            {stage ?? "Claim earnings"}
+            {labelFor("claim", "Claim earnings")}
           </button>
         </>
       )}
@@ -128,13 +130,13 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
             {Number(lpFees.coins) > 0 && <span className="mute"> + {compact(Number(lpFees.coins))} {coin.symbol}</span>}
           </div>
           <button type="button" className="mbtn buy" disabled={!canClaimLp || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim-lp", "Pool fees sent to your wallet")}>
-            {stage ?? "Claim pool fees"}
+            {labelFor("claim-lp", "Claim pool fees")}
           </button>
         </>
       )}
       {canGraduate && (
         <button type="button" className="mbtn buy" disabled={Boolean(stage) || Boolean(locked)} onClick={() => runAction("graduate", "Graduated to Meteora")}>
-          {stage ?? "Graduate to Meteora"}
+          {labelFor("graduate", "Graduate to Meteora")}
         </button>
       )}
       {status && (
