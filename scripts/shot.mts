@@ -1,5 +1,6 @@
 // Screenshot pages of the running local app: tsx scripts/shot.mts <path> <out.png> [width] [height]
 import puppeteer from "puppeteer-core";
+import { sleep } from "../src/lib/poll";
 const [path, out, width = "1440", height = "1080"] = process.argv.slice(2);
 const browser = await puppeteer.launch({
   executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -19,7 +20,7 @@ try {
     else req.abort();
   });
   await page.goto(`http://127.0.0.1:3000${path}`, { waitUntil: "domcontentloaded", timeout: 60_000 });
-  await new Promise((r) => setTimeout(r, 6_000));
+  await sleep(6_000);
   await page.screenshot({ path: out as `${string}.png` });
   console.log("saved", out);
 } finally {

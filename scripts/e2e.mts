@@ -6,6 +6,7 @@
  */
 import { mkdirSync } from "node:fs";
 import puppeteer, { type Page } from "puppeteer-core";
+import { sleep } from "../src/lib/poll";
 
 const BASE = "http://127.0.0.1:3000";
 const OUT = process.env.E2E_OUT ?? "design/build/e2e";
@@ -49,7 +50,7 @@ page.on("pageerror", (e) => errors.push((e as Error).message));
 // Dev mode compiles each page on first visit and can full-reload the open page while doing so.
 // Visit every route once first, so the clicks below run against compiled pages.
 for (const path of ["/", "/go-live", "/coin/11111111111111111111111111111111", "/api/coins"]) await fetch(`${BASE}${path}`);
-await new Promise((r) => setTimeout(r, 3_000));
+await sleep(3_000);
 
 let stepNo = 0;
 const results: { step: string; ok: boolean | "skipped"; note?: string }[] = [];
@@ -101,7 +102,7 @@ async function waitForChain(mint: string, what: string, done: (d: Detail) => boo
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (done(await detail(mint))) return;
-    await new Promise((r) => setTimeout(r, 1_000));
+    await sleep(1_000);
   }
   throw new Error(`chain never showed: ${what}`);
 }

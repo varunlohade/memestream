@@ -6,12 +6,12 @@
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { Connection, Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
+import { sleep } from "../src/lib/poll";
 
 const SITE = process.argv[2] ?? "https://memestream-iota.vercel.app";
 const connection = new Connection("https://api.devnet.solana.com", "confirmed");
 if ((await connection.getGenesisHash()) !== "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG") throw new Error("Not devnet. Stopping.");
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 function keypair(name: string, create: boolean): Keypair {
   const path = `.keys/${name}.json`;
   if (existsSync(path)) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));

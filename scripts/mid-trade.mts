@@ -7,10 +7,10 @@
  * unlocks after; a triple click makes one trade. Based on the tester's qa/2026-10-07-final/breaks.mts.
  */
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
+import { sleep } from "../src/lib/poll";
 
 const BASE = "http://127.0.0.1:3000";
 const SEND_DELAY_MS = 20_000;
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 const wallet = ((await (await fetch(`${BASE}/api/dev-wallet`)).json()) as { address: string }).address;
 const coins = ((await (await fetch(`${BASE}/api/coins`)).json()) as { coins: { mint: string; symbol: string }[] }).coins;

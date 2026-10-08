@@ -2,6 +2,8 @@
 
 export type PollOptions = { timeoutMs: number; intervalMs: number };
 
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 /**
  * Calls `check` until it returns a value (not undefined), then resolves with it.
  * Errors thrown by `check` count as "not yet" (a network blip shouldn't end the wait).
@@ -17,6 +19,6 @@ export async function pollUntil<T>(check: () => Promise<T | undefined>, { timeou
       // transient failure: try again on the next tick
     }
     if (Date.now() + intervalMs > deadline) return undefined;
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    await sleep(intervalMs);
   }
 }

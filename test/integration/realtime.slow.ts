@@ -17,7 +17,7 @@ import { loadPoolSnapshot } from "../../src/lib/dbc/pool";
 import { COIN_PRESETS, LAUNCH_FEE } from "../../src/lib/dbc/preset";
 import { quoteTrade, type TradeInput } from "../../src/lib/dbc/trade";
 import { solToLamports } from "../../src/lib/dbc/units";
-import { pollUntil } from "../../src/lib/poll";
+import { pollUntil, sleep } from "../../src/lib/poll";
 import { signatureStatus } from "../../src/lib/tx-status";
 
 /** The schedule's full length plus a 10 s margin for block time lag. */
@@ -49,7 +49,7 @@ test("with a real-time clock, the launch fee settles to the base after the first
   const atLaunch = await feeShare();
   assert.ok(atLaunch > LAUNCH_FEE.startingFeeBps / 10_000 - 0.05, `launch fee should be high, got ${(atLaunch * 100).toFixed(2)}%`);
 
-  await new Promise((resolve) => setTimeout(resolve, WAIT_MS));
+  await sleep(WAIT_MS);
 
   const base = LAUNCH_FEE.endingFeeBps / 10_000;
   const settled = await feeShare();
