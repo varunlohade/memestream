@@ -3,16 +3,20 @@
  * Browser-only: uses canvas.
  */
 
+/** Park-Miller "minimal standard" generator: modulus 2^31 - 1 and its multiplier. */
+const RANDOM_MODULUS = 2_147_483_647;
+const RANDOM_MULTIPLIER = 16_807;
+
 /** Small deterministic random generator, so the same seed always draws the same art. */
 export function seededRandom(seed: number): () => number {
-  let state = Math.abs(Math.floor(seed)) % 2147483647 || 1;
-  return () => (state = (state * 16807) % 2147483647) / 2147483647;
+  let state = Math.abs(Math.floor(seed)) % RANDOM_MODULUS || 1;
+  return () => (state = (state * RANDOM_MULTIPLIER) % RANDOM_MODULUS) / RANDOM_MODULUS;
 }
 
 /** Stable numeric seed from any string, e.g. a mint address. */
 export function seedFrom(text: string): number {
   let hash = 7;
-  for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) % 2147483647;
+  for (const char of text) hash = (hash * 31 + char.charCodeAt(0)) % RANDOM_MODULUS;
   return hash;
 }
 
@@ -22,16 +26,18 @@ const TEXTURE_COLORS = {
 } as const;
 export type TextureKind = keyof typeof TEXTURE_COLORS;
 
+const TEXTURE_SIZE = 16;
+
 /** A 16×16 noise tile as a data URL, for `background-image`. */
 export function textureUrl(kind: TextureKind, seed = 1): string {
   const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = 16;
+  canvas.width = canvas.height = TEXTURE_SIZE;
   const ctx = canvas.getContext("2d");
   if (!ctx) return "";
   const random = seededRandom(seed * 977 + kind.length * 31);
   const colors = TEXTURE_COLORS[kind];
-  for (let y = 0; y < 16; y++) {
-    for (let x = 0; x < 16; x++) {
+  for (let y = 0; y < TEXTURE_SIZE; y++) {
+    for (let x = 0; x < TEXTURE_SIZE; x++) {
       ctx.fillStyle = colors[Math.floor(random() * colors.length)];
       ctx.fillRect(x, y, 1, 1);
     }
@@ -84,11 +90,11 @@ export function drawScene(canvas: HTMLCanvasElement, seed: number) {
   ctx.fillStyle = palette[0];
   ctx.fillRect(0, 0, w, h);
   for (let band = 0; band < 5; band++) {
-    ctx.fillStyle = palette[(band + 1) % 6];
+    ctx.fillStyle = palette[(band + 1) % palette.length];
     ctx.fillRect(0, Math.round(h * (0.35 + band * 0.13)), w, Math.ceil(h * 0.13));
   }
   for (let i = 0; i < 90; i++) {
-    ctx.fillStyle = palette[Math.floor(random() * 6)];
+    ctx.fillStyle = palette[Math.floor(random() * palette.length)];
     const size = Math.max(1, Math.round((random() * w) / 14));
     ctx.fillRect(Math.floor(random() * w), Math.floor(random() * h), size, Math.max(1, Math.round(size * (0.5 + random()))));
   }

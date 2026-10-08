@@ -8,6 +8,8 @@ import { fetchJson } from "@/lib/http";
 export type { CoinDetail, CoinView, Holdings, TradePreview, TradeView } from "@/lib/api-types";
 
 const POLL_MS = 5_000;
+/** A hung request can't freeze polling: each one gives up after this and the next is scheduled. */
+const REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * Polls `url`: one request at a time (the next starts after the last ends), paused while the
@@ -31,8 +33,7 @@ function usePolled<T>(url: string, initial: T | null = null) {
         return;
       }
       try {
-        // A hung request can't freeze polling: each one gives up after 10 s and the next is scheduled.
-        const data = await fetchJson<T>(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) });
+        const data = await fetchJson<T>(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]) });
         setState({ url, data, error: null });
       } catch (e) {
         if (controller.signal.aborted) return;
