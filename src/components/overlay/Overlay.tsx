@@ -51,14 +51,13 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
             <div className="slot" style={{ overflow: "hidden" }}>
               <StreamThumb streamUrl={coin.streamUrl} seedKey={mint} sizes="76px" />
             </div>
-            <div>
-              <div className="tk">{ticker}</div>
-              <div className="where">{link}</div>
-            </div>
+            <div className="tk">{ticker}</div>
             <div className="r">
               <div className="mc">{cap}</div>
               <div className="ch">{changeText}</div>
             </div>
+            {/* Its own full-width row, so a long host never cuts off the ticker. */}
+            <div className="where">{link}</div>
           </div>
           {bar}
           <div className="gl">{graduated ? "Now trading on Meteora" : "to graduation"}</div>

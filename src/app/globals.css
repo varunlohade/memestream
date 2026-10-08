@@ -184,11 +184,11 @@ canvas { image-rendering: pixelated; }
 .overlay-root .slot canvas { width: 100%; height: 100%; }
 .overlay-preview-bg { position: absolute; inset: 0; }
 .ovA { position: absolute; left: 40px; bottom: 40px; width: 600px; padding: 22px 26px; }
-.ovA .oh { display: grid; grid-template-columns: 76px 1fr auto; gap: 18px; align-items: center; margin-bottom: 16px; }
+.ovA .oh { display: grid; grid-template-columns: 76px minmax(0, 1fr) auto; gap: 18px; align-items: center; margin-bottom: 16px; }
 .ovA .slot { width: 76px; height: 76px; padding: 12px; }
 .ovA .tk { font-size: 32px; }
-.ovA .where { font-size: 28px; color: var(--mute); margin-top: 6px; }
-.ovA .r { text-align: right; }
+.ovA .where { grid-column: 1 / -1; font-size: 26px; color: var(--mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ovA .r { text-align: right; white-space: nowrap; }
 .ovA .mc { font-size: 36px; }
 .ovA .ch { font-size: 32px; margin-top: 4px; }
 .ovA .gl { font-size: 28px; text-align: center; margin-top: 8px; color: var(--mute); }
