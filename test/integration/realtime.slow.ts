@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { after, test } from "node:test";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import type { Surfnet } from "@solana/surfpool";
-import { Connection, Keypair, PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, type PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
@@ -19,6 +19,8 @@ import { quoteTrade, type TradeInput } from "../../src/lib/dbc/trade";
 import { solToLamports } from "../../src/lib/dbc/units";
 import { pollUntil, sleep } from "../../src/lib/poll";
 import { signatureStatus } from "../../src/lib/tx-status";
+import { buyFeeShare, shareOfBps } from "../support/fees";
+import { neverSentSignature } from "../support/signatures";
 
 /** The schedule's full length plus a 10 s margin for block time lag. */
 const WAIT_MS = (LAUNCH_FEE.totalDuration + 10) * 1000;
@@ -36,17 +38,14 @@ test("with a real-time clock, the launch fee settles to the base after the first
   const pool = (await client.state.getPoolByBaseMint(launch.mint))?.publicKey as PublicKey;
 
   const probe: TradeInput = { side: "buy", lamports: solToLamports("0.1") };
-  const feeShare = async () => {
-    const quote = quoteTrade(await loadPoolSnapshot(client, pool), probe, 100);
-    return quote.tradingFee.add(quote.protocolFee).toNumber() / probe.lamports.toNumber();
-  };
+  const feeShare = async () => buyFeeShare(quoteTrade(await loadPoolSnapshot(client, pool), probe, 100), probe.lamports);
 
   const atLaunch = await feeShare();
-  assert.ok(atLaunch > LAUNCH_FEE.startingFeeBps / 10_000 - 0.05, `launch fee should be high, got ${(atLaunch * 100).toFixed(2)}%`);
+  assert.ok(atLaunch > shareOfBps(LAUNCH_FEE.startingFeeBps) - 0.05, `launch fee should be high, got ${(atLaunch * 100).toFixed(2)}%`);
 
   await sleep(WAIT_MS);
 
-  const base = LAUNCH_FEE.endingFeeBps / 10_000;
+  const base = shareOfBps(LAUNCH_FEE.endingFeeBps);
   const settled = await feeShare();
   // No trades happened, so there is no volatility fee: exactly the base, within rounding.
   assert.ok(Math.abs(settled - base) < 0.0002, `settled fee should be the ${base * 100}% base, got ${(settled * 100).toFixed(3)}%`);
@@ -57,8 +56,7 @@ test("a real blockhash expires with time; an unsent transaction reads pending, t
   try {
     const connection = new Connection(chain.rpcUrl, "confirmed");
     const { blockhash } = await connection.getLatestBlockhash("confirmed");
-    const { default: bs58 } = await import("bs58");
-    const neverSent = bs58.encode(crypto.getRandomValues(new Uint8Array(64)));
+    const neverSent = neverSentSignature();
 
     assert.equal((await signatureStatus(connection, { signature: neverSent, blockhash })).status, "pending");
     const expired = await pollUntil(
@@ -77,7 +75,6 @@ test("a landed transaction stays 'confirmed' after its blockhash really expires"
   const chain = await startOfflineSurfnet([payer], { realTimeClock: true });
   try {
     const connection = new Connection(chain.rpcUrl, "confirmed");
-    const { SystemProgram, Transaction } = await import("@solana/web3.js");
     const { blockhash } = await connection.getLatestBlockhash("confirmed");
     const tx = new Transaction({ feePayer: payer.publicKey, recentBlockhash: blockhash }).add(
       SystemProgram.transfer({ fromPubkey: payer.publicKey, toPubkey: Keypair.generate().publicKey, lamports: 1_000_000 }),

@@ -14,6 +14,7 @@ import { graduationProgress, loadPoolSnapshot, priceInSol } from "../../src/lib/
 import { COIN_PRESETS, LAUNCH_FEE } from "../../src/lib/dbc/preset";
 import { prepareTrade, quoteTrade, type TradeInput } from "../../src/lib/dbc/trade";
 import { solToLamports, toBN } from "../../src/lib/dbc/units";
+import { buyFeeShare, shareOfBps } from "../support/fees";
 import { stepRunner } from "../support/steps";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
@@ -117,13 +118,9 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
 
   await step("launch fee is ~50%; after a minute it's the 1% base plus a small volatility fee", async () => {
     const probe: TradeInput = { side: "buy", lamports: ofThreshold(0.05) };
-    /** Total fee (trading + protocol) as a share of the SOL paid in. Buy fees are taken in SOL. */
-    const feeShare = async () => {
-      const quote = quoteTrade(await snapshot(), probe, SLIPPAGE_BPS);
-      return quote.tradingFee.add(quote.protocolFee).toNumber() / probe.lamports.toNumber();
-    };
-    const startShare = LAUNCH_FEE.startingFeeBps / 10_000;
-    const baseShare = LAUNCH_FEE.endingFeeBps / 10_000;
+    const feeShare = async () => buyFeeShare(quoteTrade(await snapshot(), probe, SLIPPAGE_BPS), probe.lamports);
+    const startShare = shareOfBps(LAUNCH_FEE.startingFeeBps);
+    const baseShare = shareOfBps(LAUNCH_FEE.endingFeeBps);
     const atLaunch = await feeShare();
     assert.ok(Math.abs(atLaunch - startShare) < 0.005, `launch fee ~${startShare * 100}%, got ${(atLaunch * 100).toFixed(2)}%`);
 

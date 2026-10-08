@@ -13,6 +13,7 @@ import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
 import { COIN_PRESETS } from "../../src/lib/dbc/preset";
 import { pollUntil } from "../../src/lib/poll";
 import { signatureStatus } from "../../src/lib/tx-status";
+import { neverSentSignature } from "../support/signatures";
 
 const [partner, streamer, viewer] = [Keypair.generate(), Keypair.generate(), Keypair.generate()];
 let surfnet: Surfnet;
@@ -53,8 +54,7 @@ test("the server builds a buy for any other wallet", async () => {
 // Surfpool's time jumps don't age blockhashes, so real expiry is covered by the real-time
 // suite (npm run test:clock). Here: the status logic with a blockhash the chain never issued.
 test("an unseen transaction is pending while its blockhash is valid, expired once it isn't", async () => {
-  const { default: bs58 } = await import("bs58");
-  const neverSent = bs58.encode(crypto.getRandomValues(new Uint8Array(64)));
+  const neverSent = neverSentSignature();
   const live = (await trade(viewer.publicKey, "buy")).blockhash;
   const neverIssued = Keypair.generate().publicKey.toBase58();
   assert.equal((await signatureStatus(connection, { signature: neverSent, blockhash: live })).status, "pending");
