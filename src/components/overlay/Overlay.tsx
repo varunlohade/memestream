@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import { type CoinDetail, useCoin } from "@/components/hooks";
 import { Scene, Sprite, XpBar } from "@/components/pixel/Pixel";
+import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { useHostname } from "@/components/use-hostname";
 import { parseStreamLink } from "@/lib/stream-link";
 import { percentChange, signedPercent, sol } from "@/lib/format";
@@ -47,8 +48,8 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
       {layout === "a" && (
         <div className="p ovA">
           <div className="oh">
-            <div className="slot">
-              <Sprite name="coin" />
+            <div className="slot" style={{ overflow: "hidden" }}>
+              <StreamThumb streamUrl={coin.streamUrl} seedKey={mint} sizes="76px" />
             </div>
             <div>
               <div className="tk">{ticker}</div>

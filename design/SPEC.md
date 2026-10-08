@@ -55,16 +55,16 @@ Shared rules (apply to B):
 
 **Coin page**
 - Left: the live stream plays in a 16:9 slot, muted, with the Live tag on top (YouTube or Twitch player), then a panel with coin image slot, `$TICKER`, "<stream name> by <streamer>", and Recent trades (Buy/Sell, SOL, coins, wallet, time ago).
-- Right, panel 1: Market cap (hero number), change in the last hour, pixel step chart, Graduation label + "52.7 of 85 SOL", XP bar with %, then the heart row **"80% of fees go to the streamer"** (must stay visible).
+- Right, panel 1: Market cap (hero number), change, pixel step chart (one connected line: flat steps joined by vertical segments, never loose dots, even with few trades), Graduation label + "52.7 of 85 SOL", XP bar with %, then the heart row **"80% of fees go to the streamer"** (must stay visible).
 - Right, panel 2: Buy/Sell tabs, amount slot in SOL, chips 0.1 / 0.5 / 1 / Max, "You get about N TICKER", primary "Buy TICKER".
 
 **Home**
 - "Live coins", one line "Buy the stream you think will pop.", Go live button.
 - Sort: Hot / New / Close to graduation.
-- B layout: 3-column tiles. Each tile: the stream picture (16:9) with Live tag, `$TICKER`, stream name by streamer, market cap, 1-hour change, small XP bar with "% to graduation".
+- B layout: 3-column tiles. Each tile: the stream picture (16:9) with Live tag, then two rows. Row 1: `$TICKER` left, market cap right. Row 2: stream name left (one line, cut off with an ellipsis if long), change right. Then the small XP bar. No "% to graduation" text on tiles; the bar shows it. No text wraps in a tile.
 
 **Go live**
-- One panel: Image slot (square; NOT BUILT, the app has no upload yet, so leave it out until it does), Stream name, Ticker, Stream link ("Twitch, YouTube or Kick link").
+- One panel: Image slot (square; NOT BUILT, the app has no upload yet, so leave it out until it does), Stream name, Ticker, Stream link (placeholder "YouTube or Twitch live link"; Kick links are not allowed).
 - Heart row: "80% of trade fees go to you. Your wallet can't buy this coin."
 - Primary button "Launch coin".
 
@@ -75,6 +75,7 @@ Sentence case. No ellipses. No arrows on buttons. Ticker always has `$` in title
 - Home tile: the stream's live picture from YouTube or Twitch.
 - Coin icon (header slot, overlay slot): a square center crop of the stream picture, else the pixel scene. Later, when image upload exists, the uploaded image comes first.
 - Coin page: the stream plays muted. People unmute it in the player.
+- Tags on the picture: "Live" = red `#C62828`, white text. "Graduated" = XP green `#80FF20`, black text, so the two never look alike.
 - Fallback: if there is no picture (stream offline, bad link, load error), show the pixel scene. Do not show a broken image or an empty box.
 - The pixel scenes in the mock stills stand in for these real pictures.
 

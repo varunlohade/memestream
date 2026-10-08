@@ -106,14 +106,15 @@ export function drawStepChart(canvas: HTMLCanvasElement, values: number[], color
   const span = max - min || 1;
   const step = w / (values.length - 1);
   ctx.fillStyle = color;
-  let previousY: number | null = null;
+  // A connected stair line: flat until the next trade, then a vertical step to its price.
+  let previous: { x: number; y: number } | null = null;
   values.forEach((value, i) => {
-    const x = Math.round(i * step);
+    const x = Math.min(Math.round(i * step), w - 2);
     const y = Math.round(h - 3 - ((value - min) / span) * (h - 6));
-    if (previousY !== null) {
-      for (let k = Math.min(previousY, y); k <= Math.max(previousY, y); k++) ctx.fillRect(x, k, 2, 2);
+    if (previous) {
+      ctx.fillRect(previous.x, previous.y, x - previous.x + 2, 2);
+      ctx.fillRect(x, Math.min(previous.y, y), 2, Math.abs(y - previous.y) + 2);
     }
-    ctx.fillRect(x, y, 3, 2);
-    previousY = y;
+    previous = { x, y };
   });
 }

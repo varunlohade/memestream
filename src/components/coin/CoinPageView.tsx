@@ -25,7 +25,7 @@ function StreamEmbed({ coin }: { coin: CoinView }) {
       ) : (
         <Scene seedKey={coin.mint} width={192} height={108} />
       )}
-      <span className="live">{coin.status === "graduated" ? "Graduated" : "Live"}</span>
+      <span className={`live${coin.status === "graduated" ? " grad" : ""}`}>{coin.status === "graduated" ? "Graduated" : "Live"}</span>
     </div>
   );
 }

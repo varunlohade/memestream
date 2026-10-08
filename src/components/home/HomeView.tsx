@@ -19,18 +19,13 @@ function CoinTile({ coin }: { coin: CoinView }) {
     <Link href={`/coin/${coin.mint}`} className="p tile">
       <div className="slot thumb">
         <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="(max-width: 640px) 100vw, 33vw" />
-        <span className="live">{graduated ? "Graduated" : "Live"}</span>
+        <span className={`live${graduated ? " grad" : ""}`}>{graduated ? "Graduated" : "Live"}</span>
       </div>
       <div className="meta">
-        <div>
-          <h4>${coin.symbol}</h4>
-          <p>{coin.name}</p>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <h4 className="num">{sol(coin.marketCapSol)} SOL</h4>
-          <p className="num mute">{Math.round(coin.progress * 100)}% to graduation</p>
-        </div>
+        <h4>${coin.symbol}</h4>
+        <h4 className="num">{sol(coin.marketCapSol)} SOL</h4>
       </div>
+      <p className="name">{coin.name}</p>
       <XpBar progress={coin.progress} small />
     </Link>
   );
