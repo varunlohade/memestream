@@ -63,6 +63,11 @@ none of its parameters can change later, so all of them must be right first.
       transactions can't land after their blockhash expires, so this only affects wallets that
       swap in a fresh blockhash. Users are told to reject open popups before unlocking.
 
+- [ ] **npm advisories** (audit #2, 2026-10-08): `npm audit --omit=dev` lists 13 (6 high), all
+      transitive through @solana/web3.js v1, @solana/spl-token and the Meteora DBC SDK (bigint-buffer,
+      toml, stream-json, uuid, jayson); no fix available upstream. Our server feeds them only our own
+      RPC's responses and our own transaction bytes. Re-check before mainnet and bump when the SDK does.
+
 ## After
 - [ ] Record the config address in the deploy env (`MEMESTREAM_CONFIG`) and in this file.
 - [ ] Launch one test coin with a small first buy, then graduate-path smoke test with small amounts.
