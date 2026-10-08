@@ -18,7 +18,10 @@ none of its parameters can change later, so all of them must be right first.
       Devnet runs on the *.vercel.app URL for now; buy the domain before mainnet.
 
 ## Before creating the config
-- [ ] Full path on real **devnet** once: create, buy, sell, graduate, claim (needs faucet SOL).
+- [x] Full path on real **devnet** once: create, buy, sell, graduate, claim. Done 2026-10-08 through
+      the live site's API (`scripts/devnet-pass.mts`): coin $DVZ7PP78
+      2b9qebcq1xN8kW2MCL51mfcWBoFMqpKFEuMY2vmF79CC, graduate tx
+      3KU5oytsRphp6GSt65Ge2c34KVYeEoiSZaJ5KMtTqA4uZY7jNpdKw8S8LZ6UEJEwsYKUKdJJbAyf5AeKJmsMiQwk.
 - [ ] Paid RPC (Helius/QuickNode/Triton) in `MEMESTREAM_RPC_URL`. The coin list uses
       getProgramAccounts, which public RPCs rate-limit.
 - [ ] `MEMESTREAM_WALLET_CHAIN=solana:mainnet` and `MEMESTREAM_NETWORK_LABEL=Mainnet`.

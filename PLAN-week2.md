@@ -139,6 +139,10 @@ the fees.
   live on stream, the streamer can't buy their own coin, and money-safe trading. None of them is a
   Meteora DBC entry.
 
+## Week 3 list
+- Tie a ticker to a verified channel. Today the first coin keeps a ticker, so a squatter can pre-claim
+  a big streamer's ticker (steve, 2026-10-08).
+
 ## Order
 1. Boss man: repo go → steve's pre-push audit → first push (private).
 2. Overlay steps 1–4 (doesn't need mainnet).
