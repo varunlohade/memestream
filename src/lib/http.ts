@@ -11,9 +11,6 @@ export class HttpError extends Error {
   }
 }
 
-/** 4xx means the request itself is wrong; retrying it won't help. Network errors and 5xx may pass. */
-export const isPermanentHttpError = (error: unknown) => error instanceof HttpError && error.status >= 400 && error.status < 500;
-
 /** Fetches JSON; throws HttpError with the server's user-facing `error`, or a plain message. */
 export async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { cache: "no-store", ...init });
