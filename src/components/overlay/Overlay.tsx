@@ -14,9 +14,9 @@ import { percentChange, signedPercent, sol } from "@/lib/format";
 
 export type OverlayLayout = "a" | "b" | "c";
 
-type Props = { mint: string; initial: CoinDetail | null; layout: OverlayLayout; link: string; preview: boolean };
+type Props = { mint: string; initial: CoinDetail | null; layout: OverlayLayout; site: string; preview: boolean };
 
-export function Overlay({ mint, initial, layout, link, preview }: Props) {
+export function Overlay({ mint, initial, layout, site, preview }: Props) {
   // Polls every 5 s and keeps the last good value through errors (never flashes empty).
   const { data } = useCoin(mint, null, initial);
   const detail = data ?? initial;
@@ -36,6 +36,8 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
   const graduated = coin.status === "graduated";
 
   const ticker = <span className="hf">${coin.symbol}</span>;
+  // The short link viewers type: <site>/<ticker> (src/app/[ticker]/route.ts).
+  const link = `${site}/${coin.symbol}`;
   const cap = <span className="hf num">{sol(coin.marketCapSol)} SOL</span>;
   const changeText = change === null ? null : <span className={`num ${change >= 0 ? "up" : "down"}`}>{signedPercent(change)}</span>;
   const bar = <XpBar progress={coin.progress} label={graduated ? "Graduated" : undefined} />;

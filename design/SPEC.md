@@ -61,7 +61,7 @@ Shared rules (apply to B):
 **Home**
 - "Live coins", one line "Buy the stream you think will pop.", Go live button.
 - Sort: Hot / New / Close to graduation.
-- B layout: 3-column tiles. Each tile: the stream picture (16:9) with Live tag, then two rows. Row 1: `$TICKER` left, market cap right. Row 2: stream name left (one line, cut off with an ellipsis if long), change right. Then the small XP bar. No "% to graduation" text on tiles; the bar shows it. No text wraps in a tile.
+- B layout: 3-column tiles. Each tile: the stream picture (16:9) with Live tag, then two rows. Row 1: `$TICKER` left, market cap right. Row 2: stream name (one line, cut off with an ellipsis if long). No change % on tiles for now: it would cost ~25 RPC calls per coin per list scan. Add it later only from a cheap source (e.g. a stored price snapshot). Then the small XP bar. No "% to graduation" text on tiles; the bar shows it. No text wraps in a tile.
 
 **Go live**
 - One panel: Image slot (square; NOT BUILT, the app has no upload yet, so leave it out until it does), Stream name, Ticker, Stream link (placeholder "YouTube or Twitch live link"; Kick links are not allowed).
@@ -89,4 +89,6 @@ Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B
 - The real overlay page has a transparent body. The game picture in the mocks is a stand-in. Text sizes are for a 1920×1080 canvas; the XP number has an 8px black stroke for busy backgrounds.
 
 ## Open
-- Nothing open for design. Next: sign off on built screens from stills.
+- Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.
+- Still to check: the overlay link on the deployed site (memestream-iota.vercel.app/<ticker>, later memestream.lol) once the short-link route lands. Locally it shows 127.0.0.1:3000, which is expected.
+- USD or SOL as the big price number: Boss man decides before the demo video.

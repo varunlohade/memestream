@@ -19,9 +19,9 @@ async function OverlayPage({ params, searchParams }: PageProps<"/overlay/[mint]"
   // OBS loads this once and runs it for hours: on a missing coin or an RPC hiccup render nothing
   // (never an opaque error box over the stream) and let the 5 s poll fill it in.
   const detail = await getCoinDetail(mint, null).catch(() => null);
-  // Just the site for now; a short /<ticker> link comes with the domain (PLAN-week2 step 5).
-  const link = new URL(getChain().publicUrl).host;
-  return <Overlay mint={mint} initial={detail} layout={layout} link={link} preview={query.preview === "1"} />;
+  // From the configured public URL, never the request host. The overlay adds /<ticker>.
+  const site = new URL(getChain().publicUrl).host;
+  return <Overlay mint={mint} initial={detail} layout={layout} site={site} preview={query.preview === "1"} />;
 }
 
 export default function Page(props: PageProps<"/overlay/[mint]">) {
