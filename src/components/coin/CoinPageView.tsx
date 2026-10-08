@@ -5,6 +5,7 @@ import { useTx } from "@/components/tx";
 import { useHostname } from "@/components/use-hostname";
 import { Scene, Sprite, StepChart, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
+import { LiveBadge } from "@/components/ui/LiveBadge";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, formatSol, shortAddress, signedPercent } from "@/lib/format";
@@ -26,7 +27,7 @@ function StreamEmbed({ coin }: { coin: CoinView }) {
       ) : (
         <Scene seedKey={coin.mint} width={192} height={108} />
       )}
-      <span className={`live${coin.status === "graduated" ? " grad" : ""}`}>{coin.status === "graduated" ? "Graduated" : "Live"}</span>
+      <LiveBadge status={coin.status} />
     </div>
   );
 }
