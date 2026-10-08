@@ -1,7 +1,7 @@
 /**
  * LOCAL DEV ONLY: runs an offline Surfpool chain with Meteora's real programs (copied from devnet
- * once, then cached), creates the
- * memestream config, seeds a few stream coins with trades, writes .env.local, and stays up.
+ * once, then cached), creates the memestream config, seeds a few stream coins with trades, writes
+ * .env.local, and stays up.
  * Run: npm run dev:chain   (then, in another terminal: npm run dev)
  */
 import { renameSync, rmSync, writeFileSync } from "node:fs";

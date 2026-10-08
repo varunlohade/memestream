@@ -1,7 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
   cacheComponents: true,
   // `npm run check` builds into .next-check so it can't clash with a running `next dev` (.next).
   distDir: process.env.NEXT_DIST_DIR || ".next",
