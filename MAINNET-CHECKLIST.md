@@ -43,7 +43,9 @@ none of its parameters can change later, so all of them must be right first.
 - [x] Shared rate limits (2026-10-08): per-client limits per route and the site-wide RPC budget live in
       Upstash Redis (`src/server/shared-limit.ts`, `rpc-budget.ts`), shared by every Vercel instance.
       Without Redis, or if it's down, each instance falls back to in-memory buckets (30 s pause).
-      [ ] Upstash install waits on Boss man accepting the marketplace terms; then redeploy.
+      [x] Upstash Redis installed (2026-10-08, "memestream-limits", free plan) and verified live:
+          right after live requests Redis holds `memestream:client:<route>` and
+          `memestream:rpc-budget:all` (keys expire once a bucket refills).
       [ ] Set the RPC budget (now 300 burst / 60 calls/s) from the paid RPC plan.
 - [x] Vercel Firewall (2026-10-08): rule "Per-IP limit: whole site", 300 requests/min per IP on
       everything except /_next/static, published. Hobby allows one rate-limit rule; Pro allows more
