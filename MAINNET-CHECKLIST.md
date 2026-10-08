@@ -5,7 +5,10 @@ none of its parameters can change later, so all of them must be right first.
 
 ## Decisions (Boss man)
 - [ ] **Graduation threshold.** `COIN_PRESETS["mainnet-beta"].graduationThresholdSol` in
-      `src/lib/dbc/preset.ts` is a placeholder ("85"). Pick the real number. Devnet uses "1.5".
+      `src/lib/dbc/preset.ts` is a placeholder ("85"). Devnet uses "1.5".
+      **Proposal: 50 SOL.** It seeds a real DAMM v2 pool with deep enough liquidity, and one good
+      stream's viewers can still reach it live. pump.fun's ~85 SOL is too high for a single stream.
+      Boss man asked for "a good amount"; he confirms the number before the config is created.
 - [ ] **Partner wallet.** `feeClaimer` (receives memestream's 20% fee share) and
       `leftoverReceiver` (receives unsold tokens after graduation) must be Boss man's real wallet,
       not a local key. `scripts/dev-chain.ts` uses `.keys/local-partner.json`: never use it on mainnet.
@@ -14,6 +17,7 @@ none of its parameters can change later, so all of them must be right first.
       (`MigrationFeeOption.FixedBps100`); 100% of graduated liquidity locked forever.
 - [ ] **Public URL.** `MEMESTREAM_PUBLIC_URL` is baked into every coin's on-chain metadata URI and
       can never change for coins already launched. Set it to the final domain (e.g. https://memestream.lol).
+      Devnet runs on the *.vercel.app URL for now; buy the domain before mainnet.
 
 ## Before creating the config
 - [ ] Full path on real **devnet** once: create, buy, sell, graduate, claim (needs faucet SOL).

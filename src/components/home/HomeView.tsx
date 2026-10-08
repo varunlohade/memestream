@@ -18,9 +18,7 @@ function CoinTile({ coin }: { coin: CoinView }) {
   return (
     <Link href={`/coin/${coin.mint}`} className="p tile">
       <div className="slot thumb">
-        <div style={{ position: "relative", width: "100%", height: "100%" }}>
-          <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} alt={`${coin.name} stream`} />
-        </div>
+        <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="(max-width: 640px) 100vw, 33vw" />
         <span className="live">{graduated ? "Graduated" : "Live"}</span>
       </div>
       <div className="meta">

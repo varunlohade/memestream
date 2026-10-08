@@ -1,6 +1,15 @@
 # memestream: week 2 plan (draft, 2026-10-08)
 
-Status: DRAFT, no code yet. Waiting on Boss man's overlay pick (A, B or C) and his go for the repo.
+Status: IN PROGRESS. Repo pushed (private: github.com/varunlohade/memestream). Overlay steps 1-2 done.
+
+## Decisions (2026-10-08)
+- **Platforms: YouTube Live and Twitch.** Go live requires one of them (client and server). No Kick.
+  Coin tiles and the coin icon show the stream's real picture; the coin page plays the stream (muted).
+- **Overlay layout: A, corner panel.** It covers the least gameplay; game HUDs often sit bottom center (C).
+- **Wordmark: 1, lowercase VT323.** It's already in the app.
+- **Hosting: Vercel**, on the free *.vercel.app URL for now. Buy memestream.lol later.
+  Devnet first; mainnet waits on the checklist.
+- **Mainnet graduation: proposed 50 SOL** (see MAINNET-CHECKLIST.md). Needs Boss man's final yes before the config.
 Goal of week 2: streamers show their coin live on stream, and memestream runs on mainnet by Oct 20.
 
 ## 1. OBS overlay (the main week 2 feature)

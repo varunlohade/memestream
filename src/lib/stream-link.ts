@@ -13,6 +13,8 @@ export type StreamLink = {
 };
 
 const TWITCH_CHANNEL = /^\/([a-zA-Z0-9_]{3,25})\/?$/;
+/** Twitch site pages that look like channel names. */
+const TWITCH_RESERVED = new Set(["directory", "videos", "settings", "subscriptions", "inventory", "wallet", "search", "downloads", "jobs", "p", "login", "signup"]);
 const KICK_CHANNEL = /^\/([a-zA-Z0-9_-]{2,30})\/?$/;
 const YOUTUBE_ID = /^[a-zA-Z0-9_-]{11}$/;
 
@@ -40,7 +42,7 @@ export function parseStreamLink(raw: string): StreamLink | null {
 
   if (host === "twitch.tv") {
     const channel = url.pathname.match(TWITCH_CHANNEL)?.[1];
-    if (!channel) return null;
+    if (!channel || TWITCH_RESERVED.has(channel.toLowerCase())) return null;
     return {
       platform: "twitch",
       url: `https://twitch.tv/${channel}`,

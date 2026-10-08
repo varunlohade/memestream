@@ -23,6 +23,7 @@ test("YouTube and Twitch links give a player and a thumbnail; Kick has none", ()
   assert.equal(yt?.thumbnailUrl, "https://i.ytimg.com/vi/jfKfPfyJRdk/hqdefault.jpg");
   assert.equal(parseStreamLink("https://twitch.tv/Mira_Plays")?.thumbnailUrl, "https://static-cdn.jtvnw.net/previews-ttv/live_user_mira_plays-640x360.jpg");
   assert.equal(parseStreamLink("https://kick.com/chef-ren")?.thumbnailUrl, null);
+  assert.equal(parseStreamLink("https://twitch.tv/directory"), null);
 });
 
 test("Twitch embeds carry the parent host", () => {

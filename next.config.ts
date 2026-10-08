@@ -3,7 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
-  // YouTube stream thumbnails on coin tiles and coin icons.
+  // YouTube and Twitch stream pictures on coin tiles and coin icons.
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "i.ytimg.com", pathname: "/vi/**" },

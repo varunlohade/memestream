@@ -1,17 +1,14 @@
 "use client";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useMemo, useState } from "react";
 import { type CoinDetail, type CoinView, type TradeView, useCoin } from "@/components/hooks";
 import { useTx } from "@/components/tx";
+import { useHostname } from "@/components/use-hostname";
 import { Scene, Sprite, StepChart, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, percentChange, shortAddress, signedPercent, sol } from "@/lib/format";
 import { parseStreamLink } from "@/lib/stream-link";
 import { TradeBox } from "./TradeBox";
-
-const noSubscription = () => () => {};
-/** The page's hostname (Twitch embeds need it); null during server render. */
-const useHostname = () => useSyncExternalStore(noSubscription, () => window.location.hostname, () => null);
 
 function StreamEmbed({ coin }: { coin: CoinView }) {
   const host = useHostname();
@@ -122,8 +119,8 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
         <StreamEmbed coin={coin} />
         <div className="p" style={{ marginTop: 24 }}>
           <div className="ident">
-            <div className="slot" style={{ position: "relative", overflow: "hidden" }}>
-              <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} alt="" />
+            <div className="slot" style={{ overflow: "hidden" }}>
+              <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="84px" />
             </div>
             <div>
               <h1>${coin.symbol}</h1>

@@ -7,6 +7,7 @@
 import { useMemo } from "react";
 import { type CoinDetail, useCoin } from "@/components/hooks";
 import { Scene, Sprite, XpBar } from "@/components/pixel/Pixel";
+import { useHostname } from "@/components/use-hostname";
 import { parseStreamLink } from "@/lib/stream-link";
 import { percentChange, signedPercent, sol } from "@/lib/format";
 
@@ -98,12 +99,13 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
 
 /** Preview only: the coin's real stream behind the overlay (YouTube/Twitch), else a pixel stand-in. */
 function PreviewStream({ streamUrl, seedKey }: { streamUrl: string | null; seedKey: string }) {
+  const host = useHostname();
   const link = streamUrl ? parseStreamLink(streamUrl) : null;
   return (
     <div className="overlay-preview-bg">
-      {link && link.platform !== "kick" ? (
+      {link && link.platform !== "kick" && host ? (
         <iframe
-          src={link.embedUrl(typeof window === "undefined" ? "localhost" : window.location.hostname)}
+          src={link.embedUrl(host)}
           title="Stream preview"
           allow="autoplay"
           style={{ width: "100%", height: "100%", border: 0 }}
