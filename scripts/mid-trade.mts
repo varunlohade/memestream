@@ -8,8 +8,8 @@
  */
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { sleep } from "../src/lib/poll";
+import { blockThirdParty, CHROME_PATH, LOCAL_APP as BASE, typeAmount } from "./browser";
 
-const BASE = "http://127.0.0.1:3000";
 const SEND_DELAY_MS = 20_000;
 
 const wallet = ((await (await fetch(`${BASE}/api/dev-wallet`)).json()) as { address: string }).address;
@@ -20,7 +20,7 @@ type Detail = { trades: { wallet: string; signature: string }[] };
 const myTrades = async () => ((await (await fetch(`${BASE}/api/coins/${mint}?wallet=${wallet}`)).json()) as Detail).trades.filter((t) => t.wallet === wallet).length;
 
 const browser: Browser = await puppeteer.launch({
-  executablePath: process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  executablePath: CHROME_PATH,
   headless: true,
   args: ["--mute-audio"],
 });
@@ -30,8 +30,7 @@ const check = (name: string, ok: boolean, note?: string) => results.push([name, 
 async function newPage(): Promise<Page> {
   const page = await browser.newPage();
   await page.setViewport({ width: 1440, height: 1240 });
-  await page.setRequestInterception(true);
-  page.on("request", (r) => (["127.0.0.1", "fonts.googleapis.com", "fonts.gstatic.com"].includes(new URL(r.url()).hostname) || r.url().startsWith("data:") ? r.continue() : r.abort()));
+  await blockThirdParty(page);
   return page;
 }
 const text = (p: Page) => p.evaluate(() => document.body.innerText);
@@ -42,10 +41,7 @@ async function openCoin(p: Page) {
 }
 /** A small buy (devnet graduates at 0.1 SOL, so the 0.5 default would fill the curve). */
 async function buyButton(p: Page) {
-  const input = await p.waitForSelector('input[aria-label^="Amount in"]');
-  await input!.click({ clickCount: 3 });
-  await p.keyboard.press("Backspace");
-  await input!.type("0.005");
+  await typeAmount(p, "0.005");
   await waitText(p, "You get about");
   return p.locator("button::-p-text(Buy SYNTH):not([disabled])").setTimeout(30_000);
 }

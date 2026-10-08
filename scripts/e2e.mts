@@ -7,8 +7,8 @@
 import { mkdirSync } from "node:fs";
 import puppeteer, { type Page } from "puppeteer-core";
 import { sleep } from "../src/lib/poll";
+import { blockThirdParty, CHROME_PATH, LOCAL_APP as BASE, typeAmount } from "./browser";
 
-const BASE = "http://127.0.0.1:3000";
 const OUT = process.env.E2E_OUT ?? "design/build/e2e";
 mkdirSync(OUT, { recursive: true });
 
@@ -30,7 +30,7 @@ async function preflight() {
 await preflight();
 
 const browser = await puppeteer.launch({
-  executablePath: process.env.CHROME_PATH ?? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  executablePath: CHROME_PATH,
   headless: true,
   protocolTimeout: 60_000,
   args: ["--hide-scrollbars", "--mute-audio"],
@@ -38,12 +38,7 @@ const browser = await puppeteer.launch({
 process.on("exit", () => void browser.process()?.kill());
 const page = await browser.newPage();
 await page.setViewport({ width: 1440, height: 1240 });
-await page.setRequestInterception(true);
-page.on("request", (req) => {
-  const host = new URL(req.url()).hostname;
-  if (["127.0.0.1", "localhost", "fonts.googleapis.com", "fonts.gstatic.com"].includes(host) || req.url().startsWith("data:")) req.continue();
-  else req.abort(); // third-party embeds stall headless capture
-});
+await blockThirdParty(page);
 const errors: string[] = [];
 page.on("pageerror", (e) => errors.push((e as Error).message));
 
@@ -79,12 +74,6 @@ const waitText = (p: Page, t: string, timeout = 30_000) =>
 async function typeInto(p: Page, placeholder: string, value: string) {
   const input = await p.waitForSelector(`input[placeholder="${placeholder}"]`, { timeout: 15_000 });
   await input!.click({ clickCount: 3 });
-  await input!.type(value);
-}
-async function setAmount(p: Page, value: string) {
-  const input = await p.waitForSelector('input[aria-label^="Amount in"]');
-  await input!.click({ clickCount: 3 });
-  await p.keyboard.press("Backspace");
   await input!.type(value);
 }
 /* Chain-state checks: read our own API, so a step passes when the trade lands, not when text shows. */
@@ -144,7 +133,7 @@ await step("viewer buys 0.02 SOL of $LOFI", async (p) => {
   const mint = await mintOf("LOFI");
   const before = held(await detail(mint));
   await openCoin(p, "LOFI");
-  await setAmount(p, "0.02");
+  await typeAmount(p, "0.02");
   await waitText(p, "You get about");
   await p.locator(`button${text("Buy LOFI")}:not([disabled])`).setTimeout(20_000).click();
   await waitForChain(mint, "LOFI balance went up", (d) => held(d) > before);
@@ -162,7 +151,7 @@ await step("viewer sells half their $LOFI with the 50% chip", async (p) => {
 await step("an oversized buy is shown as a partial fill, then fills the curve", async (p) => {
   const mint = await mintOf("LOFI");
   await clickTab(p, "Buy");
-  await setAmount(p, "0.5");
+  await typeAmount(p, "0.5");
   await waitText(p, "This fills the curve");
   await p.locator(`button${text("Buy LOFI")}:not([disabled])`).setTimeout(20_000).click();
   await waitForChain(mint, "LOFI curve full", (d) => d.coin.status === "graduating");
