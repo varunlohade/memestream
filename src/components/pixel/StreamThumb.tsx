@@ -18,7 +18,7 @@ export function StreamThumb({ streamUrl, seedKey, sizes }: { streamUrl: string |
         sizes={sizes}
         // Twitch's picture is a live frame: load it fresh instead of through the image cache.
         unoptimized={link.platform === "twitch"}
-        style={{ objectFit: "cover" }}
+        style={{ objectFit: "cover", imageRendering: "auto" }} // a photo: smooth, not pixelated like the sprites
         onError={() => setFailed(true)}
       />
     </div>

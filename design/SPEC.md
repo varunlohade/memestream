@@ -1,6 +1,6 @@
 # memestream: design spec (FINAL: option B, Deepslate night)
 
-2026-10-07. Owner: art_design. Status: FINAL. Boss man picked B as-is (2026-10-07, via varun-14).
+2026-10-07, updated 2026-10-08. Owner: art_design. Status: FINAL. Boss man picked B as-is (2026-10-07, via varun-14). Overlay A and wordmark 1 are FINAL (2026-10-08, relayed by varun-14).
 
 **Name:** the product is "memestream", always lowercase (domain memestream.lol). It replaces "Chat Coins" (and the short-lived long name). Body copy may still say "stream coins". In the B mock, the logo is the coin sprite plus the word.
 
@@ -44,23 +44,24 @@ Shared rules (apply to B):
 - Button: 4px black outline, bevel, white text with a 3px hard drop shadow. Primary = green `#3C8527` (A) / `#17A34A` (B) / `#1E9E3E` (C). Secondary = stone tile. Off = `#3A3A3A`.
 - XP bar: black track with 18 segments. The percent floats centered above, in the fill color with a black text stroke.
 - Up/down colors: A `#2E8B22`/`#B02E26`, B `#5CFF6A`/`#FF5A4E`, C `#1F6E12`/`#9E2219`.
-- Images: `image-rendering: pixelated`. Stream thumbnails show pixelated.
+- Real stream pictures and video render smooth (no pixelation). They sit inside the slot bevel, `object-fit: cover`.
+- `image-rendering: pixelated` applies only to sprites, textures and the fallback pixel scene.
 - Numbers: `tabular-nums`.
 - Sprites (original): gold coin (logo), red heart (fees/wallet), image icon (upload).
-- Header wordmark: "memestream" in VT323 44px, true lowercase (option 1, the mock default). Option 2 (Silkscreen, which draws as caps) is `?wm=1`. Waiting for Boss man; board `design/boards/MS-wordmark.png`.
+- Header wordmark (FINAL, option 1): "memestream" in VT323 44px, true lowercase. Option 2 (`?wm=1`) is not used.
 - Phone header (≤520px): 16px side padding, 72px tall, 32px coin, wordmark 38px, wallet chip shrinks to a 48px heart button (address hidden). Checked at 390px.
 
 ## Screens (B)
 
 **Coin page**
-- Left: stream embed (16:9, Live tag), then a panel with coin image slot, `$TICKER`, "<stream name> by <streamer>", and Recent trades (Buy/Sell, SOL, coins, wallet, time ago).
+- Left: the live stream plays in a 16:9 slot, muted, with the Live tag on top (YouTube or Twitch player), then a panel with coin image slot, `$TICKER`, "<stream name> by <streamer>", and Recent trades (Buy/Sell, SOL, coins, wallet, time ago).
 - Right, panel 1: Market cap (hero number), change in the last hour, pixel step chart, Graduation label + "52.7 of 85 SOL", XP bar with %, then the heart row **"80% of fees go to the streamer"** (must stay visible).
 - Right, panel 2: Buy/Sell tabs, amount slot in SOL, chips 0.1 / 0.5 / 1 / Max, "You get about N TICKER", primary "Buy TICKER".
 
 **Home**
 - "Live coins", one line "Buy the stream you think will pop.", Go live button.
 - Sort: Hot / New / Close to graduation.
-- B layout: 3-column tiles. Each tile: thumbnail with Live tag, `$TICKER`, stream name by streamer, market cap, 1-hour change, small XP bar with "% to graduation".
+- B layout: 3-column tiles. Each tile: the stream picture (16:9) with Live tag, `$TICKER`, stream name by streamer, market cap, 1-hour change, small XP bar with "% to graduation".
 
 **Go live**
 - One panel: Image slot (square), Stream name, Ticker, Stream link ("Twitch, YouTube or Kick link").
@@ -70,7 +71,15 @@ Shared rules (apply to B):
 ## Copy rules
 Sentence case. No ellipses. No arrows on buttons. Ticker always has `$` in titles, no `$` in buttons ("Buy MIRA").
 
-## OBS overlay (week 2, style B): waiting for Boss man's pick
+## Stream pictures (2026-10-08, Boss man: real stream video, not pixel art)
+- Home tile: the stream's live picture from YouTube or Twitch.
+- Coin icon (header slot, overlay slot): the image the streamer uploaded. Without one, a square center crop of the stream picture.
+- Coin page: the stream plays muted. People unmute it in the player.
+- Fallback: if there is no picture (stream offline, bad link, load error), show the pixel scene. Do not show a broken image or an empty box.
+- The pixel scenes in the mock stills stand in for these real pictures.
+
+## OBS overlay (week 2, style B): FINAL = A, Corner panel
+Build A only. B and C stay for the record. Reason given: A covers the least gameplay, and game HUDs often sit at bottom center, where C would go.
 Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B|C&phase=live|grad`. Stills: `design/mock/mc/B-overlay-*.png`.
 - A Corner panel: 600px panel bottom-left. Coin slot, $TICKER, memestream.lol/<ticker>, market cap, change, XP bar with %, "to graduation".
 - B Top strip: full-width strip at the top. Coin, ticker, cap, change, XP bar, %, link.
@@ -79,5 +88,4 @@ Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B
 - The real overlay page has a transparent body. The game picture in the mocks is a stand-in. Text sizes are for a 1920×1080 canvas; the XP number has an 8px black stroke for busy backgrounds.
 
 ## Open
-- Overlay pick (A/B/C above) and wordmark pick (1/2).
-- The stream embed in the mocks is a stand-in drawing, not a real stream.
+- Nothing open for design. Next: sign off on built screens from stills.
