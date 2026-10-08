@@ -15,9 +15,19 @@ export async function signatureStatus(connection: Connection, query: { signature
     const status = lookup.value[0];
     if (status) {
       if (status.confirmationStatus !== "confirmed" && status.confirmationStatus !== "finalized") return { status: "pending" };
-      return status.err ? { status: "failed", error: JSON.stringify(status.err) } : { status: "confirmed" };
+      return status.err ? { status: "failed", error: describeTxError(status.err) } : { status: "confirmed" };
     }
     if (lookup.context.slot < blockhashCheck.context.slot) return { status: "pending" }; // lagging node
   }
   return blockhashCheck.value ? { status: "pending" } : { status: "expired" };
+}
+
+/** Meteora DBC's "Exceeded slippage tolerance" (the trade's minimum wasn't met). */
+const DBC_EXCEEDED_SLIPPAGE = 6002;
+
+/** A failed transaction's error in words people understand; unknown errors stay as raw JSON. */
+export function describeTxError(err: unknown): string {
+  const custom = (err as { InstructionError?: [number, { Custom?: number }] })?.InstructionError?.[1]?.Custom;
+  if (custom === DBC_EXCEEDED_SLIPPAGE) return "the price moved since your quote, so nothing was traded. Check the new price and try again";
+  return JSON.stringify(err);
 }

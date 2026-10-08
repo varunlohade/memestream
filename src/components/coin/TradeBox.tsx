@@ -76,7 +76,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
     if (!address) return;
     try {
       const label = `${side === "buy" ? "Buy" : "Sell"} ${coin.symbol}`;
-      await run("trade", label, { wallet: address, mint: coin.mint, side, amount, slippageBps: DEFAULT_SLIPPAGE_BPS }, (stage) =>
+      await run("trade", label, { wallet: address, mint: coin.mint, side, amount, slippageBps: DEFAULT_SLIPPAGE_BPS, minReceived: preview?.minimumReceived }, (stage) =>
         setStatus({ kind: "busy", text: stage }),
       );
       setStatus({ kind: "done", text: side === "buy" ? `Bought ${coin.symbol}` : `Sold ${coin.symbol}` });

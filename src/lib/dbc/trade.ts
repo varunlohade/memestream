@@ -62,15 +62,21 @@ export function quoteTrade(snapshot: PoolSnapshot, input: TradeInput, slippageBp
   return { ...quote, minimumAmountOut, spentAmount: quote.includedFeeInputAmount };
 }
 
-/** Quotes and builds the matching swap in one step, so they can't disagree. */
+/**
+ * Quotes and builds the matching swap in one step, so they can't disagree. `atLeast` is the
+ * minimum from the quote the user SAW: the swap's minimum is the stricter of that and this fresh
+ * quote's, so a price move between preview and build makes the trade fail, never fill worse.
+ */
 export async function prepareTrade(
   client: DynamicBondingCurveClient,
   snapshot: PoolSnapshot,
   trader: PublicKey,
   input: TradeInput,
   slippageBps: number,
+  atLeast?: BN,
 ): Promise<BuiltTx & { quote: TradeQuote }> {
-  const quote = quoteTrade(snapshot, input, slippageBps);
+  const fresh = quoteTrade(snapshot, input, slippageBps);
+  const quote = atLeast?.gt(fresh.minimumAmountOut) ? { ...fresh, minimumAmountOut: atLeast } : fresh;
   const tx = await client.pool.swap2({
     owner: trader,
     pool: snapshot.address,

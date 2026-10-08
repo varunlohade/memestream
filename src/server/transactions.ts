@@ -5,6 +5,7 @@
  */
 import "server-only";
 import { PublicKey } from "@solana/web3.js";
+import type BN from "bn.js";
 import type { PreparedTx, TradePreview } from "@/lib/api-types";
 import { buildClaimEarningsTx } from "@/lib/dbc/fees";
 import { buildGraduateTx } from "@/lib/dbc/graduate";
@@ -88,7 +89,8 @@ export async function buildLaunchForWallet(req: LaunchRequest): Promise<Prepared
 }
 
 export type QuoteRequest = { mint: string; side: "buy" | "sell"; amount: string; slippageBps: number };
-export type TradeRequest = QuoteRequest & { wallet: string };
+/** `minReceived`: the minimum the user saw in the preview (output units), so the trade can't fill worse. */
+export type TradeRequest = QuoteRequest & { wallet: string; minReceived?: string };
 
 function tradeInput(side: "buy" | "sell", amount: string): TradeInput {
   return side === "buy" ? { side, lamports: solToLamports(amount) } : { side, baseUnits: coinsToBaseUnits(amount) };
@@ -113,6 +115,16 @@ export async function previewTrade(req: QuoteRequest): Promise<TradePreview> {
   });
 }
 
+/** The preview's minimum in base units (coins for a buy, lamports for a sell); none if absent. */
+function minimumSeen(side: "buy" | "sell", minReceived: string | undefined): BN | undefined {
+  if (minReceived === undefined) return undefined;
+  try {
+    return side === "buy" ? coinsToBaseUnits(minReceived) : solToLamports(minReceived);
+  } catch {
+    throw new UserError("Not a valid minimum amount");
+  }
+}
+
 export async function buildTradeForWallet(req: TradeRequest): Promise<PreparedTx & { preview: TradePreview }> {
   const { client } = getChain();
   return userFacing(async () => {
@@ -120,7 +132,7 @@ export async function buildTradeForWallet(req: TradeRequest): Promise<PreparedTx
     const trader = walletKey(req.wallet);
     const snapshot = await snapshotForMint(req.mint);
     assertNotSelfBuy(input.side, snapshot.pool.poolState.creator, trader);
-    const built = await prepareTrade(client, snapshot, trader, input, req.slippageBps);
+    const built = await prepareTrade(client, snapshot, trader, input, req.slippageBps, minimumSeen(input.side, req.minReceived));
     return { ...(await toPreparedTx(built)), preview: previewOf(input, built.quote) };
   });
 }

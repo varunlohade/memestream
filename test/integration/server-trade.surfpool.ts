@@ -65,3 +65,39 @@ test("an unseen transaction is pending while its blockhash is valid, expired onc
   assert.equal((await signatureStatus(connection, { signature: neverSent, blockhash: neverIssued })).status, "expired");
   assert.equal((await signatureStatus(connection, { signature: null, blockhash: neverIssued })).status, "expired");
 });
+
+/** Sign a server-built transaction as `wallet`, send it, and read its outcome. */
+async function signAndSend(prepared: { transaction: string; blockhash: string }, wallet: Keypair) {
+  const { Transaction } = await import("@solana/web3.js");
+  const tx = Transaction.from(Buffer.from(prepared.transaction, "base64"));
+  tx.partialSign(wallet);
+  const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
+  for (let i = 0; i < 100; i++) {
+    const result = await signatureStatus(connection, { signature, blockhash: prepared.blockhash });
+    if (result.status !== "pending") return result.status;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return "pending";
+}
+
+test("a price move after the preview makes the trade fail, never fill worse than the user saw", async () => {
+  const order = { wallet: viewer.publicKey.toBase58(), mint: mint.toBase58(), side: "buy" as const, amount: "0.005", slippageBps: 100 };
+  const seen = await server.previewTrade(order);
+
+  // Someone else buys first: the price goes up, so the same SOL now buys fewer coins.
+  assert.equal(await signAndSend(await server.buildTradeForWallet({ ...order, wallet: partner.publicKey.toBase58(), amount: "0.03" }), partner), "confirmed");
+
+  const withSeenMinimum = await server.buildTradeForWallet({ ...order, minReceived: seen.minimumReceived });
+  assert.equal(await signAndSend(withSeenMinimum, viewer), "failed", "the trade must not fill below what the user saw");
+
+  // Without the seen minimum the server's fresh quote applies, and the trade goes through.
+  assert.equal(await signAndSend(await server.buildTradeForWallet(order), viewer), "confirmed");
+});
+
+test("a lower client minimum can't loosen the server's own slippage floor", async () => {
+  const order = { wallet: viewer.publicKey.toBase58(), mint: mint.toBase58(), side: "buy" as const, amount: "0.005", slippageBps: 100 };
+  const strict = await server.buildTradeForWallet(order);
+  const loose = await server.buildTradeForWallet({ ...order, minReceived: "0.000001" });
+  assert.equal(loose.preview.minimumReceived, strict.preview.minimumReceived);
+  await assert.rejects(server.buildTradeForWallet({ ...order, minReceived: "abc" }), /Not a valid minimum amount/);
+});

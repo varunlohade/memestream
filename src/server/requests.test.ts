@@ -5,6 +5,9 @@ import { parseQuote, parseTxRequest } from "./requests";
 test("parses each action and rejects bad input", () => {
   assert.equal(parseTxRequest("claim", { wallet: "W", mint: "M" }).action, "claim");
   const trade = parseTxRequest("trade", { wallet: "W", mint: "M", side: "sell", amount: "5" });
+  assert.equal(trade.action === "trade" && trade.req.minReceived, undefined);
+  const seen = parseTxRequest("trade", { wallet: "W", mint: "M", side: "buy", amount: "1", minReceived: "123.5" });
+  assert.equal(seen.action === "trade" && seen.req.minReceived, "123.5");
   assert.equal(trade.action === "trade" && trade.req.slippageBps, 100);
   assert.throws(() => parseTxRequest("drain", { wallet: "W" }), /Unknown action/);
   assert.throws(() => parseTxRequest("trade", { wallet: "W", mint: "M", side: "short", amount: "1" }), /Side must be/);

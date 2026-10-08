@@ -50,7 +50,14 @@ export function parseTxRequest(action: string, body: Body): ParsedTx {
     case "trade":
       return {
         action: "trade",
-        req: { wallet, mint: text(body, "mint"), side: side(body.side), amount: text(body, "amount"), slippageBps: DEFAULT_SLIPPAGE_BPS },
+        req: {
+          wallet,
+          mint: text(body, "mint"),
+          side: side(body.side),
+          amount: text(body, "amount"),
+          slippageBps: DEFAULT_SLIPPAGE_BPS,
+          minReceived: typeof body.minReceived === "string" ? body.minReceived : undefined,
+        },
       };
     case "claim":
     case "graduate":
