@@ -140,6 +140,9 @@ the fees.
   Meteora DBC entry.
 
 ## Week 3 list
+- Ended or private streams: before embedding, check on the server (YouTube oEmbed or thumbnail).
+  If the stream is gone, show its picture with an "Ended" tag (stone #3E3E44, like Unverified),
+  else the pixel scene. Needed before real streamers: every stream ends (art_design, SPEC.md).
 - Tie a ticker to a verified channel. Today the first coin keeps a ticker, so a squatter can pre-claim
   a big streamer's ticker (steve, 2026-10-08).
 
