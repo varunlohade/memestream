@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import BN from "bn.js";
-import { baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, solToLamports, toBN } from "./units";
+import { COIN_DECIMALS, SOL_DECIMALS } from "../api-types";
+import { BASE_DECIMALS, baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, QUOTE, solToLamports, toBN } from "./units";
 
 test("parses decimals exactly, without float error", () => {
   assert.equal(solToLamports("0.1").toString(), "100000000");
@@ -27,4 +28,9 @@ test("formats base units back to decimals", () => {
 
 test("converts spl-token bigints", () => {
   assert.equal(toBN(BigInt("18446744073709551615")).toString(), "18446744073709551615");
+});
+
+test("the browser-safe decimals in api-types match the on-chain units", () => {
+  assert.equal(SOL_DECIMALS, QUOTE.decimals);
+  assert.equal(COIN_DECIMALS, BASE_DECIMALS);
 });

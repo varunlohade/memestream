@@ -5,10 +5,11 @@
 import { TokenDecimal } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { NATIVE_MINT } from "@solana/spl-token";
 import BN from "bn.js";
+import { SOL_DECIMALS } from "../api-types";
 import { InputError } from "./errors";
 
 /** Coins are priced in SOL. Mint and decimals change together. */
-export const QUOTE = { mint: NATIVE_MINT, decimals: 9 } as const;
+export const QUOTE = { mint: NATIVE_MINT, decimals: SOL_DECIMALS } as const;
 
 /** Every stream coin uses 6 decimals. */
 export const BASE_DECIMALS = TokenDecimal.SIX;

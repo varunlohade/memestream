@@ -64,5 +64,6 @@ export type TxStatus = { status: "pending" | "confirmed" | "failed" | "expired";
 /** One slippage setting for quotes and trades: 1%. */
 export const DEFAULT_SLIPPAGE_BPS = 100;
 
+/** Token decimals for browser code; lib/dbc/units.ts uses the same values (units.test.ts pins them). */
 export const SOL_DECIMALS = 9;
 export const COIN_DECIMALS = 6;
