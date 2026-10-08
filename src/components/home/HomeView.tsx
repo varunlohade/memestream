@@ -5,7 +5,7 @@ import { type CoinView, useCoins } from "@/components/hooks";
 import { useTexture, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
-import { sol } from "@/lib/format";
+import { formatSol } from "@/lib/format";
 
 const SORTS = {
   hot: { label: "Hot", by: (a: CoinView, b: CoinView) => b.marketCapSol - a.marketCapSol },
@@ -27,7 +27,7 @@ function CoinTile({ coin }: { coin: CoinView }) {
       </div>
       <div className="meta">
         <h4>${coin.symbol}</h4>
-        <h4 className="num">{sol(coin.marketCapSol)} SOL</h4>
+        <h4 className="num">{formatSol(coin.marketCapSol)} SOL</h4>
       </div>
       <p className="name">{coin.name}</p>
       <XpBar progress={coin.progress} small />

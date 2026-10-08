@@ -10,7 +10,7 @@ import { Scene, Sprite, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { useHostname } from "@/components/use-hostname";
 import { parseStreamLink } from "@/lib/stream-link";
-import { percentChange, signedPercent, sol } from "@/lib/format";
+import { formatSol, percentChange, signedPercent } from "@/lib/format";
 
 export type OverlayLayout = "a" | "b" | "c";
 
@@ -36,7 +36,7 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
   const graduated = coin.status === "graduated";
 
   const ticker = <span className="hf">${coin.symbol}</span>;
-  const cap = <span className="hf num">{sol(coin.marketCapSol)} SOL</span>;
+  const cap = <span className="hf num">{formatSol(coin.marketCapSol)} SOL</span>;
   const changeText = change === null ? null : <span className={`num ${change >= 0 ? "up" : "down"}`}>{signedPercent(change)}</span>;
   const bar = <XpBar progress={coin.progress} label={graduated ? "Graduated" : undefined} />;
 

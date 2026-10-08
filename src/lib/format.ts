@@ -14,7 +14,7 @@ export function compact(value: number): string {
 }
 
 /** "12.3456789" -> "12.35" for SOL amounts in lists. */
-export const sol = (amount: string | number) => compact(Number(amount));
+export const formatSol = (amount: string | number) => compact(Number(amount));
 
 export function percentChange(from: number, to: number): number | null {
   return from > 0 ? ((to - from) / from) * 100 : null;
@@ -22,14 +22,18 @@ export function percentChange(from: number, to: number): number | null {
 
 export const signedPercent = (pct: number) => `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%`;
 
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PER_HOUR = 3_600;
+const SECONDS_PER_DAY = 86_400;
+
 /** Unix seconds -> "4s", "3m", "2h", "5d". */
 export function ago(unixSeconds: number | null, now = Date.now()): string {
   if (unixSeconds === null) return "-";
   const seconds = Math.max(0, Math.round(now / 1000 - unixSeconds));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
-  return `${Math.floor(seconds / 86400)}d`;
+  if (seconds < SECONDS_PER_MINUTE) return `${seconds}s`;
+  if (seconds < SECONDS_PER_HOUR) return `${Math.floor(seconds / SECONDS_PER_MINUTE)}m`;
+  if (seconds < SECONDS_PER_DAY) return `${Math.floor(seconds / SECONDS_PER_HOUR)}h`;
+  return `${Math.floor(seconds / SECONDS_PER_DAY)}d`;
 }
 
 /* Exact decimal-string math for amount chips. Browser-safe (BigInt, no deps). */
