@@ -1,15 +1,28 @@
 "use client";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import { useTx } from "@/components/tx";
 import type { PreparedTx } from "@/lib/api-types";
 import { Sprite } from "@/components/pixel/Pixel";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { parseStreamLink } from "@/lib/stream-link";
 
+/** How often to re-ask the server while the launch fee is still unknown (RPC busy). */
+const FEE_RETRY_MS = 5_000;
+
+/**
+ * `launchFeeSol`: the config's launch fee ("0" = free), or null while unknown. A streamer must see
+ * the cost before paying it, so Launch stays disabled until the fee is known.
+ */
 export function GoLiveView({ launchFeeSol }: { launchFeeSol: string | null }) {
   const router = useRouter();
+  const feeKnown = launchFeeSol !== null;
+  useEffect(() => {
+    if (feeKnown) return;
+    const timer = setInterval(() => router.refresh(), FEE_RETRY_MS); // re-renders the server part; the form keeps its state
+    return () => clearInterval(timer);
+  }, [feeKnown, router]);
   const { address } = useWallet();
   const { run, locked } = useTx();
   const [name, setName] = useState("");
@@ -19,7 +32,7 @@ export function GoLiveView({ launchFeeSol }: { launchFeeSol: string | null }) {
 
   const platform = parseStreamLink(streamUrl)?.platform;
   const linkProblem = streamUrl.trim() && platform !== "youtube" && platform !== "twitch" ? "Use a YouTube or Twitch live link" : null;
-  const ready = address && name.trim() && symbol.trim() && streamUrl.trim() && !linkProblem && !status?.busy && !locked;
+  const ready = feeKnown && address && name.trim() && symbol.trim() && streamUrl.trim() && !linkProblem && !status?.busy && !locked;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -76,9 +89,9 @@ export function GoLiveView({ launchFeeSol }: { launchFeeSol: string | null }) {
           <Sprite name="heart" />
           <span>80% of trade fees go to you. memestream won&apos;t let your wallet buy your own coin.</span>
         </div>
-        {launchFeeSol && (
+        {(!feeKnown || Number(launchFeeSol) > 0) && (
           <p className="mute" style={{ fontSize: 22, margin: "-8px 0 16px" }}>
-            Launch costs {launchFeeSol} SOL.
+            {feeKnown ? `Launch costs ${launchFeeSol} SOL.` : "Launch fee: checking…"}
           </p>
         )}
         <button type="submit" className="mbtn buy" style={{ width: "100%" }} disabled={!ready}>

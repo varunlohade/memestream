@@ -5,9 +5,10 @@ import { getLaunchFeeSol } from "@/server/coins";
 
 async function GoLiveWithFee() {
   await connection(); // read at request time, not while prerendering at build
-  // From the on-chain config: free on devnet, 0.05 SOL on mainnet. Unknown (busy) shows no line.
+  // From the on-chain config: "0" on devnet, "0.05" on mainnet. Null (busy) = unknown: the form
+  // says "checking…", keeps Launch disabled and retries.
   const fee = await getLaunchFeeSol().catch(() => null);
-  return <GoLiveView launchFeeSol={fee && Number(fee) > 0 ? fee : null} />;
+  return <GoLiveView launchFeeSol={fee} />;
 }
 
 export default function GoLive() {

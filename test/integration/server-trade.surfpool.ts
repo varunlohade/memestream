@@ -66,19 +66,20 @@ test("an unseen transaction is pending while its blockhash is valid, expired onc
   assert.equal((await signatureStatus(connection, { signature: null, blockhash: neverIssued })).status, "expired");
 });
 
-/** Sign a server-built transaction as `wallet`, send it, and read its outcome. */
-async function signAndSend(prepared: { transaction: string; blockhash: string }, wallet: Keypair) {
+/** Sign a server-built transaction as `wallet`, send it, and read its outcome (status and error). */
+async function sendAndRead(prepared: { transaction: string; blockhash: string }, wallet: Keypair) {
   const { Transaction } = await import("@solana/web3.js");
   const tx = Transaction.from(Buffer.from(prepared.transaction, "base64"));
   tx.partialSign(wallet);
   const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
   for (let i = 0; i < 100; i++) {
     const result = await signatureStatus(connection, { signature, blockhash: prepared.blockhash });
-    if (result.status !== "pending") return result.status;
+    if (result.status !== "pending") return result;
     await new Promise((r) => setTimeout(r, 100));
   }
-  return "pending";
+  return { status: "pending" as const };
 }
+const signAndSend = async (prepared: { transaction: string; blockhash: string }, wallet: Keypair) => (await sendAndRead(prepared, wallet)).status;
 
 test("a price move after the preview makes the trade fail, never fill worse than the user saw", async () => {
   const order = { wallet: viewer.publicKey.toBase58(), mint: mint.toBase58(), side: "buy" as const, amount: "0.005", slippageBps: 100 };
@@ -88,7 +89,10 @@ test("a price move after the preview makes the trade fail, never fill worse than
   assert.equal(await signAndSend(await server.buildTradeForWallet({ ...order, wallet: partner.publicKey.toBase58(), amount: "0.03" }), partner), "confirmed");
 
   const withSeenMinimum = await server.buildTradeForWallet({ ...order, minReceived: seen.minimumReceived });
-  assert.equal(await signAndSend(withSeenMinimum, viewer), "failed", "the trade must not fill below what the user saw");
+  const outcome = await sendAndRead(withSeenMinimum, viewer);
+  assert.equal(outcome.status, "failed", "the trade must not fill below what the user saw");
+  // Specifically DBC 6002 ExceededSlippage (worded for people by describeTxError), not some other failure.
+  assert.match(outcome.error ?? "", /price moved since your quote/);
 
   // Without the seen minimum the server's fresh quote applies, and the trade goes through.
   assert.equal(await signAndSend(await server.buildTradeForWallet(order), viewer), "confirmed");
