@@ -50,3 +50,8 @@ next-env.d.ts
 
 # agent worktrees (local only)
 .claude/worktrees/
+
+# agent skills installed by the Vercel Marketplace (local tooling)
+.agents/
+.claude/skills/
+skills-lock.json
