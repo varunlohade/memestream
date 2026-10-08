@@ -8,7 +8,7 @@ import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { LiveBadge } from "@/components/ui/LiveBadge";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
-import { ago, compact, formatSol, shortAddress, signedPercent } from "@/lib/format";
+import { ago, compact, formatSol, shortAddress, SIDE_LABEL, signedPercent } from "@/lib/format";
 import { parseStreamLink } from "@/lib/stream-link";
 import { TradeBox } from "./TradeBox";
 
@@ -38,7 +38,7 @@ function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) 
     <ul className="trade-list">
       {trades.map((t) => (
         <li className="tr num" key={t.signature}>
-          <span className={t.side === "buy" ? "up" : "down"}>{t.side === "buy" ? "Buy" : "Sell"}</span>
+          <span className={t.side === "buy" ? "up" : "down"}>{SIDE_LABEL[t.side]}</span>
           <span>{formatSol(t.sol)} SOL</span>
           <span>
             {compact(Number(t.coins))} {symbol}

@@ -6,7 +6,7 @@ import { noSubscription } from "@/components/no-subscription";
 import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { COIN_DECIMALS, DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
-import { compact, fractionOf, minusReserve } from "@/lib/format";
+import { compact, fractionOf, minusReserve, SIDE_LABEL } from "@/lib/format";
 
 type Side = "buy" | "sell";
 
@@ -69,14 +69,14 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const { preview, error: quoteError, loading } = useQuote(coin.mint, side, amount);
 
   const unit = side === "buy" ? "SOL" : coin.symbol;
+  const actionLabel = `${SIDE_LABEL[side]} ${coin.symbol}`;
   const blocked = side === "buy" && address === coin.creator;
   const busy = status?.kind === "busy";
 
   const submit = async () => {
     if (!address) return;
     try {
-      const label = `${side === "buy" ? "Buy" : "Sell"} ${coin.symbol}`;
-      await run("trade", label, { wallet: address, mint: coin.mint, side, amount, slippageBps: DEFAULT_SLIPPAGE_BPS, minReceived: preview?.minimumReceived }, (stage) =>
+      await run("trade", actionLabel, { wallet: address, mint: coin.mint, side, amount, slippageBps: DEFAULT_SLIPPAGE_BPS, minReceived: preview?.minimumReceived }, (stage) =>
         setStatus({ kind: "busy", text: stage }),
       );
       setStatus({ kind: "done", text: side === "buy" ? `Bought ${coin.symbol}` : `Sold ${coin.symbol}` });
@@ -94,7 +94,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
         ? status.text
         : locked
           ? "Paused: checking your last trade"
-        : `${side === "buy" ? "Buy" : "Sell"} ${coin.symbol}`;
+          : actionLabel;
 
   return (
     <section className="p" aria-label="Trade">
@@ -111,7 +111,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
               setStatus(null);
             }}
           >
-            {s === "buy" ? "Buy" : "Sell"}
+            {SIDE_LABEL[s]}
           </button>
         ))}
       </div>

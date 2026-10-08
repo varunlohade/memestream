@@ -61,5 +61,8 @@ export function minusReserve(amount: string, reserve: string, decimals: number):
   return left > BigInt(0) ? fromUnits(left, decimals) : "0";
 }
 
+/** Button and list text for a trade side. */
+export const SIDE_LABEL = { buy: "Buy", sell: "Sell" } as const;
+
 /** First 6 characters of a wallet or mint address, for compact display. */
 export const shortAddress = (address: string) => address.slice(0, 6);
