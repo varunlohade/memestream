@@ -1,6 +1,6 @@
 /**
- * Small in-memory token buckets. Per server instance: good enough to stop one client from
- * hammering the RPC through us; a multi-instance deploy needs a shared store (see MAINNET-CHECKLIST).
+ * Small in-memory token buckets, per server instance. They're the fallback for the shared
+ * Redis limits (shared-limit.ts) and what local dev and tests use.
  */
 export class TokenBucket {
   private tokens: number;
@@ -35,22 +35,21 @@ export class KeyedLimiter {
     private readonly idleMs = 10 * 60_000,
   ) {}
 
-  take(key: string, now = Date.now()): boolean {
+  take(key: string, now = Date.now(), cost = 1): boolean {
     let entry = this.buckets.get(key);
     if (!entry) this.buckets.set(key, (entry = { bucket: new TokenBucket(this.capacity, this.refillPerSecond, now), seen: now }));
     entry.seen = now;
     if (this.buckets.size > 10_000) for (const [k, v] of this.buckets) if (now - v.seen > this.idleMs) this.buckets.delete(k);
-    return entry.bucket.take(1, now);
+    return entry.bucket.take(cost, now);
   }
 }
 
-/** Best-effort client IP behind a proxy (Vercel and most hosts set x-forwarded-for). */
-export const clientIp = (request: Request) =>
-  request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || request.headers.get("x-real-ip") || "local";
-
 /**
- * One RPC call budget for the whole server, shared by every route that reads the chain, so the
- * paid RPC bill has a hard cap. Set it from the RPC plan's limits on mainnet.
+ * The client's IP. On Vercel, x-vercel-forwarded-for and x-real-ip are set by Vercel's edge and
+ * can't be forged by the client (x-forwarded-for can be, elsewhere). Then the usual headers.
  */
-const rpcBudget = new TokenBucket(300, 60);
-export const takeRpcBudget = (calls: number) => rpcBudget.take(calls);
+export const clientIp = (request: Request) =>
+  request.headers.get("x-vercel-forwarded-for")?.split(",")[0]?.trim() ||
+  request.headers.get("x-real-ip") ||
+  request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+  "local";

@@ -10,7 +10,7 @@ import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { streamLinkFromUri } from "@/lib/stream-link";
 import { getChain, poolForMint } from "./chain";
 import { BusyError } from "./errors";
-import { takeRpcBudget } from "./rate-limit";
+import { takeRpcBudget } from "./rpc-budget";
 import { loadMetadata } from "./metadata";
 
 async function withMetadata(connection: Connection, views: PoolView[]): Promise<CoinView[]> {
@@ -47,28 +47,31 @@ async function scanCoins(): Promise<CoinView[]> {
 /** A scan: one program-account scan, the config, and one metadata batch. */
 const LIST_SCAN_CALLS = 3;
 
-export async function listCoins(allowScan: () => boolean = () => takeRpcBudget(LIST_SCAN_CALLS)): Promise<CoinView[]> {
+export async function listCoins(allowScan: () => Promise<boolean> = () => takeRpcBudget(LIST_SCAN_CALLS)): Promise<CoinView[]> {
   if (listCache && Date.now() - listCache.at < LIST_TTL_MS) return listCache.coins;
-  if (!listInFlight && !allowScan()) {
+  // Set synchronously, so concurrent callers share one budget check and one scan.
+  listInFlight ??= refreshList(allowScan).finally(() => {
+    listInFlight = null;
+  });
+  return listInFlight;
+}
+
+async function refreshList(allowScan: () => Promise<boolean>): Promise<CoinView[]> {
+  if (!(await allowScan())) {
     if (listCache) return listCache.coins;
     throw new BusyError();
   }
-  listInFlight ??= scanCoins()
-    .then((coins) => {
-      listCache = { at: Date.now(), coins };
-      return coins;
-    })
-    .catch((error) => {
-      if (listCache) {
-        console.warn("coin scan failed; serving the last good list:", (error as Error).message);
-        return listCache.coins;
-      }
-      throw error;
-    })
-    .finally(() => {
-      listInFlight = null;
-    });
-  return listInFlight;
+  try {
+    const coins = await scanCoins();
+    listCache = { at: Date.now(), coins };
+    return coins;
+  } catch (error) {
+    if (listCache) {
+      console.warn("coin scan failed; serving the last good list:", (error as Error).message);
+      return listCache.coins;
+    }
+    throw error;
+  }
 }
 
 /** A coin's view plus the vault addresses its trade history needs. */
@@ -113,10 +116,10 @@ export async function getCoinDetail(mint: string, wallet: string | null): Promis
   if (!hit?.detail) {
     const pool = poolForMint(mint);
     if (!pool) return remember(key, null, now);
-    if (!takeRpcBudget(EXISTS_RPC_CALLS)) throw new BusyError();
+    if (!(await takeRpcBudget(EXISTS_RPC_CALLS))) throw new BusyError();
     if (!(await getChain().connection.getAccountInfo(pool))) return remember(key, null, now);
   }
-  if (!takeRpcBudget(DETAIL_RPC_CALLS - EXISTS_RPC_CALLS)) throw new BusyError();
+  if (!(await takeRpcBudget(DETAIL_RPC_CALLS - EXISTS_RPC_CALLS))) throw new BusyError();
 
   const fetched = await readCoinDetail(mint, wallet);
   const previous = hit?.detail;

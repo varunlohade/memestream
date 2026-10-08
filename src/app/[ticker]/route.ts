@@ -8,7 +8,7 @@ import { withRpcGuard } from "@/server/rpc-guard";
  * The cached coin list draws the RPC budget once per scan for everyone.
  * The Location is relative, so the request's Host header is never trusted.
  */
-export const GET = withRpcGuard({ burst: 30, perSecond: 3 }, async (_request, { params }: RouteContext<"/[ticker]">) => {
+export const GET = withRpcGuard({ name: "ticker", burst: 30, perSecond: 3 }, async (_request, { params }: RouteContext<"/[ticker]">) => {
   const { ticker } = await params;
   if (!parseTicker(ticker)) return new Response("Not found", { status: 404 });
   const coin = coinForTicker(await listCoins().catch(() => []), ticker);

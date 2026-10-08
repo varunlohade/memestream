@@ -29,20 +29,22 @@ none of its parameters can change later, so all of them must be right first.
 - [ ] Dry run: simulate the createConfig transaction and review it with Boss man.
 - [ ] Production build has **no** `MEMESTREAM_DEV_WALLET_KEY` set (the test wallet must not exist).
 
-- [ ] Rate limits on the API (`src/server/rate-limit.ts`): they're in-memory per server instance.
-      On a multi-instance host (e.g. serverless), move them to a shared store (Redis/Upstash) or the
-      host's firewall rules, and set the global RPC budget from the paid RPC plan's limits.
+- [x] Shared rate limits (2026-10-08): per-client limits per route and the site-wide RPC budget live in
+      Upstash Redis (`src/server/shared-limit.ts`, `rpc-budget.ts`), shared by every Vercel instance.
+      Without Redis, or if it's down, each instance falls back to in-memory buckets (30 s pause).
+      [ ] Upstash install waits on Boss man accepting the marketplace terms; then redeploy.
+      [ ] Set the RPC budget (now 300 burst / 60 calls/s) from the paid RPC plan.
+- [x] Vercel Firewall (2026-10-08): rule "Per-IP limit: whole site", 300 requests/min per IP on
+      everything except /_next/static, published. Hobby allows one rate-limit rule; Pro allows more
+      (e.g. a stricter /api/tx rule).
       `/api/tx/status` allows no-Origin requests (browsers omit Origin on same-origin GETs).
-- [ ] Client IP for the per-client limit: `x-forwarded-for` is set by the client unless a trusted
-      proxy overwrites it. On deploy, key the bucket on the platform's real client IP (e.g. Vercel's
-      `x-vercel-forwarded-for` / `x-real-ip` set by the edge) in `clientIp()`, and treat the global
-      RPC budget as the hard cap. Every API route that reaches the chain goes through
+- [x] Client IP: `clientIp()` prefers `x-vercel-forwarded-for` / `x-real-ip` (set by Vercel's edge)
+      over the forgeable `x-forwarded-for`. The global RPC budget stays the hard cap. Every API route that reaches the chain goes through
       `withRpcGuard` (`src/server/rpc-guard.ts`; enforced by `src/server/api-guard.test.ts`).
       Set the shared budget (`takeRpcBudget`, now 300 burst / 60 calls/s) from the paid RPC plan,
       and review each route's per-client limit and call cost for real traffic.
-- [ ] A host firewall / per-IP rate limit in front of the server-rendered pages too (`/coin/*`,
-      `/overlay/*`), not just the API: they share the RPC budget, so a flood of page loads could
-      make real users see "busy". Junk coin addresses cost 1 RPC call each (cached 30 s).
+- [x] Per-IP limit in front of the server-rendered pages too: the firewall rule above covers
+      `/coin/*`, `/overlay/*` and `/<ticker>`. Junk coin addresses cost 1 RPC call each (cached 30 s).
 - [ ] Known MVP limit (money): a wallet popup left open past the unlock window (or in a tab
       closed for 10+ minutes) can still be signed after the user unlocks. Our server-built
       transactions can't land after their blockhash expires, so this only affects wallets that

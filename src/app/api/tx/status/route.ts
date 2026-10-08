@@ -26,7 +26,7 @@ const RPC_CALLS_PER_MISS = 2;
  * one is allowed; the per-client limit and the global RPC budget are what bound abuse.
  */
 // A tab polls every 3 s; the per-client limit allows a few tabs plus bursts.
-export const GET = withRpcGuard({ burst: 20, perSecond: 2 }, async (request: Request, _context: unknown, guard) => {
+export const GET = withRpcGuard({ name: "tx-status", burst: 20, perSecond: 2 }, async (request: Request, _context: unknown, guard) => {
   const origin = request.headers.get("origin");
   if (origin !== null && origin.replace(/\/$/, "") !== PUBLIC_URL) return Response.json({ error: "Forbidden" }, { status: 403 });
   try {
@@ -42,7 +42,7 @@ export const GET = withRpcGuard({ burst: 20, perSecond: 2 }, async (request: Req
     const now = Date.now();
     const hit = cache.get(key);
     if (hit && now - hit.at < CACHE_MS) return ok(hit.answer);
-    if (!guard.spend(RPC_CALLS_PER_MISS)) return busy();
+    if (!(await guard.spend(RPC_CALLS_PER_MISS))) return busy();
     const answer = await signatureStatus(getChain().connection, { signature, blockhash });
     cache.set(key, { at: now, answer });
     for (const [k, v] of cache) if (now - v.at > CACHE_MS * 10) cache.delete(k);

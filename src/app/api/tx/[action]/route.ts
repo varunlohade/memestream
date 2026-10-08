@@ -4,7 +4,7 @@ import { withRpcGuard } from "@/server/rpc-guard";
 import { fail, jsonBody, ok } from "../../respond";
 
 /** Building a transaction reads the pool, config and a blockhash: ~6 RPC calls. */
-export const POST = withRpcGuard({ burst: 10, perSecond: 1, calls: 6 }, async (request: Request, { params }: { params: Promise<{ action: string }> }) => {
+export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1, calls: 6 }, async (request: Request, { params }: { params: Promise<{ action: string }> }) => {
   try {
     const parsed = parseTxRequest((await params).action, await jsonBody(request));
     switch (parsed.action) {

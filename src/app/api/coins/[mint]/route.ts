@@ -17,7 +17,7 @@ const isPubkey = (text: string) => {
  * Cache and RPC budget live in getCoinDetail (shared with the server-rendered pages).
  * A page polls every 5 s; the per-client limit allows several tabs and overlays per client.
  */
-export const GET = withRpcGuard({ burst: 30, perSecond: 3 }, async (request: Request, { params }: { params: Promise<{ mint: string }> }) => {
+export const GET = withRpcGuard({ name: "coin", burst: 30, perSecond: 3 }, async (request: Request, { params }: { params: Promise<{ mint: string }> }) => {
   try {
     const { mint } = await params;
     const wallet = new URL(request.url).searchParams.get("wallet");

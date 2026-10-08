@@ -9,7 +9,7 @@ import { busy, withRpcGuard } from "@/server/rpc-guard";
 const NAME_CACHE_MS = 5 * 60_000;
 const names = new Map<string, { at: number; meta: TokenMetadata | null }>();
 
-export const GET = withRpcGuard({ burst: 30, perSecond: 3 }, async (request: Request, { params }: { params: Promise<{ mint: string }> }, guard) => {
+export const GET = withRpcGuard({ name: "meta", burst: 30, perSecond: 3 }, async (request: Request, { params }: { params: Promise<{ mint: string }> }, guard) => {
   const { mint } = await params;
   let mintKey: PublicKey;
   try {
@@ -21,7 +21,7 @@ export const GET = withRpcGuard({ burst: 30, perSecond: 3 }, async (request: Req
   const now = Date.now();
   let cached = names.get(mint);
   if (!cached || now - cached.at > NAME_CACHE_MS) {
-    if (!guard.spend(1)) return busy();
+    if (!(await guard.spend(1))) return busy();
     const [meta] = await loadMetadata(getChain().connection, [mintKey]).catch(() => [null]);
     cached = { at: now, meta };
     names.set(mint, cached);

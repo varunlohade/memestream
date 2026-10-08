@@ -38,13 +38,13 @@ const fromOurPage = (request: Request) => request.headers.get("origin") === proc
 
 const disabled = () => Response.json({ error: "Dev wallet disabled" }, { status: 404 });
 
-export const GET = withRpcGuard({ burst: 20, perSecond: 2 }, async () => {
+export const GET = withRpcGuard({ name: "dev-wallet-get", burst: 20, perSecond: 2 }, async () => {
   const devWallet = loadWallet();
   if (!devWallet) return disabled();
   return ok({ address: devWallet.publicKey.toBase58() });
 });
 
-export const POST = withRpcGuard({ burst: 10, perSecond: 1, calls: 1 }, async (request: Request) => {
+export const POST = withRpcGuard({ name: "dev-wallet-post", burst: 10, perSecond: 1, calls: 1 }, async (request: Request) => {
   const devWallet = loadWallet();
   if (!devWallet || !fromOurPage(request)) return disabled();
   try {
