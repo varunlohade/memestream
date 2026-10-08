@@ -10,8 +10,10 @@ import type { PreparedTx, TradePreview } from "@/lib/api-types";
 import { buildClaimEarningsTx } from "@/lib/dbc/fees";
 import { buildGraduateTx } from "@/lib/dbc/graduate";
 import { buildCreateStreamCoinTx } from "@/lib/dbc/launch";
-import { loadPoolSnapshot } from "@/lib/dbc/pool";
-import { prepareTrade, quoteTrade, type TradeInput, type TradeQuote } from "@/lib/dbc/trade";
+import { loadPoolSnapshot, type PoolSnapshot } from "@/lib/dbc/pool";
+import { prepareTrade, quoteTrade, type TradeInput } from "@/lib/dbc/trade";
+import { type DammSnapshot, graduatedPoolAddress, loadDammSnapshot } from "@/lib/damm/pool";
+import { prepareDammTrade, quoteDammTrade } from "@/lib/damm/trade";
 import type { BuiltTx } from "@/lib/dbc/tx";
 import { baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, solToLamports } from "@/lib/dbc/units";
 import { coinForTicker, parseTicker } from "@/lib/short-link";
@@ -96,7 +98,10 @@ function tradeInput(side: "buy" | "sell", amount: string): TradeInput {
   return side === "buy" ? { side, lamports: solToLamports(amount) } : { side, baseUnits: coinsToBaseUnits(amount) };
 }
 
-function previewOf(input: TradeInput, quote: TradeQuote): TradePreview {
+/** What a preview needs from either kind of quote (the curve's, or the graduated pool's). */
+type QuoteAmounts = { spentAmount: BN; outputAmount: BN; minimumAmountOut: BN };
+
+function previewOf(input: TradeInput, quote: QuoteAmounts): TradePreview {
   const [fmtIn, fmtOut] = input.side === "buy" ? [lamportsToSol, baseUnitsToCoins] : [baseUnitsToCoins, lamportsToSol];
   const asked = input.side === "buy" ? input.lamports : input.baseUnits;
   return {
@@ -107,11 +112,24 @@ function previewOf(input: TradeInput, quote: TradeQuote): TradePreview {
   };
 }
 
-/** Read-only price check for the trade box; needs no wallet. */
+/** A graduated coin trades in its Meteora DAMM v2 pool, found from the coin's config and mint. */
+async function graduatedPool(snapshot: PoolSnapshot): Promise<DammSnapshot> {
+  const address = graduatedPoolAddress(snapshot.config, snapshot.pool.poolState.baseMint);
+  const pool = await loadDammSnapshot(getChain().connection, address);
+  if (!pool) throw new UserError("This coin's Meteora pool isn't open yet. Try again in a moment.");
+  return pool;
+}
+
+/** Read-only price check for the trade box; needs no wallet. Uses the curve, or the Meteora pool once graduated. */
 export async function previewTrade(req: QuoteRequest): Promise<TradePreview> {
   return userFacing(async () => {
     const input = tradeInput(req.side, req.amount);
-    return previewOf(input, quoteTrade(await snapshotForMint(req.mint), input, req.slippageBps));
+    const snapshot = await snapshotForMint(req.mint);
+    const quote =
+      snapshot.status === "graduated"
+        ? quoteDammTrade(await graduatedPool(snapshot), input, req.slippageBps)
+        : quoteTrade(snapshot, input, req.slippageBps);
+    return previewOf(input, quote);
   });
 }
 
@@ -132,7 +150,11 @@ export async function buildTradeForWallet(req: TradeRequest): Promise<PreparedTx
     const trader = walletKey(req.wallet);
     const snapshot = await snapshotForMint(req.mint);
     assertNotSelfBuy(input.side, snapshot.pool.poolState.creator, trader);
-    const built = await prepareTrade(client, snapshot, trader, input, req.slippageBps, minimumSeen(input.side, req.minReceived));
+    const floor = minimumSeen(input.side, req.minReceived);
+    const built =
+      snapshot.status === "graduated"
+        ? await prepareDammTrade(client.connection, await graduatedPool(snapshot), trader, input, req.slippageBps, floor)
+        : await prepareTrade(client, snapshot, trader, input, req.slippageBps, floor);
     return { ...(await toPreparedTx(built)), preview: previewOf(input, built.quote) };
   });
 }
