@@ -14,7 +14,9 @@ none of its parameters can change later, so all of them must be right first.
       `claimPartnerPoolCreationFee` (a claim script is still to write). Go live shows
       "Launch costs 0.05 SOL" (read from the on-chain config). Devnet stays free.
 - [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). It also receives the
-      partner's locked LP position.
+      partner's locked LP position NFT. The app's "Claim pool fees" builds a transaction the
+      holder signs directly, so for a multisig claim the partner's LP fees through Squads
+      (audit #3, INFO-3).
 - [x] **Graduation threshold: 10 SOL** (Boss man, 2026-10-08, via steve). Set in
       `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
       programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).

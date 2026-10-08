@@ -8,28 +8,58 @@ import {
   CollectFeeMode,
   CpAmm,
   derivePositionAddress,
+  derivePositionNftAccount,
   getAllPositionNftAccountByOwner,
   getTokenProgram,
   getUnClaimLpFee,
+  positionByPoolFilter,
   type PoolState,
   type PositionState,
 } from "@meteora-ag/cp-amm-sdk";
 import { createCloseAccountInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
-import type { Connection, PublicKey } from "@solana/web3.js";
+import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { InputError } from "../dbc/errors";
 import { built, type BuiltTx } from "../dbc/tx";
 
 export type LpPosition = { position: PublicKey; positionNftAccount: PublicKey; positionState: PositionState };
 
-/** Position NFTs read per wallet: bounds the work one request can cause (a holder of more claims from Meteora). */
+/** Position NFTs read per wallet in the fallback scan: bounds the work one request can cause. */
 const MAX_POSITION_NFTS = 50;
 
 /**
- * The positions `owner` holds in `pool`, found from the position NFTs in its wallet (at most
- * MAX_POSITION_NFTS of them). Exactly two RPC calls: the wallet's NFT accounts, then their positions.
+ * The positions `owner` holds in `pool`. The pool's own positions are found first (graduation
+ * makes two: streamer and platform), then each position's NFT account is checked for `owner`.
+ * Junk token accounts in a wallet can't hide a position this way. Only if a position's NFT has
+ * left its original account (the holder transferred it) does this fall back to scanning the
+ * wallet's position NFTs (capped). Usually 2 RPC calls.
  */
 export async function lpPositionsOf(connection: Connection, pool: PublicKey, owner: PublicKey): Promise<LpPosition[]> {
+  const program = new CpAmm(connection)._program;
+  const inPool = (await program.account.position.all([positionByPoolFilter(pool)])) as { publicKey: PublicKey; account: PositionState }[];
+  if (inPool.length === 0) return [];
+  const nftAccounts = inPool.map((p) => derivePositionNftAccount(p.account.nftMint));
+  const infos = await connection.getMultipleAccountsInfo(nftAccounts);
+
+  const held: LpPosition[] = [];
+  let anyMoved = false;
+  inPool.forEach((p, i) => {
+    const holder = nftHolder(infos[i]?.data);
+    if (!holder) anyMoved = true;
+    else if (holder.equals(owner)) held.push({ position: p.publicKey, positionNftAccount: nftAccounts[i], positionState: p.account });
+  });
+  if (held.length > 0 || !anyMoved) return held;
+  return walletScan(connection, pool, owner);
+}
+
+/** The owner of a token account holding exactly 1 (an NFT), or null. Token account: mint 0..32, owner 32..64, amount u64 @64. */
+function nftHolder(data: Buffer | undefined): PublicKey | null {
+  if (!data || data.length < 72 || data.readBigUInt64LE(64) !== BigInt(1)) return null;
+  return new PublicKey(data.subarray(32, 64));
+}
+
+/** Fallback for transferred NFTs: the wallet's position NFTs (first MAX_POSITION_NFTS), then their positions. */
+async function walletScan(connection: Connection, pool: PublicKey, owner: PublicKey): Promise<LpPosition[]> {
   const nfts = (await getAllPositionNftAccountByOwner(connection, owner)).slice(0, MAX_POSITION_NFTS);
   if (nfts.length === 0) return [];
   const addresses = nfts.map((nft) => derivePositionAddress(nft.positionNft));

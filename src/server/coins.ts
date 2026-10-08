@@ -6,7 +6,7 @@ import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import type { CoinDetail, CoinView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
-import { fetchDammPools, graduatedPoolAddress, withGraduatedPool } from "@/lib/damm/pool";
+import { fetchDammPools, graduatedPoolAddress, isCoinSolPool, withGraduatedPool } from "@/lib/damm/pool";
 import { lpPositionsOf, unclaimedPoolFees } from "@/lib/damm/positions";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
@@ -121,7 +121,8 @@ async function loadCoin(mint: string): Promise<{ coin: CoinView; venue: TradeVen
   if (view.status === "graduated") {
     // Live price and trades come from the Meteora pool; the curve froze at graduation.
     const damm = graduatedPoolAddress(config, pool.poolState.baseMint);
-    const [state] = await fetchDammPools(connection, [damm]);
+    const [fetched] = await fetchDammPools(connection, [damm]);
+    const state = fetched && isCoinSolPool(fetched, pool.poolState.baseMint) ? fetched : null; // same check as trading
     view = withGraduatedPool(view, damm, state, Number(baseUnitsToCoins(config.preMigrationTokenSupply)));
     if (state) venue = { address: damm, vaults: { quote: state.tokenBVault, base: state.tokenAVault } };
   }
