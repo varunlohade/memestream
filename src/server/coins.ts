@@ -8,6 +8,7 @@ import type { CoinDetail, CoinView, Holdings, TradeView } from "@/lib/api-types"
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { streamLinkFromUri } from "@/lib/stream-link";
+import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
 import { getChain, poolForMint } from "./chain";
 import { BusyError } from "./errors";
 import { takeRpcBudget } from "./rpc-budget";
@@ -15,12 +16,15 @@ import { loadMetadata, MAX_ACCOUNTS_PER_CALL } from "./metadata";
 
 async function withMetadata(connection: Connection, views: PoolView[]): Promise<CoinView[]> {
   const metadata = await loadMetadata(connection, views.map((v) => new PublicKey(v.mint)));
-  return views.map((view, i) => ({
-    ...view,
-    name: metadata[i]?.name ?? "Unnamed stream",
-    symbol: metadata[i]?.symbol ?? "COIN",
-    streamUrl: metadata[i] ? (streamLinkFromUri(metadata[i].uri)?.url ?? null) : null,
-  }));
+  return views.map((view, i) => {
+    const meta = metadata[i];
+    return {
+      ...view,
+      name: meta?.name ?? "Unnamed stream",
+      symbol: meta?.symbol ?? "COIN",
+      streamUrl: meta ? (streamLinkFromUri(meta.uri)?.url ?? null) : null,
+    };
+  });
 }
 
 /**
@@ -40,13 +44,13 @@ async function scanCoins(): Promise<CoinView[]> {
   return withMetadata(connection, views);
 }
 
+/** A scan: one program-account scan, the config, and one metadata call per 100 coins (last known count). */
+const listScanCalls = () => 2 + Math.max(1, Math.ceil((listCache?.coins.length ?? 0) / MAX_ACCOUNTS_PER_CALL));
+
 /**
  * Every coin launched on our config. `allowScan` is asked before a fresh scan (the RPC budget);
  * if it says no, the last good list is served.
  */
-/** A scan: one program-account scan, the config, and one metadata call per 100 coins (last known count). */
-const listScanCalls = () => 2 + Math.max(1, Math.ceil((listCache?.coins.length ?? 0) / MAX_ACCOUNTS_PER_CALL));
-
 export async function listCoins(allowScan: () => Promise<boolean> = () => takeRpcBudget(listScanCalls())): Promise<CoinView[]> {
   if (listCache && Date.now() - listCache.at < LIST_TTL_MS) return listCache.coins;
   // Set synchronously, so concurrent callers share one budget check and one scan.
@@ -75,7 +79,7 @@ async function refreshList(allowScan: () => Promise<boolean>): Promise<CoinView[
 }
 
 /** A coin's view plus the vault addresses its trade history needs. */
-async function loadCoin(mint: string): Promise<{ coin: CoinView; vaults: { quote: PublicKey; base: PublicKey } } | null> {
+async function loadCoin(mint: string): Promise<{ coin: CoinView; vaults: PoolVaults } | null> {
   const { client, connection } = getChain();
   const address = poolForMint(mint);
   const pool = address && (await client.state.getPool(address));
@@ -177,51 +181,14 @@ export async function getLaunchFeeSol(): Promise<string | null> {
 
 const TRADE_HISTORY_LIMIT = 25;
 
-type TokenBalances = { accountIndex: number; uiTokenAmount: { amount: string } }[] | null | undefined;
-const vaultAmount = (balances: TokenBalances, index: number) =>
-  new BN(balances?.find((b) => b.accountIndex === index)?.uiTokenAmount.amount ?? "0");
-
-/**
- * Recent swaps, read from the pool's vault balance changes: SOL into the quote vault is a buy.
- * Launch, claim and graduation transactions don't move both vaults and are skipped.
- */
-async function recentTrades(
-  client: DynamicBondingCurveClient,
-  coin: CoinView,
-  vaults: { quote: PublicKey; base: PublicKey },
-): Promise<TradeView[]> {
+/** The pool's last few swaps (two RPC calls); other transactions on the pool are skipped. */
+async function recentTrades(client: DynamicBondingCurveClient, coin: CoinView, vaults: PoolVaults): Promise<TradeView[]> {
   const signatures = await client.connection.getSignaturesForAddress(new PublicKey(coin.pool), { limit: TRADE_HISTORY_LIMIT });
   const transactions = await client.connection.getParsedTransactions(
     signatures.map((s) => s.signature),
     { maxSupportedTransactionVersion: 0 },
   );
-
-  const trades: TradeView[] = [];
-  transactions.forEach((tx, i) => {
-    if (!tx?.meta || tx.meta.err) return;
-    const keys = tx.transaction.message.accountKeys.map((k) => k.pubkey.toBase58());
-    const quoteIndex = keys.indexOf(vaults.quote.toBase58());
-    const baseIndex = keys.indexOf(vaults.base.toBase58());
-    if (quoteIndex < 0 || baseIndex < 0) return;
-    const quoteDelta = vaultAmount(tx.meta.postTokenBalances, quoteIndex).sub(vaultAmount(tx.meta.preTokenBalances, quoteIndex));
-    const baseDelta = vaultAmount(tx.meta.postTokenBalances, baseIndex).sub(vaultAmount(tx.meta.preTokenBalances, baseIndex));
-    if (quoteDelta.isZero() || baseDelta.isZero()) return;
-
-    const sol = lamportsToSol(quoteDelta.abs());
-    const coins = baseUnitsToCoins(baseDelta.abs());
-    const wallet = keys[0];
-    trades.push({
-      signature: signatures[i].signature,
-      side: quoteDelta.gtn(0) ? "buy" : "sell",
-      sol,
-      coins,
-      wallet,
-      time: tx.blockTime ?? null,
-      priceSol: Number(sol) / Number(coins),
-      byStreamer: wallet === coin.creator,
-    });
-  });
-  return trades;
+  return transactions.flatMap((tx, i) => tradeFromTransaction(tx, signatures[i].signature, { vaults, creator: coin.creator }) ?? []);
 }
 
 /** A wallet's SOL and its balance of one coin (0 if it has no token account yet). */
