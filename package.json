@@ -12,7 +12,7 @@
     "dev:chain": "tsx scripts/dev-chain.ts",
     "test:clock": "tsx --test 'test/integration/*.slow.ts'",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run lint && npm test && npm run test:surfpool && npm run build"
+    "check": "npm run typecheck && npm run lint && npm test && npm run test:surfpool && NEXT_DIST_DIR=.next-check npm run build"
   },
   "dependencies": {
     "@meteora-ag/dynamic-bonding-curve-sdk": "^1.5.13",
