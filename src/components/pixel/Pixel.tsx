@@ -45,7 +45,8 @@ export function useTexture(kind: TextureKind, seed = 1): CSSProperties {
 
 /** The XP-style graduation bar. `progress` is 0 to 1. */
 export function XpBar({ progress, small, big, label }: { progress: number; small?: boolean; big?: boolean; label?: string }) {
-  const percent = Math.round(Math.min(Math.max(progress, 0), 1) * 100);
+  // Round down: "100%" only once the curve is really full (99.92% must not read as done).
+  const percent = Math.floor(Math.min(Math.max(progress, 0), 1) * 100);
   const bar = (
     <div
       className={`xp${small ? " sm" : ""}${big ? " big" : ""}`}

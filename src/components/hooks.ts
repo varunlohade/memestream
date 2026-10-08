@@ -71,9 +71,13 @@ export function usePriceTrend(detail: CoinDetail | null) {
 const QUOTE_DEBOUNCE_MS = 300;
 
 /** Live price check for the trade box. Keeps the last good quote while a new one loads. */
-export function useQuote(mint: string, side: "buy" | "sell", amount: string) {
+/**
+ * `curveState` is anything that changes when the pool does (the coin's raised SOL): after any trade
+ * lands, the old quote no longer counts and a fresh one is fetched.
+ */
+export function useQuote(mint: string, side: "buy" | "sell", amount: string, curveState: string) {
   const [quote, setQuote] = useState<{ key: string; preview: TradePreview | null; error: string | null } | null>(null);
-  const key = `${mint}|${side}|${amount}`;
+  const key = `${mint}|${side}|${amount}|${curveState}`;
 
   useEffect(() => {
     if (!amount.trim()) return;

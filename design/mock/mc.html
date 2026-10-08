@@ -197,6 +197,21 @@ h1 .unvic canvas{width:36px;height:36px}
 .r2{margin:4px 0 12px}
 .r2 p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .r2 .unvw{color:var(--mute);flex:none}
+
+/* Ticker tape options (?tape=A|B|C) */
+.tape{height:48px;background:#111113;border-bottom:4px solid #000;overflow:hidden;display:flex;align-items:center}
+.trow{display:flex;align-items:center;gap:22px;white-space:nowrap;padding-left:40px;font-family:"VT323",monospace;font-size:26px;color:#EDEDED}
+.ti{display:inline-flex;align-items:center;gap:10px;color:inherit;text-decoration:none}
+.ti b{font-weight:400;color:#fff}
+.tsep{display:inline-block;width:6px;height:6px;background:#5A5A62;flex:none}
+.tthumb{display:inline-block;width:32px;height:18px;border:2px solid #000}
+.tthumb canvas{width:100%;height:100%;display:block}
+.ti canvas[data-spr]{width:22px;height:22px}
+.ti.grad{color:#80FF20}.ti.grad b{color:#80FF20}
+.tbar{display:inline-block;width:90px;height:12px;background:#1A1A1A;border:2px solid #000;position:relative;overflow:hidden}
+.tbar b{display:block;height:100%;background:#80FF20}
+.xpt{color:#80FF20}
+@media (max-width:520px){html,body{overflow-x:hidden;max-width:100vw}.tape{max-width:100vw}body.B .home{display:none}.trow{padding-left:16px;font-size:22px;gap:16px}.tape{height:40px}.tbar{width:60px}}
 </style>
 <body>
 <script>
@@ -298,10 +313,27 @@ function coinPage(){
     </div></div>`;
 }
 
+const TAPE = q.get('tape');
+const sep = '<i class="tsep"></i>';
+const mini = g => `<span class="tbar"><b style="width:${g}%"></b></span>`;
+function tape(){
+  if (!TAPE) return '';
+  let items;
+  if (TAPE === 'A') items = COINS.map(c => `<a class="ti"><span class="tthumb">${sc(c.seed,16,9)}</span><b>$${c.tk}</b><span class="num">${c.mc}</span></a>`);
+  if (TAPE === 'B') items = [
+    `<a class="ti"><span class="mute">7xKp3f</span><span class="up">bought</span><span class="num">0.5 SOL</span>of <b>$MIRA</b></a>`,
+    `<a class="ti grad">${sprite('coin')}<b>$SHIP</b> graduated to Meteora</a>`,
+    `<a class="ti"><span class="mute">ApF7Vq</span><span class="down">sold</span><span class="num">0.2 SOL</span>of <b>$LENA</b></a>`,
+    `<a class="ti"><span class="mute">Gq91Lm</span><span class="up">bought</span><span class="num">1.2 SOL</span>of <b>$OKO</b></a>`,
+    `<a class="ti"><span class="mute">mR8vYd</span><span class="up">bought</span><span class="num">0.1 SOL</span>of <b>$RAMEN</b></a>`];
+  if (TAPE === 'C') items = [COINS[1],COINS[0],COINS[2],COINS[3],COINS[4],COINS[5]].map(c => `<a class="ti"><b>$${c.tk}</b>${mini(c.g)}<span class="num xpt">${c.g}%</span></a>`);
+  items.splice(TAPE==='C'?2:3, 0, TAPE==='C' ? `<a class="ti grad">${sprite('coin')}<b>$DVZ7PP78</b> graduated</a>` : '');
+  return `<div class="tape"><div class="trow">${items.filter(Boolean).concat(items.filter(Boolean)).join(sep)}</div></div>`;
+}
 function home(){
   const hero = `<div class="hero"><div><h1>Live coins</h1><p>Buy the stream you think will pop.</p></div><div class="mbtn">Go live</div></div>
     <div class="sort"><div class="mbtn">Hot</div><div class="mbtn off">New</div><div class="mbtn off">Close to graduation</div></div>`;
-  if (OPT === 'B') return topBar() + `<div class="home">${hero}<div class="grid">${COINS.map(c=>`<div class="p tile"><div class="slot">${sc(c.seed,96,54)}<span class="tags"><span class="live">Live</span>${UNV==='A'?unvTag():''}</span></div>
+  if (OPT === 'B') return topBar() + tape() + `<div class="home">${hero}<div class="grid">${COINS.map(c=>`<div class="p tile"><div class="slot">${sc(c.seed,96,54)}<span class="tags"><span class="live">Live</span>${UNV==='A'?unvTag():''}</span></div>
     ${UNV ? `<div class="m2"><h4>$${c.tk}${UNV==='C'?unvIcon():''}</h4><h4 class="num">${c.mc}</h4></div><div class="m2 r2"><p>${c.name}</p>${UNV==='B'?'<p class="unvw">Unverified</p>':''}</div>`
       : `<div class="meta"><div><h4>$${c.tk}</h4><p>${c.name}</p></div><div style="text-align:right"><h4 class="num">${c.mc}</h4><p class="num ${cls(c.ch)}">${pct(c.ch)}</p></div></div>`}${xp(c.g,1)}</div>`).join('')}</div></div>`;
   return topBar() + `<div class="home">${hero}<div class="p">${COINS.map(c=>`<div class="row"><div class="slot">${sc(c.seed,48,27)}</div>

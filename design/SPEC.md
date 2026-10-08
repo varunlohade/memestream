@@ -49,7 +49,7 @@ Shared rules (apply to B):
 - Numbers: `tabular-nums`.
 - Sprites (original): gold coin (logo), red heart (fees/wallet), image icon (upload).
 - Header wordmark (FINAL, option 1): "memestream" in VT323 44px, true lowercase. Option 2 (`?wm=1`) is not used.
-- Phone header (≤520px): 16px side padding, 72px tall, 32px coin, wordmark 38px, wallet chip shrinks to a 48px heart button (address hidden). Checked at 390px.
+- Phone header (≤520px): 16px side padding, 72px tall, 32px coin, wordmark 38px, wallet chip shrinks to a 48px heart button (address hidden). Checked at a true 390px in the built app (qa/2026-10-08-unverified/home-phone.png). Note: headless Chrome won't go below 500px, so mock phone shots need an iframe of the real width.
 
 ## Screens (B)
 
@@ -98,6 +98,17 @@ Board: `design/boards/MS-unverified.png`. Mock: `mc.html?opt=B&screen=home|coin&
 - C Icon: small gray "?" block after $TICKER on tiles and the coin page, with the hover/tap note.
 - Note text (all): "We haven't checked that this streamer owns the channel."
 - (art_design had recommended B; Boss man chose A.)
+
+## Ticker tape (2026-10-08): FINAL = B, Live trades
+Boss man picked B (2026-10-08, in this session: "b"). Build B only; A and C stay for the record.
+- Thin data rule: B shows the latest trades the app already has, newest first (max ~20). If there are fewer than 5 trades from the last 30 minutes, fill the rest with C-style items ("$TICKER, mini XP bar, %") from the cached coin list, so the tape is never empty or stuck on old trades. If there are no coins at all, hide the strip.
+A strip under the top bar, on every page except the OBS overlay. Board: `design/boards/MS-tickertape.png`. Mock: `mc.html?opt=B&screen=home&tape=A|B|C`.
+- Strip: 48px tall (40px on phones), `#111113`, 4px black bottom border, VT323 26px (22px on phones). Items are separated by a 6px gray square `#5A5A62`, not "·". No emoji: a graduation uses the coin sprite and XP green `#80FF20`.
+- A Market cap: stream thumbnail (32×18), $TICKER, market cap. No change % (that costs ~25 RPC calls per coin).
+- B Live trades: "<wallet> bought|sold <SOL> of $TICKER" (bought green, sold red), with graduation events in green.
+- C Graduation race: $TICKER, a mini XP bar (90px, 60px on phones), % in green. A graduation event appears in green when a coin graduates.
+- Motion (all): slow scroll (~40 px/s). Pause on hover and focus. No motion under prefers-reduced-motion: the strip sits still and scrolls by hand. Each item links to its coin.
+- (art_design had recommended C: it uses data the coin list already has, it repeats the product's one hook (the XP bar), and it stays quiet. B is the liveliest, but its trades come only from coin pages people opened, so it goes stale or empty when traffic is low. Boss man chose B; the thin data rule above covers that.)
 
 ## Open
 - Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.

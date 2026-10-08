@@ -66,7 +66,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
     saveAmount(coin.mint, side, value);
   };
   const [status, setStatus] = useState<Status | null>(null);
-  const { preview, error: quoteError, loading } = useQuote(coin.mint, side, amount);
+  const { preview, error: quoteError, loading } = useQuote(coin.mint, side, amount, coin.raisedSol);
 
   const unit = side === "buy" ? "SOL" : coin.symbol;
   const actionLabel = `${SIDE_LABEL[side]} ${coin.symbol}`;
