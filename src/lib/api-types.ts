@@ -67,3 +67,9 @@ export const DEFAULT_SLIPPAGE_BPS = 100;
 /** Token decimals for browser code; lib/dbc/units.ts uses the same values (units.test.ts pins them). */
 export const SOL_DECIMALS = 9;
 export const COIN_DECIMALS = 6;
+
+/** One item on the site's ticker tape (design B: live trades, with graduation-race filler). */
+export type TapeItem =
+  | { kind: "trade"; mint: string; symbol: string; side: "buy" | "sell"; sol: string; wallet: string; time: number | null }
+  | { kind: "graduated"; mint: string; symbol: string }
+  | { kind: "race"; mint: string; symbol: string; progress: number };

@@ -1,7 +1,7 @@
 "use client";
 /** Client-side data hooks. They call our own API routes; the browser never talks to RPC directly. */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { CoinDetail, CoinView, TradePreview } from "@/lib/api-types";
+import type { CoinDetail, CoinView, TapeItem, TradePreview } from "@/lib/api-types";
 import { percentChange } from "@/lib/format";
 import { fetchJson } from "@/lib/http";
 
@@ -53,6 +53,9 @@ function usePolled<T>(url: string, initial: T | null = null) {
 }
 
 export const useCoins = () => usePolled<{ coins: CoinView[] }>("/api/coins");
+
+/** The site's ticker tape: recent trades and graduations (see lib/tape.ts). */
+export const usePolledTape = () => usePolled<{ items: TapeItem[] }>("/api/tape");
 
 /** One coin, its recent trades, and (if a wallet is connected) that wallet's holdings. */
 export const useCoin = (mint: string, wallet: string | null, initial: CoinDetail | null = null) =>

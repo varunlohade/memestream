@@ -4,11 +4,12 @@ import type { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curv
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
-import type { CoinDetail, CoinView, Holdings, TradeView } from "@/lib/api-types";
+import type { CoinDetail, CoinView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
 import { isCanonicalTicker } from "@/lib/short-link";
+import { buildTape } from "@/lib/tape";
 import { streamLinkFromUri } from "@/lib/stream-link";
 import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
 import { getChain, poolForMint } from "./chain";
@@ -188,6 +189,17 @@ export async function getLaunchFeeSol(): Promise<string | null> {
   if (!read) return null;
   launchFee = lamportsToSol(read.poolCreationFee);
   return launchFee;
+}
+
+/**
+ * The ticker tape from what this server already has: the coin list (cached, budgeted) and the
+ * trades coin pages have read. No extra RPC calls.
+ */
+export async function getTape(): Promise<TapeItem[]> {
+  const coins = await listCoins();
+  const tradesByMint = new Map<string, TradeView[]>();
+  for (const [mint, entry] of coinCache) if (entry.value) tradesByMint.set(mint, entry.value.trades);
+  return buildTape(coins, tradesByMint, Math.floor(Date.now() / 1000));
 }
 
 const TRADE_HISTORY_LIMIT = 25;

@@ -1,4 +1,5 @@
 import { TxBanner, TxProvider } from "@/components/tx";
+import { TickerTape } from "@/components/ui/TickerTape";
 import { TopBar } from "@/components/ui/TopBar";
 import { WalletProvider } from "@/components/wallet/WalletProvider";
 import { networkInfo } from "@/server/chain";
@@ -11,6 +12,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
     <WalletProvider chain={network.walletChain}>
       <TxProvider>
         <TopBar network={network.label} />
+        <TickerTape />
         <TxBanner />
         <main>{children}</main>
       </TxProvider>

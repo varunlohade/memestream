@@ -217,3 +217,31 @@ button.unv { cursor: help; }
 .ovC .hot .slot canvas { width: 44px; height: 44px; flex: none; }
 .ovC .hot .hf { font-size: 26px; }
 .ovC .hot .where { font-size: 30px; color: #c9c9cf; }
+
+/* Ticker tape (SPEC design B): a strip under the top bar; two copies of the list loop seamlessly. */
+.tape { height: 48px; background: #111113; border-bottom: 4px solid #000; overflow: hidden; font-family: var(--bf); font-size: 26px; display: flex; align-items: center; }
+.tape-track { display: flex; width: max-content; animation: tape-scroll linear infinite; }
+.tape:hover .tape-track, .tape:focus-within .tape-track { animation-play-state: paused; }
+.tape-list { display: flex; list-style: none; margin: 0; padding: 0; }
+.tape-list li { display: flex; align-items: center; white-space: nowrap; }
+/* 6px gray squares between items. */
+.tape-list li::after { content: ""; width: 6px; height: 6px; background: #5A5A62; margin: 0 22px; flex: none; }
+.tape-item { display: inline-flex; align-items: center; gap: 8px; color: var(--fg); text-decoration: none; }
+.tape-item:hover { text-decoration: underline; }
+.tape-wallet { color: var(--mute); }
+.tape-item.grad { color: var(--xp); }
+.tape-coin { width: 22px; height: 22px; }
+.tape-xp { display: inline-block; width: 90px; height: 12px; background: #0b0b0c; border: 2px solid #000; }
+.tape-xp b { display: block; height: 100%; background: var(--xp); }
+.tape-pct { color: var(--xp); }
+@keyframes tape-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@media (max-width: 640px) {
+  .tape { height: 40px; font-size: 22px; }
+  .tape-xp { width: 60px; }
+}
+/* No motion: the strip stands still and scrolls by hand; the second copy isn't needed. */
+@media (prefers-reduced-motion: reduce) {
+  .tape { overflow-x: auto; }
+  .tape-track { animation: none; }
+  .tape-track > ul { display: none; }
+}
