@@ -1,0 +1,28 @@
+18:10:00 click 1: enabled
+18:10:03 pending text: Confirming "Buy OKO". Trading is paused until we know, so you can't pay twice.
+18:10:22 idle after main: true
+18:10:25 PASS 1 main buy: on-chain ok tx +1 (all +1), SOL -0.0520
+18:10:25 buy again: enabled
+18:10:49 PASS 1b second buy right after (not stuck): on-chain ok tx +1 (all +1), SOL -0.0500
+18:10:49 click: enabled
+18:10:55 after reload buy: none none
+18:11:11 idle after reload: true
+18:11:14 reload end text: went through.
+18:11:14 PASS 2 reload mid-trade: on-chain ok tx +1 (all +1), SOL -0.0500
+18:11:14 click A: enabled
+18:11:18 tab2 buy: none lock msg: A trade is in progress in another tab. Trading is paused until it finishes (at most 10 minutes).
+18:11:35 idle A: true
+18:11:38 PASS 3 second tab mid-trade: on-chain ok tx +1 (all +1), SOL -0.5000
+18:11:38 tab2 idle w/o reload: true
+18:11:38 tab2 buy after: enabled
+18:12:03 PASS 3b second tab trades after first finishes: on-chain ok tx +1 (all +1), SOL -0.0500
+18:12:07 extra clicks: none none
+18:12:26 idle: true
+18:12:29 PASS 4 triple click + 2 more clicks mid-trade: on-chain ok tx +1 (all +1), SOL -0.0500
+
+PASS 1 main buy: on-chain ok tx +1 (all +1), SOL -0.0520
+PASS 1b second buy right after (not stuck): on-chain ok tx +1 (all +1), SOL -0.0500
+PASS 2 reload mid-trade: on-chain ok tx +1 (all +1), SOL -0.0500
+PASS 3 second tab mid-trade: on-chain ok tx +1 (all +1), SOL -0.5000
+PASS 3b second tab trades after first finishes: on-chain ok tx +1 (all +1), SOL -0.0500
+PASS 4 triple click + 2 more clicks mid-trade: on-chain ok tx +1 (all +1), SOL -0.0500

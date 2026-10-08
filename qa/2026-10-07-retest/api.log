@@ -1,0 +1,23 @@
+== 1 creator buys own DEV via API
+{"error":"memestream won't let a streamer's wallet buy their own coin"} [HTTP 400]
+== 2 MIRA creator buys MIRA via API
+{"error":"memestream won't let a streamer's wallet buy their own coin"} [HTTP 400]
+== 3 side BUY uppercase
+{"error":"Side must be buy or sell"} [HTTP 400]
+== 4 wallet with whitespace
+{"error":"Not a valid wallet address"} [HTTP 400]
+== 5 control: viewer W buys MIRA via API (should build)
+{"transaction":"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkPpvfH+BojiQAaTUGHRNlQdwavb9/9Oj04AS+nkP9KdJUe2ecG2seIyAyHa4mQRbW0hJTpFvIRBbc5Gh9r6dSX0z+jwVnp
+
+== 6 creator sells own DEV (holds 0)
+{"transaction":"AQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABAAkPpvfH+BojiQAaTUGHRNlQdwavb9/9Oj04AS+nkP9KdJUe2ecG2seIyAyHa4mQRbW0hJTpFvIRBbc5Gh9r6dSX011BAWcw
+
+== quote route
+8:    return ok(await previewTrade(parseQuote(new URL(request.url).searchParams)));
+== quote buy 0.2 now
+{"spent":"0.2","received":"53380464.713311","minimumReceived":"52846660.066177","partial":false}
+== quote sell 53380464.713311 now
+{"spent":"53380464.713311","received":"0.040995776","minimumReceived":"0.040585818","partial":false}
+== quote buy 0.2 later
+Wed Oct  7 17:12:49 UTC 2026
+{"spent":"0.2","received":"53380464.713311","minimumReceived":"52846660.066177","partial":false}

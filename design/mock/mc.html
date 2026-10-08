@@ -1,0 +1,333 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>memestream pixel mock</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Silkscreen:wght@400;700&family=Pixelify+Sans:wght@400;600;700&display=block">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+.num{font-variant-numeric:tabular-nums}
+canvas,.px{image-rendering:pixelated}
+canvas.scene{display:block;width:100%;height:100%}
+
+/* ---------- themes ---------- */
+body.A{--panel:#C6C6C6;--fg:#262626;--mute:#555;--hi:#FFFFFF;--lo:#555555;--edge:#000;--slot:#8B8B8B;--slothi:#FFFFFF;--slotlo:#373737;--up:#2E8B22;--down:#B02E26;--xp:#80FF20;--btn:#6F6F6F;--buy:#3C8527;--hf:"Press Start 2P";--bf:"VT323";--hs:.6}
+body.B{--panel:#2C2C30;--fg:#EDEDED;--mute:#9A9AA2;--hi:#4A4A50;--lo:#161618;--edge:#000;--slot:#1C1C1F;--slothi:#3E3E44;--slotlo:#0B0B0C;--up:#5CFF6A;--down:#FF5A4E;--xp:#80FF20;--btn:#3E3E44;--buy:#17A34A;--hf:"Silkscreen";--bf:"VT323";--hs:1}
+body.C{--panel:#E3C99A;--fg:#2E1F0E;--mute:#5A4127;--hi:#D9B77F;--lo:#6B5130;--edge:#2E1F0E;--slot:#7A5C34;--slothi:#C9A46B;--slotlo:#4A3620;--up:#1F6E12;--down:#9E2219;--xp:#FCDB05;--btn:#7F7F7F;--buy:#1E9E3E;--hf:"Pixelify Sans";--bf:"Pixelify Sans";--hs:1}
+body{color:var(--fg);font-family:var(--bf),monospace;background-color:#3a2a1d;background-size:96px 96px;image-rendering:pixelated;min-height:100vh}
+body.B{background-color:#18181a}
+body.C{background:#8FC7F2}
+
+h1,h2,h3,.hf{font-family:var(--hf),monospace;font-weight:400}
+body.C h1,body.C h2,body.C h3,body.C .hf{font-weight:600}
+
+/* bevelled block panel */
+.p{background:var(--panel);border:4px solid var(--edge);box-shadow:inset 4px 4px 0 var(--hi),inset -4px -4px 0 var(--lo);padding:22px}
+body.C .p{background-size:128px 128px}
+.slot{background:var(--slot);box-shadow:inset 4px 4px 0 var(--slotlo),inset -4px -4px 0 var(--slothi)}
+.mbtn{display:flex;align-items:center;justify-content:center;height:60px;background:var(--btn);border:4px solid #000;box-shadow:inset 4px 4px 0 rgba(255,255,255,.4),inset -4px -6px 0 rgba(0,0,0,.4);color:#fff;font-family:var(--hf),monospace;font-size:calc(18px*var(--hs) + 2px);text-shadow:3px 3px 0 rgba(0,0,0,.5)}
+body.C .mbtn{font-weight:700;font-size:24px}
+.mbtn.buy{background:var(--buy)}
+.up{color:var(--up)}.down{color:var(--down)}
+.mute{color:var(--mute)}
+
+/* XP-style bar */
+.xpw{position:relative;padding-top:30px}
+.xpn{position:absolute;left:50%;top:0;transform:translateX(-50%);font-family:var(--hf),monospace;font-size:calc(22px*var(--hs) + 4px);color:var(--xp);-webkit-text-stroke:6px #000;paint-order:stroke fill;line-height:1}
+body.C .xpn{font-weight:600;font-size:32px;-webkit-text-stroke:4px #000}
+body.A .xpn{font-size:22px;-webkit-text-stroke:7px #000}
+.xp{height:24px;background:#1A1A1A;border:4px solid #000;position:relative;overflow:hidden}
+.xp b{display:block;height:100%;background:var(--xp);box-shadow:inset 0 4px 0 rgba(255,255,255,.45),inset 0 -4px 0 rgba(0,0,0,.25)}
+.xp i{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 calc(5.555% - 4px),#000 calc(5.555% - 4px) 5.555%)}
+.xp.sm{height:16px;border-width:3px}
+
+/* top bar */
+.top{display:flex;align-items:center;justify-content:space-between;height:88px;padding:0 40px;border-bottom:4px solid #000;background-size:64px 64px}
+.brand{display:flex;align-items:center;gap:14px;font-family:var(--hf),monospace;font-size:calc(18px*var(--hs) + 6px);color:#fff;text-shadow:3px 3px 0 #000}
+body.C .brand{font-weight:400;font-size:28px}
+.brand canvas{width:40px;height:40px}
+.net{font-family:var(--bf),monospace;font-size:22px;color:#fff;background:#000;padding:2px 10px}
+.wallet{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px 0 10px;font-size:24px;color:#fff;background:rgba(0,0,0,.55);border:4px solid #000}
+.wallet canvas{width:28px;height:28px}
+
+/* coin page */
+.coin{display:grid;grid-template-columns:1fr 440px;gap:32px;padding:32px 40px 40px}
+.embed{position:relative;aspect-ratio:16/9;border:4px solid #000}
+.live{position:absolute;left:16px;top:16px;background:#C62828;color:#fff;font-family:var(--hf),monospace;font-size:calc(12px*var(--hs) + 4px);padding:6px 10px;border:3px solid #000}
+.ident{display:flex;gap:18px;align-items:center}
+.ident .slot{width:84px;height:84px;padding:8px;flex:none}
+.ident h1{font-size:calc(26px*var(--hs) + 10px)}
+body.C .ident h1{font-size:40px}
+.ident p{font-size:26px;margin-top:6px}
+body.C .ident p{font-size:20px}
+.lbl{font-size:24px}
+body.C .lbl{font-size:18px}
+.cap{font-family:var(--hf),monospace;font-size:calc(34px*var(--hs) + 12px);margin-top:8px;line-height:1.05}
+body.C .cap{font-size:56px;font-weight:700}
+.chg{font-size:26px;margin-top:4px}
+body.C .chg{font-size:20px;font-weight:600}
+.chart{margin-top:14px;height:120px}
+.chart canvas{width:100%;height:100%;display:block}
+.fees{display:flex;align-items:center;gap:12px;margin-top:18px;padding:10px 12px;font-size:26px;background:rgba(0,0,0,.12)}
+body.B .fees{background:rgba(255,255,255,.06)}
+body.C .fees{font-size:19px;font-weight:600;background:rgba(0,0,0,.15)}
+.fees canvas{width:32px;height:32px;flex:none}
+.gradlbl{display:flex;justify-content:space-between;font-size:24px;margin-top:20px}
+body.C .gradlbl{font-size:18px}
+.tabs{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+.tabs .mbtn{height:52px}
+.tabs .off{background:#3a3a3a;color:#aaa;text-shadow:none}
+.amt{display:flex;align-items:center;justify-content:space-between;height:68px;padding:0 20px;font-size:40px;color:#fff;text-shadow:3px 3px 0 #3f3f3f}
+body.C .amt{font-size:32px;font-weight:600}
+.amt small{font-size:26px;color:#ddd}
+.chips{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:10px 0 14px}
+.chips span{height:52px;display:flex;align-items:center;justify-content:center;font-size:28px;color:#fff;text-shadow:2px 2px 0 #3f3f3f}
+body.C .chips span{font-size:20px;font-weight:600}
+.get{display:flex;justify-content:space-between;font-size:26px;margin-bottom:14px}
+body.C .get{font-size:19px}
+.trades{margin-top:28px}
+.trades h3{font-size:calc(16px*var(--hs) + 6px);margin-bottom:12px}
+body.C .trades h3{font-size:24px}
+.tr{display:grid;grid-template-columns:80px 1fr 1fr 1fr 90px;font-size:26px;padding:8px 0;border-top:4px solid rgba(0,0,0,.18)}
+body.B .tr{border-top-color:rgba(255,255,255,.07)}
+body.C .tr{font-size:19px;padding:10px 0}
+.tr .r{text-align:right}
+
+/* home */
+.home{padding:32px 40px 40px}
+.hero{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}
+.hero h1{font-size:calc(30px*var(--hs) + 14px);color:#fff;text-shadow:4px 4px 0 #000}
+body.C .hero h1{font-size:56px}
+.hero p{font-size:30px;color:#fff;margin-top:10px;text-shadow:2px 2px 0 #000}
+body.C .hero p{font-size:22px;font-weight:600;color:#2E1F0E;text-shadow:none}
+body.C .hero h1{color:#fff}
+.hero .mbtn{width:260px;background:var(--buy)}
+.sort{display:flex;gap:10px;margin-bottom:18px}
+.sort .mbtn{height:48px;padding:0 18px;font-size:calc(12px*var(--hs) + 6px)}
+body.C .sort .mbtn{font-size:18px}
+.sort .off{background:#3a3a3a;color:#bbb;text-shadow:none}
+.row{display:grid;grid-template-columns:140px 1.5fr 1fr .7fr 1.4fr;align-items:center;gap:24px;padding:14px 0;border-top:4px solid rgba(0,0,0,.18)}
+.row:first-child{border-top:0;padding-top:0}
+.row .slot{width:140px;height:84px;padding:6px}
+.row h4{font-family:var(--hf),monospace;font-weight:400;font-size:calc(14px*var(--hs) + 8px)}
+body.C .row h4{font-weight:700;font-size:24px}
+.row p{font-size:24px;margin-top:4px}
+body.C .row p{font-size:17px}
+.row .m{font-family:var(--hf),monospace;font-size:calc(14px*var(--hs) + 8px);text-align:right}
+body.C .row .m{font-weight:700;font-size:24px}
+.row .c{font-size:28px;text-align:right}
+body.C .row .c{font-size:20px;font-weight:600}
+.row .g{font-size:22px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.tile{padding:14px}
+.tile .slot{aspect-ratio:16/9;padding:6px;position:relative}
+.tile .meta{display:flex;justify-content:space-between;align-items:flex-end;margin:14px 0 12px}
+.tile h4{font-family:var(--hf),monospace;font-weight:400;font-size:22px}
+.tile p{font-size:24px;margin-top:4px}
+.tile .live{left:14px;top:14px}
+
+/* go live */
+.form{max-width:640px;margin:36px auto 40px}
+.form h1{font-size:calc(26px*var(--hs) + 12px)}
+body.C .form h1{font-size:48px}
+.form .sub{font-size:28px;margin:10px 0 24px}
+body.C .form .sub{font-size:20px}
+.f{margin-bottom:18px}
+.f label{display:block;font-size:26px;margin-bottom:6px}
+body.C .f label{font-size:19px;font-weight:600}
+.f .in{height:60px;display:flex;align-items:center;padding:0 18px;font-size:30px;color:#fff;text-shadow:2px 2px 0 #3f3f3f}
+body.C .f .in{font-size:22px}
+.f .ph{color:#d8d8d8;text-shadow:none;opacity:.8}
+.two{display:grid;grid-template-columns:170px 1fr;gap:20px}
+.drop{width:170px;height:170px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;color:#fff;font-size:24px;text-align:center;line-height:1}
+body.C .drop{font-size:17px}
+.drop canvas{width:48px;height:48px}
+.earn{display:flex;gap:14px;align-items:center;font-size:26px;margin:6px 0 20px;padding:14px;background:rgba(0,0,0,.12)}
+body.B .earn{background:rgba(255,255,255,.06)}
+body.C .earn{font-size:19px;font-weight:600;background:rgba(0,0,0,.15)}
+.earn canvas{width:40px;height:40px;flex:none}
+
+/* ---------- OBS overlay (style B). Real overlay page: transparent body, no .ovbg ---------- */
+body.ov{width:1920px;height:1080px;overflow:hidden;position:relative;background:transparent;min-height:0}
+.ovbg{position:absolute;inset:0;width:1920px;height:1080px}
+body.ov .xpn{font-size:34px;-webkit-text-stroke:8px #000}
+body.ov .xp{height:30px}
+body.ov .xp.big{height:36px}
+body.ov .slot canvas{width:100%;height:100%}
+.ovA{position:absolute;left:40px;bottom:40px;width:600px;padding:22px 26px}
+.ovA .oh{display:grid;grid-template-columns:76px 1fr auto;gap:18px;align-items:center;margin-bottom:16px}
+.ovA .slot{width:76px;height:76px;padding:12px}
+.ovA .tk{font-size:32px}
+.ovA .where{font-size:28px;color:var(--mute);margin-top:6px}
+.ovA .r{text-align:right}
+.ovA .mc{font-size:36px}
+.ovA .ch{font-size:32px;margin-top:4px}
+.ovA .gl{font-size:28px;text-align:center;margin-top:8px;color:var(--mute)}
+.ovB{position:absolute;left:40px;top:32px;right:40px;display:flex;align-items:center;gap:26px;padding:14px 22px}
+.ovB .slot{width:64px;height:64px;padding:10px;flex:none}
+.ovB .tk{font-size:30px}
+.ovB .mc{font-size:30px}
+.ovB .ch{font-size:32px}
+.ovB .w{flex:1}
+.ovB .w .xpw{padding-top:0;display:flex;align-items:center;gap:16px;flex-direction:row-reverse}
+.ovB .w .xpn{position:static;transform:none;font-size:28px}
+.ovB .w .xp{flex:1}
+.ovB .where{font-size:28px;color:var(--mute)}
+.ovC{position:absolute;left:50%;bottom:28px;transform:translateX(-50%);width:1080px}
+.ovC .xpw{padding-top:44px}
+.ovC .hot{display:grid;grid-template-columns:1.1fr 1fr .8fr 1.4fr;margin-top:10px;border:4px solid #000;background:#000;gap:4px}
+.ovC .hot .slot{height:84px;display:flex;align-items:center;justify-content:center;gap:12px;font-size:30px;color:#fff;background:#2C2C30;box-shadow:inset 4px 4px 0 #4A4A50,inset -4px -4px 0 #161618}
+.ovC .hot .slot canvas{width:44px;height:44px;flex:none}
+.ovC .hot .hf{font-size:26px}
+.ovC .hot .s4 span{font-size:30px;color:#C9C9CF}
+.wm{font-family:"VT323",monospace;font-size:44px;letter-spacing:.01em;line-height:1;text-transform:none}
+body.wm1 .wm{font-family:var(--hf),monospace;font-size:inherit}
+@media (max-width:520px){.top{padding:0 16px;height:72px}.brand{gap:10px}.brand canvas{width:32px;height:32px}.wm{font-size:38px}.net{font-size:18px;padding:1px 6px}.wallet{height:48px;width:48px;padding:0;justify-content:center}.wallet span{display:none}}
+</style>
+<body>
+<script>
+const q = new URLSearchParams(location.search), OPT = q.get('opt') || 'A', SCR = q.get('screen') || 'coin';
+const COINS = [
+  {tk:'MIRA', by:'mira_plays', name:'Ranked till Diamond', mc:'$42.1K', ch:38.2, g:62, raised:'52.7', seed:3},
+  {tk:'SHIP', by:'tomasz_codes', name:'Building a game in 24h', mc:'$71.9K', ch:71.5, g:88, raised:'74.8', seed:11},
+  {tk:'OKO', by:'dj_okoro', name:'Sunday vinyl set', mc:'$28.4K', ch:12.4, g:41, raised:'34.9', seed:7},
+  {tk:'LENA', by:'lena.irl', name:'Tokyo night walk', mc:'$22.0K', ch:-2.3, g:33, raised:'28.1', seed:19},
+  {tk:'PAULA', by:'pixelpaula', name:'Speedrun any% in one night', mc:'$13.6K', ch:-6.1, g:18, raised:'15.3', seed:5},
+  {tk:'RAMEN', by:'chef_ren', name:'Ramen from scratch', mc:'$9.8K', ch:4.0, g:9, raised:'7.7', seed:23},
+];
+const TRADES = [['Buy','1.20','28,510','7xKp3f','4s'],['Buy','0.50','11,870','Gq91Lm','9s'],['Sell','0.80','19,240','Bn4tZe','15s'],['Buy','2.00','47,920','mR8vYd','22s'],['Buy','0.10','2,401','Hc2wQa','31s'],['Sell','0.35','8,590','7xKp3f','48s']];
+const pct = c => (c >= 0 ? '+' : '') + c.toFixed(1) + '%', cls = c => c >= 0 ? 'up' : 'down';
+function rng(s){return()=>(s=(s*16807)%2147483647)/2147483647}
+
+// ---------- original 16x16 procedural textures ----------
+function tex(kind, seed=1){
+  const c = document.createElement('canvas'); c.width = c.height = 16; const x = c.getContext('2d'), r = rng(seed*977+kind.length*31);
+  const P = {
+    dirt:['#866043','#79553A','#593D29','#9B7653','#6C4D36'],
+    darkdirt:['#3d2b1e','#36261a','#2a1d13','#45311f','#30221a'],
+    stone:['#7F7F7F','#747474','#8F8F8F','#686868','#9A9A9A'],
+    deep:['#2f2f34','#28282c','#38383e','#222225','#333338'],
+    grass:['#5D9B3A','#6AAA40','#4E8A32','#7CBD4C'],
+  };
+  if (kind === 'planks'){
+    const pl = ['#A2834F','#9C7E4A','#B8945F','#AE8A55'];
+    for(let y=0;y<16;y++)for(let i=0;i<16;i++){x.fillStyle=pl[(r()*4)|0];x.fillRect(i,y,1,1)}
+    x.fillStyle='#6B5130';for(let y=3;y<16;y+=4)x.fillRect(0,y,16,1);
+    [[5,0],[12,4],[2,8],[9,12]].forEach(([a,b])=>x.fillRect(a,b,1,3));
+    return c.toDataURL();
+  }
+  if (kind === 'grassside'){
+    const d = P.dirt; for(let y=0;y<16;y++)for(let i=0;i<16;i++){x.fillStyle=d[(r()*5)|0];x.fillRect(i,y,1,1)}
+    for(let i=0;i<16;i++){const h=3+((r()*3)|0);for(let y=0;y<h;y++){x.fillStyle=P.grass[(r()*4)|0];x.fillRect(i,y,1,1)}}
+    return c.toDataURL();
+  }
+  const p = P[kind]; for(let y=0;y<16;y++)for(let i=0;i<16;i++){x.fillStyle=p[(r()*p.length)|0];x.fillRect(i,y,1,1)}
+  return c.toDataURL();
+}
+
+// ---------- original pixel sprites ----------
+const SPR = {
+  coin:['....aaaa....','..aabbbbaa..','.abbccccbba.','.abccddccba.','abccdccdccba','abcddccddcba','abcdccccdcba','abccdccdccba','.abccddccba.','.abbccccbba.','..aabbbbaa..','....aaaa....'],
+  heart:['.aa...aa.','abba.abba','abbbabbba','abbbbbbba','.abbbbba.','..abbba..','...aba...','....a....'],
+  pick:['.....aaaa.','....abbbba','.....aaaba','......acba','.....acaba','....aca.a.','...aca....','..aca.....','.aca......','aaa.......'],
+  img:['aaaaaaaaaa','abbbbbbbba','abbbbccbba','abbbbccbba','abbbbbbbba','abdbbbbbba','addbbbbdba','adddbbddda','adddddddda','aaaaaaaaaa'],
+};
+const SC = {coin:{a:'#3b2a00',b:'#c98f00',c:'#ffd23f',d:'#fff3a8'},heart:{a:'#2b0000',b:'#e0352b'},pick:{a:'#1d1d1d',b:'#47e0d0',c:'#8a6a3a'},img:{a:'#1d1d1d',b:'#9fd3ff',c:'#ffe066',d:'#4e8a32'}};
+function sprite(name, cls=''){return `<canvas class="${cls}" data-spr="${name}"></canvas>`}
+function drawSprites(){document.querySelectorAll('canvas[data-spr]').forEach(cv=>{const m=SPR[cv.dataset.spr],col=SC[cv.dataset.spr];cv.width=m[0].length;cv.height=m.length;const x=cv.getContext('2d');m.forEach((row,y)=>[...row].forEach((ch,i)=>{if(col[ch]){x.fillStyle=col[ch];x.fillRect(i,y,1,1)}}))})}
+
+// ---------- blocky "game stream" stand-in, drawn low-res ----------
+function scene(cv, seed){
+  const W=cv.width,H=cv.height,x=cv.getContext('2d'),r=rng(seed*7919+13);
+  const pals=[['#1d3b8f','#e94f37','#f6c90e','#3fb950','#7b2cbf','#00b4d8'],['#264653','#2a9d8f','#e9c46a','#f4a261','#e76f51','#8ecae6'],['#3a0ca3','#f72585','#4cc9f0','#ffbe0b','#06d6a0','#ef476f']];
+  const p=pals[seed%3]; x.fillStyle=p[0]; x.fillRect(0,0,W,H);
+  for(let i=0;i<5;i++){x.fillStyle=p[(i+1)%6];x.fillRect(0,Math.round(H*(.35+i*.13)),W,Math.ceil(H*.13))}
+  for(let i=0;i<90;i++){x.fillStyle=p[(r()*6)|0];const s=Math.max(1,Math.round(r()*W/14));x.fillRect((r()*W)|0,(r()*H)|0,s,Math.max(1,Math.round(s*(.5+r()))))}
+  x.fillStyle='#e94f37';x.fillRect(Math.round(W*.36),H-Math.round(H*.07),Math.round(W*.2),Math.max(1,Math.round(H*.025)));
+}
+
+// pixel stair-step chart on a low-res canvas
+function chart(cv, color){
+  const W=cv.width,H=cv.height,x=cv.getContext('2d'),r=rng(101);let v=30,pts=[];
+  for(let i=0;i<W/3;i++){v+=(r()-.38)*6;v=Math.max(4,v);pts.push(v)}
+  const mx=Math.max(...pts),mn=Math.min(...pts);x.fillStyle=color;
+  let py=null;pts.forEach((p,i)=>{const y=Math.round(H-3-(p-mn)/(mx-mn)*(H-6));if(py!==null){for(let k=Math.min(py,y);k<=Math.max(py,y);k++)x.fillRect(i*3,k,2,2)}x.fillRect(i*3,y,3,2);py=y});
+}
+
+const sc = (seed,w,h) => `<canvas class="scene" data-seed="${seed}" width="${w}" height="${h}"></canvas>`;
+const xp = (g, sm) => `<div class="xp${sm?' sm':''}"><b style="width:${g}%"></b><i></i></div>`;
+const topBar = () => `<div class="top" data-tex="${OPT==='B'?'deep':'grassside'}"><div class="brand">${sprite('coin')}<span class="wm">memestream</span><span class="net">Devnet</span></div><div class="wallet">${sprite('heart')}<span class="num">7xKp3f</span></div></div>`;
+
+function coinPage(){
+  const c = COINS[0];
+  const trades = TRADES.map(t=>`<div class="tr num"><span class="${t[0]=='Buy'?'up':'down'}">${t[0]}</span><span>${t[1]} SOL</span><span>${t[2]} ${c.tk}</span><span class="mute">${t[3]}</span><span class="r mute">${t[4]} ago</span></div>`).join('');
+  return topBar() + `<div class="coin">
+    <div><div class="embed">${sc(c.seed,192,108)}<span class="live">Live</span></div>
+      <div class="p" style="margin-top:24px"><div class="ident"><div class="slot">${sc(c.seed,16,16)}</div><div><h1>$${c.tk}</h1><p>${c.name} by ${c.by}</p></div></div>
+      <div class="trades"><h3>Recent trades</h3>${trades}</div></div></div>
+    <div style="display:flex;flex-direction:column;gap:24px">
+      <div class="p"><div class="lbl mute">Market cap</div><div class="cap num">${c.mc}</div><div class="chg up num">${pct(c.ch)} in the last hour</div>
+        <div class="chart"><canvas data-chart width="132" height="40"></canvas></div>
+        <div class="gradlbl"><span>Graduation</span><span class="mute num">${c.raised} of 85 SOL</span></div>
+        <div class="xpw"><div class="xpn num">${c.g}%</div>${xp(c.g)}</div>
+        <div class="fees">${sprite('heart')}<span>80% of fees go to the streamer</span></div></div>
+      <div class="p"><div class="tabs"><div class="mbtn buy">Buy</div><div class="mbtn off">Sell</div></div>
+        <div class="slot amt num">0.5<small>SOL</small></div>
+        <div class="chips num"><span class="slot">0.1</span><span class="slot">0.5</span><span class="slot">1</span><span class="slot">Max</span></div>
+        <div class="get"><span class="mute">You get about</span><span class="num">11,870 ${c.tk}</span></div>
+        <div class="mbtn buy">Buy ${c.tk}</div></div>
+    </div></div>`;
+}
+
+function home(){
+  const hero = `<div class="hero"><div><h1>Live coins</h1><p>Buy the stream you think will pop.</p></div><div class="mbtn">Go live</div></div>
+    <div class="sort"><div class="mbtn">Hot</div><div class="mbtn off">New</div><div class="mbtn off">Close to graduation</div></div>`;
+  if (OPT === 'B') return topBar() + `<div class="home">${hero}<div class="grid">${COINS.map(c=>`<div class="p tile"><div class="slot">${sc(c.seed,96,54)}<span class="live">Live</span></div>
+    <div class="meta"><div><h4>$${c.tk}</h4><p>${c.name}</p></div><div style="text-align:right"><h4 class="num">${c.mc}</h4><p class="num ${cls(c.ch)}">${pct(c.ch)}</p></div></div>${xp(c.g,1)}</div>`).join('')}</div></div>`;
+  return topBar() + `<div class="home">${hero}<div class="p">${COINS.map(c=>`<div class="row"><div class="slot">${sc(c.seed,48,27)}</div>
+    <div><h4>$${c.tk}</h4><p>${c.name} by ${c.by}</p></div><div class="m num">${c.mc}</div><div class="c num ${cls(c.ch)}">${pct(c.ch)}</div>
+    <div class="g num"><div style="margin-bottom:6px">${c.g}% to graduation</div>${xp(c.g,1)}</div></div>`).join('')}</div></div>`;
+}
+
+function goLive(){
+  return topBar() + `<div class="form"><div class="p" style="padding:32px">
+    <h1>Go live</h1><div class="sub mute">Launch a coin for this stream in one transaction.</div>
+    <div class="two"><div class="f"><label>Image</label><div class="slot drop">${sprite('img')}Add image</div></div>
+      <div><div class="f"><label>Stream name</label><div class="slot in">Ranked till Diamond</div></div>
+      <div class="f"><label>Ticker</label><div class="slot in">$MIRA</div></div></div></div>
+    <div class="f"><label>Stream link</label><div class="slot in"><span class="ph">Twitch, YouTube or Kick link</span></div></div>
+    <div class="earn">${sprite('heart')}<span>80% of trade fees go to you. Your wallet can't buy this coin.</span></div>
+    <div class="mbtn buy">Launch coin</div></div></div>`;
+}
+
+// ---------- OBS overlay (week 2, style B). v=A panel / B top strip / C hotbar ----------
+function overlay(){
+  const c = COINS[0], v = q.get('v') || 'A', ph = q.get('phase') || 'live';
+  const bg = `<canvas class="scene ovbg" data-seed="${c.seed+2}" width="240" height="135"></canvas>`;
+  const done = ph === 'grad';
+  const bar = (big) => done
+    ? `<div class="xpw"><div class="xpn">Graduated</div><div class="xp${big?' big':''}"><b style="width:100%"></b><i></i></div></div>`
+    : `<div class="xpw"><div class="xpn num">${c.g}%</div><div class="xp${big?' big':''}"><b style="width:${c.g}%"></b><i></i></div></div>`;
+  if (v === 'A') return bg + `<div class="p ovA"><div class="oh"><div class="slot">${sprite('coin')}</div><div><div class="tk hf">$${c.tk}</div><div class="where">memestream.lol/mira</div></div>
+    <div class="r"><div class="mc hf num">${c.mc}</div><div class="ch up num">${pct(c.ch)}</div></div></div>${bar()}<div class="gl">${done?'Now trading on Meteora':'to graduation'}</div></div>`;
+  if (v === 'B') return bg + `<div class="p ovB"><div class="slot">${sprite('coin')}</div><div class="tk hf">$${c.tk}</div><div class="mc hf num">${c.mc}</div><div class="ch up num">${pct(c.ch)}</div>
+    <div class="w">${bar()}</div><div class="where">memestream.lol/mira</div></div>`;
+  return bg + `<div class="ovC">${bar(true)}<div class="hot">
+    <div class="slot s1">${sprite('coin')}<span class="hf">$${c.tk}</span></div><div class="slot s2"><span class="hf num">${c.mc}</span></div>
+    <div class="slot s3"><span class="up num">${pct(c.ch)}</span></div><div class="slot s4"><span>memestream.lol/mira</span></div></div></div>`;
+}
+
+document.body.className = OPT;
+if (SCR === 'overlay') document.body.classList.add('ov');
+if (q.get('wm') === '1') document.body.classList.add('wm1');
+const pageTex = {A:'darkdirt', B:'deep', C:null}[OPT];
+if (pageTex) document.body.style.backgroundImage = `url(${tex(pageTex,4)})`;
+document.body.innerHTML = ({coin: coinPage, home, golive: goLive, overlay})[SCR]();
+if (SCR === 'overlay') document.body.style.backgroundImage = 'none';
+document.querySelectorAll('[data-tex]').forEach(e => e.style.backgroundImage = `url(${tex(e.dataset.tex, 2)})`);
+if (OPT === 'A') document.querySelectorAll('.top').forEach(e => e.style.backgroundImage = `url(${tex('grassside',2)})`);
+if (OPT === 'C') document.querySelectorAll('.p').forEach(e => e.style.borderTop = '14px solid #4E8A32');
+if (OPT === 'B') document.querySelectorAll('.mbtn:not(.buy):not(.off)').forEach(e => e.style.backgroundImage = `url(${tex('stone',6)})`);
+if (OPT !== 'B') document.querySelectorAll('.mbtn:not(.buy):not(.off)').forEach(e => e.style.cssText += `;background-image:url(${tex('stone',6)});background-size:64px 64px`);
+document.querySelectorAll('canvas.scene').forEach(c => scene(c, +c.dataset.seed));
+document.querySelectorAll('canvas[data-chart]').forEach(c => chart(c, {A:'#2E8B22',B:'#80FF20',C:'#2E1F0E'}[OPT]));
+drawSprites();
+</script>

@@ -1,0 +1,322 @@
+
+> memestream@0.1.0 dev
+> next dev -H 127.0.0.1
+
+▲ Next.js 16.4.0 (Turbopack)
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+- Environments: .env.local
+✓ Ready in 186ms
+⚠ `cacheComponents` is enabled without a corresponding `partialPrefetching` option. Set `partialPrefetching` to either `true` or `false`.
+
+The only reason to set `partialPrefetching` to `false` is if you're migrating an older Cache Components app. The initial release of Cache Components did not include Partial Prefetching. New projects should enable both Cache Components and Partial Prefetching.
+
+Both Cache Components and Partial Prefetching will be enabled everywhere in the next major release, and the old configurations will be removed.
+
+Learn more: https://nextjs.org/docs/app/guides/adopting-partial-prefetching
+✓ Running next.config.ts took 14ms
+- Cache Components enabled
+
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET / 200 in 238ms (next.js: 144ms, application-code: 94ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET / 200 in 14ms (next.js: 0.6ms, application-code: 13ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/dev-wallet 200 in 98ms (next.js: 51ms, application-code: 47ms)
+ GET /api/dev-wallet 200 in 2ms (next.js: 0.5ms, application-code: 1.6ms)
+ GET /api/coins 200 in 225ms (next.js: 16ms, application-code: 209ms)
+ GET /api/dev-wallet 200 in 3ms (next.js: 0.6ms, application-code: 2.0ms)
+ GET /go-live 200 in 15ms (next.js: 3ms, application-code: 12ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ POST /api/tx/launch 200 in 441ms (next.js: 422ms, application-code: 19ms)
+ POST /api/dev-wallet 200 in 95ms (next.js: 0.5ms, application-code: 94ms)
+ GET /api/tx/status?signature=2cJbUdAdjYcoEWCETu8DPVciN7sSVjcHrmiZvx4SD3y7WvwmTA5ZihC741Wmkyw6qWhkdzreZQnqKp51wYghVJMZ 200 in 15ms (next.js: 9ms, application-code: 6ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/9CgWD4rAwe6f9YRpsHCE5TSfZpFvkG44DDcPQ3iMXZGs 200 in 970ms (next.js: 4ms, generate-params: 181ms, application-code: 785ms)
+ GET / 200 in 12ms (next.js: 0.4ms, application-code: 12ms)
+ GET /api/coins/9CgWD4rAwe6f9YRpsHCE5TSfZpFvkG44DDcPQ3iMXZGs?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 159ms
+ GET /api/dev-wallet 200 in 1.6ms (next.js: 0.4ms, application-code: 1.3ms)
+ GET /api/dev-wallet 200 in 1.5ms (next.js: 0.2ms, application-code: 1.2ms)
+ GET /api/coins 200 in 1.5ms (next.js: 0.4ms, application-code: 1.1ms)
+ GET /api/dev-wallet 200 in 1.6ms (next.js: 0.3ms, application-code: 1.3ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj 200 in 643ms (next.js: 0.6ms, generate-params: 1.0ms, application-code: 642ms)
+ GET /api/quote?mint=AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj&side=buy&amount=0.5 200 in 19ms (next.js: 8ms, application-code: 11ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 536ms (next.js: 1.7ms, application-code: 534ms)
+ POST /api/tx/trade 200 in 99ms (next.js: 1.3ms, application-code: 98ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 25.9s (next.js: 1.9ms, application-code: 25.9s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj&side=sell&amount=0 400 in 629ms (next.js: 0.5ms, application-code: 628ms)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 25.8s (next.js: 2.0ms, application-code: 25.8s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj&side=buy&amount=3 200 in 12.5s (next.js: 0.8ms, application-code: 12.5s)
+ POST /api/tx/trade 200 in 218ms (next.js: 1.8ms, application-code: 216ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+trade history unavailable: failed to get signatures for address: Internal error
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 57s (next.js: 2ms, application-code: 57s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ POST /api/dev-wallet 200 in 60s (next.js: 0.5ms, application-code: 60s)
+ GET /api/tx/status?signature=4SK72dffCZ5ZUTtUWix7PUa5YetEgwVnB7gd7JuLDhHmWHYGT89EuySxhMWZxMBYQUChKfHjCZasqcQN8K7AN6Mq 200 in 4ms (next.js: 0.5ms, application-code: 3ms)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 25.3s (next.js: 2ms, application-code: 25.3s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 785ms (next.js: 1.6ms, application-code: 784ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ POST /api/tx/graduate 200 in 555ms (next.js: 1.6ms, application-code: 553ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+Error: Simulation failed. 
+Message: Transaction simulation failed: Error processing Instruction 4: custom program error: 0x177d: 31 log messages:
+Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]
+Program log: CreateIdempotent
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 183 of 997649 compute units
+Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+Program 11111111111111111111111111111111 invoke [2]
+Program 11111111111111111111111111111111 success
+Program log: Initialize the associated token account
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 38 of 992556 compute units
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 230 of 990094 compute units
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 13419 of 1003000 compute units
+Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success
+Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]
+Program log: CreateIdempotent
+Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 7338 of 989581 compute units
+Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success
+Program 11111111111111111111111111111111 invoke [1]
+Program 11111111111111111111111111111111 success
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 201 of 982093 compute units
+Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN invoke [1]
+Program log: Instruction: Swap2
+Program log: AnchorError thrown in programs/dynamic-bonding-curve/src/instructions/swap/process_swap.rs:224. Error Code: PoolIsCompleted. Error Number: 6013. Error Message: Pool is completed.
+Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN consumed 13734 of 981892 compute units
+Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN failed: custom program error: 0x177d. 
+Logs: 
+[
+  "Program 11111111111111111111111111111111 invoke [1]",
+  "Program 11111111111111111111111111111111 success",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 201 of 982093 compute units",
+  "Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success",
+  "Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN invoke [1]",
+  "Program log: Instruction: Swap2",
+  "Program log: AnchorError thrown in programs/dynamic-bonding-curve/src/instructions/swap/process_swap.rs:224. Error Code: PoolIsCompleted. Error Number: 6013. Error Message: Pool is completed.",
+  "Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN consumed 13734 of 981892 compute units",
+  "Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN failed: custom program error: 0x177d"
+]. 
+Catch the `SendTransactionError` and call `getLogs()` on it for full details.
+    at async sendWithLocalForkRetry (src/app/api/dev-wallet/route.ts:39:14)
+    at async POST (src/app/api/dev-wallet/route.ts:63:23)
+  37 |   for (let attempt = 1; ; attempt++) {
+  38 |     try {
+> 39 |       return await connection.sendRawTransaction(raw);
+     |              ^
+  40 |     } catch (error) {
+  41 |       if (attempt >= 6 || !String((error as Error).message).includes("Failed to fetch accounts from remote")) throw error;
+  42 |       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt)); {
+  signature: '',
+  transactionMessage: 'Transaction simulation failed: Error processing Instruction 4: custom program error: 0x177d: 31 log messages:\n' +
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]\n' +
+    'Program log: CreateIdempotent\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 183 of 997649 compute units\n' +
+    'Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success\n' +
+    'Program 11111111111111111111111111111111 invoke [2]\n' +
+    'Program 11111111111111111111111111111111 success\n' +
+    'Program log: Initialize the associated token account\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 38 of 992556 compute units\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 230 of 990094 compute units\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success\n' +
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 13419 of 1003000 compute units\n' +
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\n' +
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]\n' +
+    'Program log: CreateIdempotent\n' +
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 7338 of 989581 compute units\n' +
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success\n' +
+    'Program 11111111111111111111111111111111 invoke [1]\n' +
+    'Program 11111111111111111111111111111111 success\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 201 of 982093 compute units\n' +
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success\n' +
+    'Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN invoke [1]\n' +
+    'Program log: Instruction: Swap2\n' +
+    'Program log: AnchorError thrown in programs/dynamic-bonding-curve/src/instructions/swap/process_swap.rs:224. Error Code: PoolIsCompleted. Error Number: 6013. Error Message: Pool is completed.\n' +
+    'Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN consumed 13734 of 981892 compute units\n' +
+    'Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN failed: custom program error: 0x177d',
+  transactionLogs: [
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]',
+    'Program log: CreateIdempotent',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 183 of 997649 compute units',
+    'Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program 11111111111111111111111111111111 invoke [2]',
+    'Program 11111111111111111111111111111111 success',
+    'Program log: Initialize the associated token account',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 38 of 992556 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 230 of 990094 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 13419 of 1003000 compute units',
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success',
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]',
+    'Program log: CreateIdempotent',
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 7338 of 989581 compute units',
+    'Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success',
+    'Program 11111111111111111111111111111111 invoke [1]',
+    'Program 11111111111111111111111111111111 success',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [1]',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 201 of 982093 compute units',
+    'Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success',
+    'Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN invoke [1]',
+    'Program log: Instruction: Swap2',
+    'Program log: AnchorError thrown in programs/dynamic-bonding-curve/src/instructions/swap/process_swap.rs:224. Error Code: PoolIsCompleted. Error Number: 6013. Error Message: Pool is completed.',
+    'Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN consumed 13734 of 981892 compute units',
+    'Program dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN failed: custom program error: 0x177d'
+  ]
+}
+ POST /api/dev-wallet 500 in 3.1min (next.js: 0.3ms, application-code: 3.1min)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 26.6s (next.js: 3ms, application-code: 26.6s)
+ POST /api/dev-wallet 200 in 31.1s (next.js: 0.3ms, application-code: 31.1s)
+ GET /api/tx/status?signature=2gUgArTsxSs9mRcz62NJx3Jx373Nxng2k3SG6oePA7pFAUPQp6xnaSxvZtxVFGLAexBbfvXNCdeiTKkX1anwtNdy 200 in 4ms (next.js: 0.5ms, application-code: 4ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/AtRoGsT84tGspVniQKEPqeboDTXCEaoGnC5Vaa7XM9Yj?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 612ms (next.js: 1.7ms, application-code: 611ms)
+ GET / 200 in 18ms (next.js: 0.6ms, application-code: 17ms)
+ GET /api/dev-wallet 200 in 1.8ms (next.js: 0.3ms, application-code: 1.5ms)
+ GET /api/dev-wallet 200 in 1.3ms (next.js: 0.4ms, application-code: 1.0ms)
+ GET /api/dev-wallet 200 in 1.0ms (next.js: 0.2ms, application-code: 0.8ms)
+ GET /api/coins 200 in 166ms (next.js: 0.3ms, application-code: 166ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/6igJBkGaiqR4XE9ewfjYWob9wDUWKaYVEvCgpMK7aNQm 200 in 890ms (next.js: 0.7ms, generate-params: 1.1ms, application-code: 888ms)
+ POST /api/tx/claim 200 in 21ms (next.js: 1.7ms, application-code: 19ms)
+ POST /api/dev-wallet 200 in 94ms (next.js: 0.3ms, application-code: 94ms)
+ GET /api/tx/status?signature=3bgfhzZgU3co61S376Dm14ragb4x5X7hBBMQbamcgFaazT9TEywawwwztrWR7YZDkGwif5prMVBZdhfT4wmwAQa8 200 in 4ms (next.js: 0.4ms, application-code: 4ms)
+ GET /api/coins/6igJBkGaiqR4XE9ewfjYWob9wDUWKaYVEvCgpMK7aNQm?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 257ms (next.js: 1.9ms, application-code: 255ms)
+ GET /api/quote?mint=6igJBkGaiqR4XE9ewfjYWob9wDUWKaYVEvCgpMK7aNQm&side=buy&amount=0.5 200 in 10ms (next.js: 0.4ms, application-code: 10ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/6igJBkGaiqR4XE9ewfjYWob9wDUWKaYVEvCgpMK7aNQm?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 123ms (next.js: 0.3ms, application-code: 123ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET / 200 in 18ms (next.js: 0.4ms, application-code: 17ms)
+ GET /api/dev-wallet 200 in 1.8ms (next.js: 0.4ms, application-code: 1.4ms)
+ GET /api/dev-wallet 200 in 1.3ms (next.js: 0.4ms, application-code: 0.9ms)
+ GET /api/coins 200 in 90ms (next.js: 0.2ms, application-code: 90ms)
+ GET /api/dev-wallet 200 in 1.6ms (next.js: 0.4ms, application-code: 1.2ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf 200 in 721ms (next.js: 1.0ms, generate-params: 1.6ms, application-code: 718ms)
+ GET /api/quote?mint=F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf&side=buy&amount=0.1 200 in 12ms (next.js: 0.4ms, application-code: 12ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 507ms (next.js: 1.4ms, application-code: 506ms)
+ POST /api/tx/trade 200 in 105ms (next.js: 1.7ms, application-code: 103ms)
+ POST /api/dev-wallet 200 in 107ms (next.js: 0.3ms, application-code: 107ms)
+ GET /api/tx/status?signature=5pSXTvnwszNqMuuPFjKA4d2Fiwj297mezYyDXmZnUdNcwBCjTENjp27hAhMqY7p68hjJGuxYTu45eAz75uSJp3Wi 200 in 4ms (next.js: 0.4ms, application-code: 4ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 520ms (next.js: 1.2ms, application-code: 518ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 522ms (next.js: 2ms, application-code: 520ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 518ms (next.js: 3ms, application-code: 516ms)
+ GET / 200 in 15ms (next.js: 0.3ms, application-code: 15ms)
+ GET /api/dev-wallet 200 in 2.0ms (next.js: 0.3ms, application-code: 1.6ms)
+ GET /api/dev-wallet 200 in 1.5ms (next.js: 0.3ms, application-code: 1.2ms)
+ GET /api/dev-wallet 200 in 1.5ms (next.js: 0.3ms, application-code: 1.2ms)
+ GET /api/coins 200 in 758ms (next.js: 0.3ms, application-code: 758ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf 200 in 1479ms (next.js: 1.0ms, generate-params: 1.6ms, application-code: 1476ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf&side=sell&amount=10000000 200 in 10ms (next.js: 0.5ms, application-code: 9ms)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 751ms (next.js: 1.9ms, application-code: 749ms)
+ POST /api/tx/trade 200 in 106ms (next.js: 1.8ms, application-code: 104ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 29.4s (next.js: 3ms, application-code: 29.4s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 25.9s (next.js: 3ms, application-code: 25.9s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 27.1s (next.js: 3ms, application-code: 27.1s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 30.9s (next.js: 1.7ms, application-code: 30.9s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 26.0s (next.js: 3ms, application-code: 26.0s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ POST /api/dev-wallet 200 in 3.0min (next.js: 0.3ms, application-code: 3.0min)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 14.9s (next.js: 2ms, application-code: 14.9s)
+Error: Simulation failed. 
+Message: Transaction verification failed for transaction Internal error: "Failed to fetch accounts from remote: error sending request for url (https://api.devnet.solana.com/)". 
+
+Catch the `SendTransactionError` and call `getLogs()` on it for full details.
+    at async sendWithLocalForkRetry (src/app/api/dev-wallet/route.ts:39:14)
+    at async POST (src/app/api/dev-wallet/route.ts:63:23)
+  37 |   for (let attempt = 1; ; attempt++) {
+  38 |     try {
+> 39 |       return await connection.sendRawTransaction(raw);
+     |              ^
+  40 |     } catch (error) {
+  41 |       if (attempt >= 6 || !String((error as Error).message).includes("Failed to fetch accounts from remote")) throw error;
+  42 |       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt)); {
+  signature: '',
+  transactionMessage: 'Transaction verification failed for transaction Internal error: "Failed to fetch accounts from remote: error sending request for url (https://api.devnet.solana.com/)"',
+  transactionLogs: undefined
+}
+ GET / 200 in 13ms (next.js: 0.4ms, application-code: 13ms)
+ GET /api/dev-wallet 200 in 1.3ms (next.js: 0.3ms, application-code: 1.0ms)
+ GET /api/dev-wallet 200 in 0.9ms (next.js: 0.2ms, application-code: 0.7ms)
+ GET /api/dev-wallet 200 in 1.8ms (next.js: 0.4ms, application-code: 1.4ms)
+ GET /api/coins 200 in 257ms (next.js: 0.2ms, application-code: 257ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf 200 in 560ms (next.js: 1.0ms, generate-params: 1.6ms, application-code: 557ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf&side=sell&amount=10000000 200 in 11ms (next.js: 0.5ms, application-code: 11ms)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 527ms (next.js: 1.4ms, application-code: 525ms)
+ POST /api/tx/trade 200 in 104ms (next.js: 1.6ms, application-code: 102ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 29.5s (next.js: 3ms, application-code: 29.5s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 26.0s (next.js: 2ms, application-code: 26.0s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 27.0s (next.js: 1.9ms, application-code: 27.0s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 30.2s (next.js: 3ms, application-code: 30.2s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 26.8s (next.js: 3ms, application-code: 26.8s)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 14.9s (next.js: 2ms, application-code: 14.9s)
+ POST /api/dev-wallet 200 in 3.0min (next.js: 0.2ms, application-code: 3.0min)
+Error: Simulation failed. 
+Message: Transaction verification failed for transaction Internal error: "Failed to fetch accounts from remote: error sending request for url (https://api.devnet.solana.com/)". 
+
+Catch the `SendTransactionError` and call `getLogs()` on it for full details.
+    at async sendWithLocalForkRetry (src/app/api/dev-wallet/route.ts:39:14)
+    at async POST (src/app/api/dev-wallet/route.ts:63:23)
+  37 |   for (let attempt = 1; ; attempt++) {
+  38 |     try {
+> 39 |       return await connection.sendRawTransaction(raw);
+     |              ^
+  40 |     } catch (error) {
+  41 |       if (attempt >= 6 || !String((error as Error).message).includes("Failed to fetch accounts from remote")) throw error;
+  42 |       await new Promise((resolve) => setTimeout(resolve, 1000 * attempt)); {
+  signature: '',
+  transactionMessage: 'Transaction verification failed for transaction Internal error: "Failed to fetch accounts from remote: error sending request for url (https://api.devnet.solana.com/)"',
+  transactionLogs: undefined
+}
+ POST /api/tx/trade 200 in 242ms (next.js: 1.6ms, application-code: 240ms)
+ POST /api/tx/claim 400 in 8ms (next.js: 0.4ms, application-code: 8ms)
+ POST /api/tx/trade 200 in 89ms (next.js: 0.4ms, application-code: 88ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+[?25h

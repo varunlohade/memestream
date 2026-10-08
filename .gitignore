@@ -39,3 +39,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# devnet keys
+.keys/
+*.keypair.json
+
+# cached devnet program/account snapshots for the offline local chain
+.cache/

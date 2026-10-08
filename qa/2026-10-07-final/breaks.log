@@ -1,0 +1,13 @@
+A SHIP age s: 229 sol before 18.844961934
+A after buy sol 18.644956934 coins 79334347.324533
+A buttons after buy: CEmpNR / Buy[tab] / Sell[tab] / 0.1 / 0.5 / 1 / Max / Buy SHIP
+A after sell sol 18.840576131 coins 0 loss SOL 0.004386 loss % 2.19
+B spent SOL 0.102044 my new trades 1 api POSTs [
+  '2026-10-07T17:44:47.252Z /api/tx/trade',
+  '2026-10-07T17:44:47.282Z /api/dev-wallet'
+]
+C spent SOL 0.100005 my new trades 1 api POSTs [
+  '2026-10-07T17:44:52.203Z /api/tx/trade',
+  '2026-10-07T17:44:52.233Z /api/dev-wallet'
+]
+C page text after reload: memestream | Local | CEmpNR | Your last transaction went through. | Live | $OKO | Sunday vinyl set by ETZ5Ha | Recent trades | Buy | 0.1 SOL | 100.9M OKO | CEmpNR | - ago | Buy | 0.1 SOL | 135.5M OKO | CEmpNR | 10s ago | Buy | 0.15 SOL | 141.1M OKO | 6NTm4S | 4m ago | Market cap | 1.12 SOL | +5.6% over recent trades | Graduation | 0.274 of 1.5 SOL | 18% | 80% of fees go to the streamer | Buy | Sell | SOL | 0.1 | 0.5 | 1 | Max | You hold | 236.3M OKO · 18.64 SOL | You get about | 268.5M OKO | Buy OKO

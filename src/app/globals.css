@@ -1,26 +1,213 @@
+/* memestream look B ("Deepslate night"). Values from design/mock/mc.html?opt=B and design/SPEC.md. */
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --panel: #2c2c30;
+  --fg: #ededed;
+  --mute: #9a9aa2;
+  --hi: #4a4a50;
+  --lo: #161618;
+  --edge: #000;
+  --slot: #1c1c1f;
+  --slothi: #3e3e44;
+  --slotlo: #0b0b0c;
+  --up: #5cff6a;
+  --down: #ff5a4e;
+  --xp: #80ff20;
+  --btn: #3e3e44;
+  --buy: #17a34a;
+  --page: #18181a;
+  /* Fonts come from next/font in layout.tsx. */
+  --hf: var(--font-heading), monospace;
+  --bf: var(--font-body), monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+* { box-sizing: border-box; }
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  color: var(--fg);
+  background-color: var(--page);
+  background-size: 96px 96px;
+  font-family: var(--bf);
+  image-rendering: pixelated;
 }
+h1, h2, h3, h4, .hf { font-family: var(--hf); font-weight: 400; margin: 0; }
+p { margin: 0; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; color: inherit; cursor: pointer; }
+input { font: inherit; }
+.num { font-variant-numeric: tabular-nums; }
+.up { color: var(--up); }
+.down { color: var(--down); }
+.mute { color: var(--mute); }
+canvas { image-rendering: pixelated; }
+
+/* Bevelled block panel and inset slot. */
+.p { background: var(--panel); border: 4px solid var(--edge); box-shadow: inset 4px 4px 0 var(--hi), inset -4px -4px 0 var(--lo); padding: 22px; }
+.slot { background: var(--slot); box-shadow: inset 4px 4px 0 var(--slotlo), inset -4px -4px 0 var(--slothi); }
+
+/* Buttons. */
+.mbtn {
+  display: flex; align-items: center; justify-content: center; height: 60px; padding: 0 18px;
+  background: var(--btn); background-size: 64px 64px; border: 4px solid #000;
+  box-shadow: inset 4px 4px 0 rgba(255,255,255,.4), inset -4px -6px 0 rgba(0,0,0,.4);
+  color: #fff; font-family: var(--hf); font-size: 20px; text-shadow: 3px 3px 0 rgba(0,0,0,.5);
+}
+.mbtn.buy { background: var(--buy); }
+.mbtn.sell { background: #b8372e; }
+.mbtn.off { background: #3a3a3a; color: #aaa; text-shadow: none; }
+.mbtn:disabled { filter: grayscale(.7) brightness(.7); cursor: not-allowed; }
+.mbtn:focus-visible, .slot:focus-visible, input:focus-visible { outline: 4px solid var(--xp); outline-offset: 2px; }
+
+/* XP-style graduation bar: 18 segments, percent floats above. */
+.xpw { position: relative; padding-top: 30px; }
+.xpn { position: absolute; left: 50%; top: 0; transform: translateX(-50%); font-family: var(--hf); font-size: 26px; color: var(--xp); -webkit-text-stroke: 6px #000; paint-order: stroke fill; line-height: 1; white-space: nowrap; }
+.xp { height: 24px; background: #1a1a1a; border: 4px solid #000; position: relative; overflow: hidden; }
+.xp b { display: block; height: 100%; background: var(--xp); box-shadow: inset 0 4px 0 rgba(255,255,255,.45), inset 0 -4px 0 rgba(0,0,0,.25); }
+.xp i { position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 calc(5.555% - 4px), #000 calc(5.555% - 4px) 5.555%); }
+.xp.sm { height: 16px; border-width: 3px; }
+
+/* Top bar. */
+.top { display: flex; align-items: center; justify-content: space-between; height: 88px; padding: 0 40px; border-bottom: 4px solid #000; background-size: 64px 64px; }
+.brand { display: flex; align-items: center; gap: 14px; color: #fff; text-shadow: 3px 3px 0 #000; }
+.brand canvas { width: 40px; height: 40px; }
+.wm { font-family: var(--bf); font-size: 44px; line-height: 1; }
+.net { font-family: var(--bf); font-size: 22px; color: #fff; background: #000; padding: 2px 10px; text-shadow: none; }
+.wallet { display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 16px 0 10px; font-size: 24px; color: #fff; background: rgba(0,0,0,.55); border: 4px solid #000; }
+.wallet canvas { width: 28px; height: 28px; }
+
+.live { position: absolute; left: 16px; top: 16px; background: #c62828; color: #fff; font-family: var(--hf); font-size: 16px; padding: 6px 10px; border: 3px solid #000; }
+.fees { display: flex; align-items: center; gap: 12px; margin-top: 18px; padding: 10px 12px; font-size: 26px; background: rgba(255,255,255,.06); }
+.fees canvas { width: 32px; height: 32px; flex: none; }
+.notice { padding: 12px 14px; font-size: 24px; background: rgba(255,255,255,.06); border-left: 4px solid var(--xp); }
+.notice.err { border-left-color: var(--down); }
+
+/* Phones: from the spec's ≤520px header rule. */
+@media (max-width: 520px) {
+  .top { padding: 0 16px; height: 72px; }
+  .brand { gap: 10px; }
+  .brand canvas { width: 32px; height: 32px; }
+  .wm { font-size: 38px; }
+  .net { font-size: 18px; padding: 1px 6px; }
+  .wallet { height: 48px; width: 48px; padding: 0; justify-content: center; }
+  .wallet span { display: none; }
+}
+
+/* Home (B: 3-column tiles). */
+.home { padding: 32px 40px 40px; }
+.hero { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 22px; }
+.hero h1 { font-size: 44px; color: #fff; text-shadow: 4px 4px 0 #000; }
+.hero p { font-size: 30px; color: #fff; margin-top: 10px; text-shadow: 2px 2px 0 #000; }
+.hero-cta { width: 260px; }
+.sort { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+.sort .mbtn { height: 48px; font-size: 18px; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 18px; }
+.tile { padding: 14px; display: block; }
+.tile .thumb { aspect-ratio: 16/9; padding: 6px; position: relative; }
+.tile .live { left: 14px; top: 14px; }
+.tile .meta { display: flex; justify-content: space-between; align-items: flex-end; gap: 10px; margin: 14px 0 12px; }
+.tile h4 { font-size: 22px; }
+.tile p { font-size: 24px; margin-top: 4px; }
+@media (max-width: 1000px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) {
+  .home { padding: 20px 16px 32px; }
+  .grid { grid-template-columns: 1fr; }
+  .hero { flex-direction: column; align-items: flex-start; }
+  .hero h1 { font-size: 34px; }
+  .hero p { font-size: 24px; }
+  .hero-cta { width: 100%; }
+}
+
+/* Coin page. */
+.coin { display: grid; grid-template-columns: 1fr 440px; gap: 32px; padding: 32px 40px 40px; }
+.coin .side { display: flex; flex-direction: column; gap: 24px; }
+.embed { position: relative; aspect-ratio: 16/9; border: 4px solid #000; background: #000; }
+.ident { display: flex; gap: 18px; align-items: center; }
+.ident .slot { width: 84px; height: 84px; padding: 8px; flex: none; }
+.ident h1 { font-size: 36px; }
+.ident p { font-size: 26px; margin-top: 6px; }
+.lbl { font-size: 24px; }
+.cap { font-family: var(--hf); font-size: 46px; margin-top: 8px; line-height: 1.05; }
+.chg { font-size: 26px; margin-top: 4px; }
+.chart { margin-top: 14px; height: 120px; }
+.gradlbl { display: flex; justify-content: space-between; font-size: 24px; margin-top: 20px; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+.tabs .mbtn { height: 52px; }
+.amt { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 68px; padding: 0 20px; font-size: 40px; color: #fff; }
+.amt input { width: 100%; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 40px; text-shadow: 3px 3px 0 #3f3f3f; outline: none; }
+.amt small { font-size: 26px; color: #ddd; }
+.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 14px; }
+.chips button { height: 52px; border: 0; font-size: 28px; color: #fff; text-shadow: 2px 2px 0 #3f3f3f; }
+.get { display: flex; justify-content: space-between; font-size: 26px; margin-bottom: 14px; }
+.trades { margin-top: 28px; }
+.trades h2 { font-size: 22px; margin-bottom: 12px; }
+.trade-list { list-style: none; margin: 0; padding: 0; }
+.tr { display: grid; grid-template-columns: 70px 1fr 1fr 1fr 90px; gap: 8px; font-size: 26px; padding: 8px 0; border-top: 4px solid rgba(255,255,255,.07); }
+.tr .r { text-align: right; }
+.tag { margin-left: 8px; font-weight: 400; font-size: 18px; color: #000; background: var(--xp); padding: 0 6px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (max-width: 1000px) { .coin { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .coin { padding: 20px 16px 32px; gap: 20px; }
+  .tr { grid-template-columns: 50px 1fr 1fr 60px; font-size: 22px; }
+  .tr > :nth-child(4) { display: none; }
+  .cap { font-size: 36px; }
+}
+
+/* Go live. */
+.form { max-width: 640px; margin: 36px auto 40px; padding: 0 16px; }
+.form h1 { font-size: 38px; }
+.form .sub { font-size: 28px; margin: 10px 0 24px; }
+.f { display: block; margin-bottom: 18px; }
+.flabel { display: block; font-size: 26px; margin-bottom: 6px; }
+.in { width: 100%; height: 60px; padding: 0 18px; border: 0; font-size: 30px; color: #fff; text-shadow: 2px 2px 0 #3f3f3f; outline: none; }
+.in::placeholder { color: #8a8a90; text-shadow: none; }
+.two { display: grid; grid-template-columns: 170px 1fr; gap: 20px; }
+.drop { width: 170px; height: 170px; padding: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px; text-align: center; }
+.earn { display: flex; gap: 14px; align-items: center; font-size: 26px; margin: 6px 0 20px; padding: 14px; background: rgba(255,255,255,.06); }
+.earn canvas { width: 40px; height: 40px; flex: none; }
+@media (max-width: 640px) {
+  .form { margin-top: 20px; }
+  .two { grid-template-columns: 1fr; }
+  .drop { width: 120px; height: 120px; }
+}
+.chips.four { grid-template-columns: repeat(4, 1fr); }
+.chips button:disabled { opacity: .45; cursor: not-allowed; }
+.wallet-panel { position: absolute; right: 0; top: 60px; z-index: 10; width: min(320px, calc(100vw - 32px)); display: grid; gap: 8px; }
+.wallet-panel .mbtn { height: 52px; font-size: 16px; }
+.tx-banner { padding: 16px 40px 0; }
+@media (max-width: 640px) { .tx-banner { padding: 12px 16px 0; } }
+
+/* OBS overlay (look B), 1920×1080, transparent. Values from design/mock/mc.html (overlay section). */
+.overlay-root { position: relative; width: 1920px; height: 1080px; overflow: hidden; }
+.overlay-root .xpn { font-size: 34px; -webkit-text-stroke: 8px #000; }
+.overlay-root .xp { height: 30px; }
+.overlay-root .xp.big { height: 36px; }
+.overlay-root .slot canvas { width: 100%; height: 100%; }
+.overlay-preview-bg { position: absolute; inset: 0; }
+.ovA { position: absolute; left: 40px; bottom: 40px; width: 600px; padding: 22px 26px; }
+.ovA .oh { display: grid; grid-template-columns: 76px 1fr auto; gap: 18px; align-items: center; margin-bottom: 16px; }
+.ovA .slot { width: 76px; height: 76px; padding: 12px; }
+.ovA .tk { font-size: 32px; }
+.ovA .where { font-size: 28px; color: var(--mute); margin-top: 6px; }
+.ovA .r { text-align: right; }
+.ovA .mc { font-size: 36px; }
+.ovA .ch { font-size: 32px; margin-top: 4px; }
+.ovA .gl { font-size: 28px; text-align: center; margin-top: 8px; color: var(--mute); }
+.ovB { position: absolute; left: 40px; top: 32px; right: 40px; display: flex; align-items: center; gap: 26px; padding: 14px 22px; }
+.ovB .slot { width: 64px; height: 64px; padding: 10px; flex: none; }
+.ovB .tk, .ovB .mc { font-size: 30px; }
+.ovB .ch { font-size: 32px; }
+.ovB .w { flex: 1; }
+.ovB .w .xpw { padding-top: 0; display: flex; align-items: center; gap: 16px; flex-direction: row-reverse; }
+.ovB .w .xpn { position: static; transform: none; font-size: 28px; }
+.ovB .w .xp { flex: 1; }
+.ovB .where { font-size: 28px; color: var(--mute); }
+.ovC { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); width: 1080px; }
+.ovC .xpw { padding-top: 44px; }
+.ovC .hot { display: grid; grid-template-columns: 1.1fr 1fr .8fr 1.4fr; margin-top: 10px; border: 4px solid #000; background: #000; gap: 4px; }
+.ovC .hot .slot { height: 84px; display: flex; align-items: center; justify-content: center; gap: 12px; font-size: 30px; color: #fff; background: #2c2c30; box-shadow: inset 4px 4px 0 #4a4a50, inset -4px -4px 0 #161618; }
+.ovC .hot .slot canvas { width: 44px; height: 44px; flex: none; }
+.ovC .hot .hf { font-size: 26px; }
+.ovC .hot .where { font-size: 30px; color: #c9c9cf; }

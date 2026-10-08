@@ -1,0 +1,297 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Chat Coins mock</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{font-family:-apple-system,"SF Pro Text",system-ui,Helvetica,sans-serif;-webkit-font-smoothing:antialiased}
+.num{font-variant-numeric:tabular-nums}
+canvas.scene{display:block;width:100%;height:100%}
+
+/* ---------- theme tokens ---------- */
+body.A{--bg:#fff;--fg:#0B0B0C;--mute:#6B6B70;--line:#E6E6E8;--soft:#F4F4F5;--up:#0A8F3C;--down:#D93025;--bar:#0B0B0C;--track:#ECECEE;--btn:#0B0B0C;--btnfg:#fff;--accent:#0B0B0C}
+body.B{--bg:#000;--fg:#F5F5F7;--mute:#8E8E93;--line:#232326;--soft:#111113;--up:#30D158;--down:#FF453A;--bar:#F5F5F7;--track:#2A2A2D;--btn:#F5F5F7;--btnfg:#000;--accent:#F5F5F7}
+body.C{--bg:#fff;--fg:#0B0B0C;--mute:#5E5E63;--line:#E6E6E8;--soft:#F4F4F5;--up:#0A8F3C;--down:#D93025;--bar:#FF4F00;--track:#F0F0F1;--btn:#FF4F00;--btnfg:#fff;--accent:#FF4F00}
+body{background:var(--bg);color:var(--fg)}
+
+/* ---------- shared ---------- */
+.top{display:flex;align-items:center;justify-content:space-between;height:72px;padding:0 40px}
+.brand{display:flex;align-items:center;gap:12px;font-weight:700;font-size:19px;letter-spacing:-.01em}
+.mark{width:26px;height:26px;border-radius:50%;background:var(--fg);position:relative}
+.mark:after{content:"";position:absolute;inset:7px;border-radius:50%;background:var(--bg)}
+body.C .mark{background:var(--accent)}
+.net{font-size:12px;font-weight:600;color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:3px 9px}
+.wallet{display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;border:1px solid var(--line);border-radius:999px;padding:7px 14px 7px 8px}
+.wallet i{width:22px;height:22px;border-radius:50%;background:#7B61FF;display:block}
+.btn{display:flex;align-items:center;justify-content:center;height:52px;border-radius:14px;background:var(--btn);color:var(--btnfg);font-weight:650;font-size:17px;width:100%}
+.thumb{border-radius:12px;overflow:hidden;flex:none;background:#222}
+.up{color:var(--up)}.down{color:var(--down)}
+.bar{height:8px;border-radius:99px;background:var(--track);overflow:hidden}
+.bar b{display:block;height:100%;background:var(--bar);border-radius:99px}
+.mute{color:var(--mute)}
+.hair{border-top:1px solid var(--line)}
+.live{position:absolute;left:14px;top:14px;background:#E5252A;color:#fff;font-size:12px;font-weight:700;border-radius:6px;padding:3px 8px}
+
+/* ---------- coin page ---------- */
+.coin{display:grid;grid-template-columns:1fr 400px;gap:40px;padding:8px 40px 40px;max-width:1440px}
+.embed{position:relative;aspect-ratio:16/9;border-radius:16px;overflow:hidden}
+.ident{display:flex;gap:16px;align-items:center;margin:22px 0 0}
+.ident h1{font-size:28px;letter-spacing:-.02em;font-weight:700}
+.ident p{font-size:15px;color:var(--mute);margin-top:3px}
+.card{border:1px solid var(--line);border-radius:18px;padding:22px}
+.lbl{font-size:13px;color:var(--mute);font-weight:500}
+.cap{font-size:44px;font-weight:700;letter-spacing:-.03em;line-height:1.05;margin-top:4px}
+.chg{font-size:15px;font-weight:600;margin-top:6px}
+.chart{margin-top:18px;height:120px}
+.chart svg{width:100%;height:100%;display:block}
+.grad{margin-top:20px}
+.gradrow{display:flex;justify-content:space-between;font-size:14px;margin-bottom:9px}
+.gradrow b{font-weight:650}
+.tabs{display:flex;background:var(--soft);border-radius:12px;padding:4px;margin-bottom:16px}
+.tabs span{flex:1;text-align:center;font-size:15px;font-weight:600;padding:9px 0;border-radius:9px;color:var(--mute)}
+.tabs span.on{background:var(--bg);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08),0 1px 6px rgba(0,0,0,.04)}
+body.B .tabs span.on{background:#2A2A2D;box-shadow:none}
+.amt{display:flex;align-items:center;justify-content:space-between;border:1px solid var(--line);border-radius:14px;height:60px;padding:0 18px;font-size:26px;font-weight:650}
+.amt small{font-size:15px;color:var(--mute);font-weight:600}
+.chips{display:flex;gap:8px;margin:10px 0 14px}
+.chips span{flex:1;text-align:center;border:1px solid var(--line);border-radius:10px;padding:8px 0;font-size:14px;font-weight:600}
+.get{display:flex;justify-content:space-between;font-size:14px;margin-bottom:14px}
+.fair{font-size:13px;color:var(--mute);margin-top:12px;text-align:center}
+.trades{margin-top:28px}
+.trades h3{font-size:17px;font-weight:650;margin-bottom:8px}
+.tr{display:grid;grid-template-columns:70px 1fr 1fr 1fr 70px;font-size:14px;padding:11px 0;border-top:1px solid var(--line)}
+.tr .s{font-weight:650}
+.tr .r{text-align:right}
+
+/* B: theater */
+body.B .coin{grid-template-columns:1fr 380px;gap:0;padding:0}
+body.B .stage{padding:0 32px 32px 32px}
+body.B .embed{border-radius:12px}
+body.B .rail{border-left:1px solid var(--line);padding:0 24px 24px;min-height:100%}
+body.B .card{border:none;padding:22px 0 0;border-radius:0}
+body.B .rail .trades{margin-top:22px}
+body.B .tr{grid-template-columns:52px 1fr 1fr 56px}
+
+/* C: hype */
+body.C .meter{margin:4px 40px 28px;padding:0}
+body.C .meter .row{display:flex;align-items:baseline;justify-content:space-between}
+body.C .meter .pct{font-size:88px;font-weight:800;letter-spacing:-.05em;line-height:.9}
+body.C .meter .pct em{font-style:normal;color:var(--accent)}
+body.C .meter .bigbar{height:28px;border-radius:6px;background:var(--track);margin-top:14px;position:relative;overflow:hidden}
+body.C .meter .bigbar b{display:block;height:100%;background:var(--accent)}
+body.C .meter .ticks{position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 3px),var(--bg) calc(10% - 3px) 10%)}
+body.C .cap{font-size:64px;font-weight:800;letter-spacing:-.045em}
+body.C .ident h1{font-size:36px;font-weight:800;letter-spacing:-.035em}
+body.C .card{border:2px solid var(--fg);border-radius:14px}
+body.C .btn{border-radius:10px;font-weight:750}
+
+/* ---------- home ---------- */
+.home{padding:20px 40px 40px;max-width:1440px}
+.hero{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:26px}
+.hero h1{font-size:40px;font-weight:700;letter-spacing:-.03em}
+.hero p{font-size:16px;color:var(--mute);margin-top:6px}
+.golive{width:auto;padding:0 26px;height:48px;font-size:16px}
+.sort{display:flex;gap:6px;margin-bottom:6px}
+.sort span{font-size:15px;font-weight:600;padding:8px 14px;border-radius:999px;color:var(--mute)}
+.sort span.on{background:var(--soft);color:var(--fg)}
+body.B .sort span.on{background:#1C1C1E}
+.list .row{display:grid;grid-template-columns:120px 1.6fr 1fr .8fr 1.3fr;align-items:center;gap:24px;padding:16px 0;border-top:1px solid var(--line)}
+.list .row .t{width:120px;height:68px;position:relative;border-radius:10px}
+.list .row h4{font-size:17px;font-weight:650}
+.list .row p{font-size:14px;color:var(--mute);margin-top:3px}
+.list .row .m{font-size:17px;font-weight:650;text-align:right}
+.list .row .c{font-size:15px;font-weight:600;text-align:right}
+.list .row .g{font-size:13px;color:var(--mute)}
+.list .row .g .bar{margin-top:7px}
+.list .head{display:grid;grid-template-columns:120px 1.6fr 1fr .8fr 1.3fr;gap:24px;font-size:13px;color:var(--mute);padding:10px 0}
+.list .head .r{text-align:right}
+/* B home: grid of tiles */
+body.B .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:28px 24px;margin-top:14px}
+body.B .tile .t{aspect-ratio:16/9;position:relative;border-radius:12px;overflow:hidden}
+body.B .tile .meta{display:flex;justify-content:space-between;margin-top:12px}
+body.B .tile h4{font-size:16px;font-weight:650}
+body.B .tile p{font-size:14px;color:var(--mute);margin-top:2px}
+body.B .tile .bar{margin-top:10px;height:5px}
+/* C home: big rank rows */
+body.C .hero h1{font-size:64px;font-weight:800;letter-spacing:-.045em}
+body.C .list .row .m{font-size:22px;font-weight:800;letter-spacing:-.02em}
+body.C .list .row .g .bar{height:12px;border-radius:3px}
+body.C .list .row .g .bar b{border-radius:0}
+
+/* ---------- go live ---------- */
+.form{max-width:560px;margin:10px auto 40px}
+.form h1{font-size:36px;font-weight:700;letter-spacing:-.03em}
+.form > p{font-size:16px;color:var(--mute);margin:8px 0 28px}
+.f{margin-bottom:18px}
+.f label{display:block;font-size:14px;font-weight:600;margin-bottom:8px}
+.f .in{height:52px;border:1px solid var(--line);border-radius:12px;display:flex;align-items:center;padding:0 16px;font-size:17px}
+.f .in .ph{color:var(--mute)}
+.f .hint{font-size:13px;color:var(--mute);margin-top:6px}
+.two{display:grid;grid-template-columns:150px 1fr;gap:18px}
+.drop{width:150px;height:150px;border:1px dashed var(--mute);border-radius:16px;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;font-size:13px;color:var(--mute);text-align:center}
+.drop svg{width:28px;height:28px}
+.earn{border:1px solid var(--line);border-radius:14px;padding:16px;margin:8px 0 20px;font-size:14px;line-height:1.5}
+.earn b{font-weight:650}
+body.C .form h1{font-size:52px;font-weight:800;letter-spacing:-.045em}
+body.C .f .in{border:2px solid var(--fg);border-radius:10px}
+body.C .earn{border:2px solid var(--fg)}
+body.B .f .in{background:#111113}
+
+/* ---------- overlay ---------- */
+body.ov{background:#000;width:1920px;height:1080px;overflow:hidden;position:relative}
+body.ov > canvas{position:absolute;inset:0;width:1920px;height:1080px}
+.oA{position:absolute;left:40px;bottom:40px;width:620px;background:#fff;color:#0B0B0C;border-radius:22px;padding:22px 26px;display:grid;grid-template-columns:76px 1fr auto;gap:0 20px;align-items:center;box-shadow:0 2px 4px rgba(0,0,0,.25),0 12px 32px rgba(0,0,0,.25)}
+.oA .tk{font-size:30px;font-weight:700;letter-spacing:-.02em}
+.oA .where{font-size:17px;color:#6B6B70;margin-top:2px}
+.oA .mc{font-size:40px;font-weight:700;letter-spacing:-.03em;text-align:right;line-height:1}
+.oA .ch{font-size:20px;font-weight:650;text-align:right;color:#0A8F3C;margin-top:4px}
+.oA .gb{grid-column:1/-1;margin-top:18px}
+.oA .gb .bar{height:12px;background:#ECECEE}.oA .gb .bar b{background:#0B0B0C}
+.oA .gb .gl{display:flex;justify-content:space-between;font-size:17px;font-weight:600;margin-bottom:8px}
+.oB{position:absolute;left:40px;top:40px;background:#000;color:#fff;border-radius:16px;padding:18px 24px;display:flex;align-items:center;gap:22px;border:1px solid #2A2A2D}
+.oB .tk{font-size:26px;font-weight:700}
+.oB .mc{font-size:34px;font-weight:700;letter-spacing:-.03em}
+.oB .ch{font-size:20px;font-weight:650;color:#30D158}
+.oB .gw{width:260px}
+.oB .gw .gl{font-size:15px;font-weight:600;color:#C7C7CC;margin-bottom:8px;display:flex;justify-content:space-between}
+.oB .bar{height:10px;background:#2A2A2D}.oB .bar b{background:#fff}
+.oB .where{font-size:15px;color:#8E8E93;margin-top:2px}
+.oC{position:absolute;left:44px;bottom:44px;width:760px;color:#fff;font-weight:800}
+.oC .l1{display:flex;align-items:baseline;gap:22px;-webkit-text-stroke:8px #000;paint-order:stroke fill;text-shadow:0 4px 0 #000}
+.oC .tk{font-size:64px;letter-spacing:-.04em;line-height:1}
+.oC .mc{font-size:64px;letter-spacing:-.04em;line-height:1}
+.oC .ch{font-size:34px;color:#4BFF7A}
+.oC .bb{margin-top:16px;height:44px;border:4px solid #000;border-radius:8px;background:#fff;position:relative;overflow:hidden}
+.oC .bb b{display:block;height:100%;background:#FF4F00}
+.oC .bb span{position:absolute;left:16px;top:50%;transform:translateY(-50%);font-size:22px;color:#000;-webkit-text-stroke:0}
+.oC .where{margin-top:12px;font-size:24px;-webkit-text-stroke:6px #000;paint-order:stroke fill;text-shadow:0 3px 0 #000}
+</style>
+<body>
+<script>
+const q = new URLSearchParams(location.search), OPT = q.get('opt') || 'A', SCR = q.get('screen') || 'coin';
+
+// ---------- fake data ----------
+const COINS = [
+  {tk:'MIRA', by:'mira_plays', name:'Ranked till Diamond', mc:'$42.1K', ch:38.2, g:62, raised:'52.7', seed:3},
+  {tk:'SHIP', by:'tomasz_codes', name:'Building a game in 24h', mc:'$71.9K', ch:71.5, g:88, raised:'74.8', seed:11},
+  {tk:'OKO', by:'dj_okoro', name:'Sunday vinyl set', mc:'$28.4K', ch:12.4, g:41, raised:'34.9', seed:7},
+  {tk:'LENA', by:'lena.irl', name:'Tokyo night walk', mc:'$22.0K', ch:-2.3, g:33, raised:'28.1', seed:19},
+  {tk:'PAULA', by:'pixelpaula', name:'Speedrun any% in one night', mc:'$13.6K', ch:-6.1, g:18, raised:'15.3', seed:5},
+  {tk:'RAMEN', by:'chef_ren', name:'Ramen from scratch', mc:'$9.8K', ch:4.0, g:9, raised:'7.7', seed:23},
+];
+const TRADES = [
+  ['Buy','1.20','28,510','7xKp3f','4s'],['Buy','0.50','11,870','Gq91Lm','9s'],['Sell','0.80','19,240','Bn4tZe','15s'],
+  ['Buy','2.00','47,920','mR8vYd','22s'],['Buy','0.10','2,401','Hc2wQa','31s'],['Sell','0.35','8,590','7xKp3f','48s'],
+];
+const pct = c => (c >= 0 ? '+' : '') + c.toFixed(1) + '%';
+const cls = c => c >= 0 ? 'up' : 'down';
+
+// ---------- seeded "busy game stream" scene ----------
+function rng(s){return()=>(s=(s*16807)%2147483647)/2147483647}
+function scene(cv, seed){
+  const W = cv.width, H = cv.height, x = cv.getContext('2d'), r = rng(seed*7919+13);
+  const pals = [['#1d3b8f','#e94f37','#f6c90e','#3fb950','#7b2cbf','#00b4d8'],['#264653','#2a9d8f','#e9c46a','#f4a261','#e76f51','#8ecae6'],['#3a0ca3','#f72585','#4cc9f0','#ffbe0b','#06d6a0','#ef476f']];
+  const p = pals[seed % 3];
+  x.fillStyle = p[0]; x.fillRect(0,0,W,H);
+  for (let i=0;i<5;i++){x.fillStyle=p[(i+1)%6];x.fillRect(0,H*(.35+i*.13),W,H*.13)}
+  for (let i=0;i<160;i++){
+    x.fillStyle=p[(r()*6)|0]; x.globalAlpha=.55+r()*.45; x.beginPath();
+    const cx=r()*W, cy=r()*H, s=(6+r()*60)*W/1920*2.2;
+    if(r()<.5){x.moveTo(cx,cy-s);x.lineTo(cx+s,cy+s);x.lineTo(cx-s,cy+s)}else{x.rect(cx-s/2,cy-s/2,s,s*(.4+r()))}
+    x.fill();
+  }
+  x.globalAlpha=1;
+  // light streaks
+  for(let i=0;i<30;i++){x.strokeStyle='#fff';x.globalAlpha=.25+r()*.5;x.lineWidth=(1+r()*4)*W/1920*2;x.beginPath();const a=r()*W,b=r()*H;x.moveTo(a,b);x.lineTo(a+(r()-.5)*W*.3,b+(r()-.5)*H*.3);x.stroke()}
+  x.globalAlpha=1;
+  // HUD: health bar, minimap, kill feed
+  const k=W/1920;
+  x.fillStyle='rgba(0,0,0,.5)';x.fillRect(W-300*k,24*k,270*k,270*k);
+  x.strokeStyle='#fff';x.lineWidth=3*k;x.strokeRect(W-300*k,24*k,270*k,270*k);
+  x.fillStyle='#e94f37';x.fillRect(W/2-260*k,H-70*k,520*k*.72,22*k);x.strokeRect(W/2-260*k,H-70*k,520*k,22*k);
+  x.font=`700 ${26*k}px -apple-system`;x.fillStyle='#fff';
+  ['NoScope99 eliminated Vex','mira_plays  +1 KILL','Squad wiped  (3/4)'].forEach((t,i)=>x.fillText(t,W-680*k,340*k+i*40*k));
+}
+
+const svgChart = (color, seed, w=360, h=120) => {
+  const r = rng(seed+101); let v = 30, pts = [];
+  for (let i=0;i<60;i++){ v += (r()-.38)*6; v = Math.max(4, v); pts.push(v) }
+  const mx = Math.max(...pts), mn = Math.min(...pts);
+  const d = pts.map((p,i)=>`${i?'L':'M'}${(i/59*w).toFixed(1)},${(h-6-(p-mn)/(mx-mn)*(h-12)).toFixed(1)}`).join(' ');
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="${color}" stroke-width="2.25" vector-effect="non-scaling-stroke" stroke-linejoin="round"/></svg>`;
+};
+
+const topBar = () => `<div class="top"><div class="brand"><div class="mark"></div>Chat Coins<span class="net">Devnet</span></div><div class="wallet"><i></i><span class="num">7xKp3f</span></div></div>`;
+const cv = (seed, w, h) => `<canvas class="scene" data-seed="${seed}" width="${w}" height="${h}"></canvas>`;
+
+// ---------- screens ----------
+function coinPage(){
+  const c = COINS[0], css = getComputedStyle(document.body);
+  const chartColor = css.getPropertyValue('--accent').trim();
+  const price = `<div class="lbl">Market cap</div><div class="cap num">${c.mc}</div><div class="chg num up">${pct(c.ch)} in the last hour</div>`;
+  const grad = `<div class="grad"><div class="gradrow"><b class="num">${c.g}% to graduation</b><span class="mute num">${c.raised} of 85 SOL</span></div><div class="bar"><b style="width:${c.g}%"></b></div></div>`;
+  const trade = `<div class="tabs"><span class="on">Buy</span><span>Sell</span></div>
+    <div class="amt num">0.5<small>SOL</small></div>
+    <div class="chips num"><span>0.1</span><span>0.5</span><span>1</span><span>Max</span></div>
+    <div class="get"><span class="mute">You get about</span><b class="num">11,870 MIRA</b></div>
+    <div class="btn">Buy MIRA</div>
+    <div class="fair">The streamer can't buy this coin.</div>`;
+  const rows = (cols4) => TRADES.map(t => cols4
+    ? `<div class="tr num"><span class="s ${t[0]=='Buy'?'up':'down'}">${t[0]}</span><span>${t[1]} SOL</span><span class="mute">${t[3]}</span><span class="r mute">${t[4]}</span></div>`
+    : `<div class="tr num"><span class="s ${t[0]=='Buy'?'up':'down'}">${t[0]}</span><span>${t[1]} SOL</span><span>${t[2]} MIRA</span><span class="mute">${t[3]}</span><span class="r mute">${t[4]} ago</span></div>`).join('');
+  const ident = `<div class="ident"><div class="thumb" style="width:56px;height:56px">${cv(c.seed,112,112)}</div><div><h1>$${c.tk}</h1><p>${c.name} by ${c.by}</p></div></div>`;
+  const embed = `<div class="embed">${cv(c.seed,1280,720)}<span class="live">Live</span></div>`;
+
+  if (OPT === 'B') return topBar() + `<div class="coin"><div class="stage">${embed}${ident}
+      <div class="chart" style="height:150px;margin-top:22px">${svgChart(chartColor, 1, 900, 150)}</div></div>
+    <div class="rail"><div class="card">${price}${grad}</div><div class="card">${trade}</div>
+      <div class="trades"><h3>Trades</h3>${rows(true)}</div></div></div>`;
+
+  const meter = OPT === 'C' ? `<div class="meter"><div class="row"><div class="pct num"><em>${c.g}%</em> to graduation</div><div class="mute num" style="font-size:17px;font-weight:600">${c.raised} of 85 SOL raised</div></div><div class="bigbar"><b style="width:${c.g}%"></b><i class="ticks"></i></div></div>` : '';
+  return topBar() + meter + `<div class="coin"><div>${embed}${ident}
+      <div class="trades"><h3>Trades</h3>${rows(false)}</div></div>
+    <div style="display:flex;flex-direction:column;gap:20px"><div class="card">${price}<div class="chart">${svgChart(chartColor,1)}</div>${OPT==='C'?'':grad}</div><div class="card">${trade}</div></div></div>`;
+}
+
+function home(){
+  const hero = `<div class="hero"><div><h1>Live coins</h1><p>Buy the stream you think will pop. Price moves with the hype.</p></div><div class="btn golive">Go live</div></div>
+    <div class="sort"><span class="on">Hot</span><span>New</span><span>Close to graduation</span></div>`;
+  if (OPT === 'B') return topBar() + `<div class="home">${hero}<div class="grid">${COINS.map(c=>`<div class="tile"><div class="t">${cv(c.seed,640,360)}<span class="live">Live</span></div>
+      <div class="meta"><div><h4>$${c.tk}</h4><p>${c.name}</p></div><div style="text-align:right"><h4 class="num">${c.mc}</h4><p class="num ${cls(c.ch)}">${pct(c.ch)}</p></div></div>
+      <div class="bar"><b style="width:${c.g}%"></b></div></div>`).join('')}</div></div>`;
+  return topBar() + `<div class="home">${hero}<div class="list">
+    <div class="head"><span></span><span>Stream</span><span class="r">Market cap</span><span class="r">1 hour</span><span>Graduation</span></div>
+    ${COINS.map(c=>`<div class="row"><div class="t thumb">${cv(c.seed,240,136)}</div><div><h4>$${c.tk}</h4><p>${c.name} by ${c.by}</p></div>
+    <div class="m num">${c.mc}</div><div class="c num ${cls(c.ch)}">${pct(c.ch)}</div>
+    <div class="g num">${c.g}%<div class="bar"><b style="width:${c.g}%"></b></div></div></div>`).join('')}</div></div>`;
+}
+
+function goLive(){
+  const img = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/></svg>`;
+  return topBar() + `<div class="form"><h1>Go live</h1><p>Launch a coin for this stream. It takes one transaction.</p>
+    <div class="two"><div><div class="f"><label>Image</label><div class="drop">${img}Add image<br>Square, 1 MB</div></div></div>
+    <div><div class="f"><label>Stream name</label><div class="in">Ranked till Diamond</div></div>
+    <div class="f"><label>Ticker</label><div class="in">$&nbsp;<span>MIRA</span></div><div class="hint">2 to 8 letters</div></div></div></div>
+    <div class="f"><label>Stream link</label><div class="in"><span class="ph">twitch.tv, youtube.com or kick.com link</span></div></div>
+    <div class="earn"><b>You earn from every trade.</b> A share of each trade fee goes to your wallet. Your wallet can't buy this coin.</div>
+    <div class="btn">Launch coin</div></div>`;
+}
+
+function overlay(){
+  const c = COINS[0];
+  const bg = `<canvas data-seed="${c.seed+2}" width="1920" height="1080"></canvas>`;
+  const th = `<div class="thumb" style="width:76px;height:76px;border-radius:14px">${cv(c.seed,152,152)}</div>`;
+  if (OPT === 'A') return bg + `<div class="oA">${th}<div><div class="tk">$${c.tk}</div><div class="where">chatcoins.app/mira</div></div>
+    <div><div class="mc num">${c.mc}</div><div class="ch num">${pct(c.ch)}</div></div>
+    <div class="gb"><div class="gl num"><span>${c.g}% to graduation</span><span style="color:#6B6B70">${c.raised} of 85 SOL</span></div><div class="bar"><b style="width:${c.g}%"></b></div></div></div>`;
+  if (OPT === 'B') return bg + `<div class="oB"><div><div class="tk">$${c.tk}</div><div class="where">chatcoins.app/mira</div></div>
+    <div><div class="mc num">${c.mc}</div><div class="ch num">${pct(c.ch)}</div></div>
+    <div class="gw"><div class="gl num"><span>${c.g}% to graduation</span></div><div class="bar"><b style="width:${c.g}%"></b></div></div></div>`;
+  return bg + `<div class="oC"><div class="l1 num"><span class="tk">$${c.tk}</span><span class="mc">${c.mc}</span><span class="ch">${pct(c.ch)}</span></div>
+    <div class="bb"><b style="width:${c.g}%"></b><span class="num">${c.g}% to graduation</span></div>
+    <div class="where">Buy at chatcoins.app/mira</div></div>`;
+}
+
+document.body.className = OPT + (SCR === 'overlay' ? ' ov' : '');
+document.body.innerHTML = ({coin: coinPage, home, golive: goLive, overlay})[SCR]();
+document.querySelectorAll('canvas[data-seed]').forEach(c => scene(c, +c.dataset.seed));
+</script>

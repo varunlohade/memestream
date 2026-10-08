@@ -1,0 +1,13 @@
+
+> memestream@0.1.0 dev:chain
+> tsx scripts/dev-chain.ts
+
+seeded $MIRA  mint CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR
+seeded $SHIP  mint 5ZnhrvQBckZoKPH1wEiGdR5sX7kUURcLyVSQyC8kPjSG
+seeded $OKO  mint FmtVawG2Y1wFYdssTUz9RjYwuHDfikZNWUV1BEa9cgXa
+seeded $DEV  mint 6wbBU6NMj42AAzC9pJW4qPSc4sutWg23wPZ8jSTQKjod
+
+local chain ready at http://127.0.0.1:61883
+config DeWybaToNAoPEmEqf3Kqt8yZUs4EFTzGekX5tJNYTnAb
+dev wallet CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx (20 SOL)
+wrote .env.local. Now run: npm run dev. Ctrl+C here stops the chain.

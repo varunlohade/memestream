@@ -1,0 +1,86 @@
+
+> memestream@0.1.0 dev
+> next dev -H 127.0.0.1
+
+▲ Next.js 16.4.0 (Turbopack)
+- Local:         http://127.0.0.1:3000
+- Network:       http://127.0.0.1:3000
+✓ Ready in 154ms
+⚠ `cacheComponents` is enabled without a corresponding `partialPrefetching` option. Set `partialPrefetching` to either `true` or `false`.
+
+The only reason to set `partialPrefetching` to `false` is if you're migrating an older Cache Components app. The initial release of Cache Components did not include Partial Prefetching. New projects should enable both Cache Components and Partial Prefetching.
+
+Both Cache Components and Partial Prefetching will be enabled everywhere in the next major release, and the old configurations will be removed.
+
+Learn more: https://nextjs.org/docs/app/guides/adopting-partial-prefetching
+✓ Running next.config.ts took 12ms
+- Cache Components enabled
+
+  Reload env: .env.local
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins 200 in 227ms (next.js: 140ms, application-code: 87ms)
+ GET /api/dev-wallet 200 in 50ms (next.js: 30ms, application-code: 21ms)
+ GET /api/dev-wallet 200 in 2ms (next.js: 0.6ms, application-code: 1.7ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET / 200 in 197ms (next.js: 102ms, application-code: 95ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR 200 in 357ms (next.js: 5ms, generate-params: 190ms, application-code: 163ms)
+ GET /coin/6wbBU6NMj42AAzC9pJW4qPSc4sutWg23wPZ8jSTQKjod 200 in 95ms (next.js: 0.4ms, generate-params: 0.9ms, application-code: 94ms)
+ GET / 200 in 32ms (next.js: 0.3ms, application-code: 32ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/dev-wallet 200 in 1.8ms (next.js: 0.4ms, application-code: 1.3ms)
+ GET /api/dev-wallet 200 in 1.4ms (next.js: 0.4ms, application-code: 1.0ms)
+ GET /api/coins 200 in 9ms (next.js: 0.4ms, application-code: 8ms)
+ GET /api/dev-wallet 200 in 2ms (next.js: 0.5ms, application-code: 1.6ms)
+ GET /coin/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR 200 in 69ms (next.js: 0.5ms, generate-params: 1.3ms, application-code: 67ms)
+ GET /api/dev-wallet 200 in 3ms (next.js: 0.9ms, application-code: 2ms)
+ GET /api/dev-wallet 200 in 3ms (next.js: 0.7ms, application-code: 2ms)
+ GET /api/dev-wallet 200 in 2ms (next.js: 0.3ms, application-code: 1.8ms)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR 200 in 16ms
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR&side=buy&amount=0.5 200 in 21ms (next.js: 9ms, application-code: 11ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 428ms (next.js: 393ms, application-code: 36ms)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 449ms (next.js: 385ms, application-code: 63ms)
+ GET /api/quote?mint=CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR&side=buy&amount=0.2 200 in 9ms (next.js: 0.4ms, application-code: 9ms)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 41ms (next.js: 2ms, application-code: 39ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ POST /api/tx/trade 200 in 434ms (next.js: 413ms, application-code: 21ms)
+ POST /api/dev-wallet 200 in 24ms (next.js: 0.3ms, application-code: 24ms)
+ GET /api/tx/status?signature=nyoDNoSbsGgJESpz9b4dnZkpph8icpYZQaLQNB5A6zdp1XhGHEz1tczrJo8uw8qi6bFZY4Hsoae2tSyb55xBwNg&lastValidBlockHeight=163 200 in 11ms (next.js: 7ms, application-code: 4ms)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 29ms (next.js: 1.1ms, application-code: 28ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 33ms (next.js: 1.9ms, application-code: 32ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR&side=sell&amount=53380464.713311 200 in 10ms (next.js: 0.5ms, application-code: 9ms)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 39ms (next.js: 2ms, application-code: 37ms)
+ POST /api/tx/trade 200 in 42ms (next.js: 1.6ms, application-code: 40ms)
+ POST /api/dev-wallet 200 in 15ms (next.js: 0.3ms, application-code: 15ms)
+ GET /api/tx/status?signature=3at5aJQdLRHnePFBDxPHT1k3m3auC3c59j3aMVbridfPjNxtmTkVnQ9MFE53M4MJCryPDuvNV8qGGEpSRzXVNPDi&lastValidBlockHeight=164 200 in 4ms (next.js: 0.4ms, application-code: 3ms)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 31ms (next.js: 0.4ms, application-code: 31ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/coins/CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 42ms (next.js: 3ms, application-code: 39ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /coin/6wbBU6NMj42AAzC9pJW4qPSc4sutWg23wPZ8jSTQKjod 200 in 57ms (next.js: 0.7ms, generate-params: 1.3ms, application-code: 55ms)
+ GET /api/dev-wallet 200 in 2ms (next.js: 0.4ms, application-code: 1.8ms)
+ GET /api/dev-wallet 200 in 2.0ms (next.js: 0.4ms, application-code: 1.6ms)
+ GET /api/dev-wallet 200 in 1.2ms (next.js: 0.3ms, application-code: 1.0ms)
+ GET /api/coins/6wbBU6NMj42AAzC9pJW4qPSc4sutWg23wPZ8jSTQKjod 200 in 10ms (next.js: 1.2ms, application-code: 9ms)
+ GET /api/coins/6wbBU6NMj42AAzC9pJW4qPSc4sutWg23wPZ8jSTQKjod?wallet=CEmpNRyN2AYXMoRPAmvAjsgw357oaNUwycRzu3bSzTCx 200 in 19ms (next.js: 0.4ms, application-code: 19ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=6wbBU6NMj42AAzC9pJW4qPSc4sutWg23wPZ8jSTQKjod&side=buy&amount=0.5 200 in 9ms (next.js: 0.5ms, application-code: 9ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ POST /api/tx/trade 400 in 10ms (next.js: 1.8ms, application-code: 8ms)
+ POST /api/tx/trade 400 in 9ms (next.js: 0.4ms, application-code: 9ms)
+ POST /api/tx/trade 400 in 1.6ms (next.js: 0.3ms, application-code: 1.3ms)
+ POST /api/tx/trade 400 in 1.7ms (next.js: 0.3ms, application-code: 1.4ms)
+ POST /api/tx/trade 200 in 18ms (next.js: 0.3ms, application-code: 18ms)
+ POST /api/tx/trade 200 in 18ms (next.js: 0.2ms, application-code: 18ms)
+bigint: Failed to load bindings, pure JS will be used (try npm run rebuild?)
+ GET /api/quote?mint=CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR&side=buy&amount=0.2 200 in 7ms (next.js: 0.3ms, application-code: 7ms)
+ GET /api/quote?mint=CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR&side=sell&amount=53380464.713311 200 in 8ms (next.js: 0.3ms, application-code: 7ms)
+ GET /api/quote?mint=CZT11DjpQ4EE3YsHsAvQSb211b4UmghVUvjYf5WrHmvR&side=buy&amount=0.2 200 in 8ms (next.js: 0.4ms, application-code: 7ms)
+[?25h

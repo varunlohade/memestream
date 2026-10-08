@@ -1,0 +1,35 @@
+import puppeteer from "puppeteer-core";
+const OUT = "qa/2026-10-07-week1/manual";
+const TICK = process.argv[2] ?? "SHIP"; const SIDE = process.argv[3] ?? "Buy"; const AMT = process.argv[4] ?? "0.1";
+const b = await puppeteer.launch({ executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", headless: true, protocolTimeout: 120000, args: ["--mute-audio"] });
+const p = await b.newPage(); await p.setViewport({ width: 1440, height: 1240 });
+await p.setRequestInterception(true);
+p.on("request", r => { const h = new URL(r.url()).hostname; (["127.0.0.1","localhost"].includes(h) || r.url().startsWith("data:")) ? r.continue() : r.abort(); });
+p.on("console", m => { if (["error","warn"].includes(m.type())) console.log("console", m.type(), m.text().slice(0,300)); });
+p.on("pageerror", e => console.log("pageerror", (e as Error).message));
+p.on("response", r => { if (r.url().includes("/api/")) console.log("api", r.status(), r.request().method(), r.url().replace("http://127.0.0.1:3000","").slice(0,120)); });
+const t = (s: string) => `::-p-text(${s})`;
+await p.goto("http://127.0.0.1:3000", { waitUntil: "domcontentloaded" });
+await p.locator(t("Connect")).setTimeout(20000).click();
+await p.locator(t("Test wallet (localhost)")).setTimeout(20000).click();
+await new Promise(r => setTimeout(r, 1500));
+await p.locator(t(`$${TICK}`)).setTimeout(20000).click();
+await p.waitForFunction(() => document.body.innerText.includes("Graduation"), { timeout: 30000 });
+if (SIDE === "Sell") await p.locator(`button[aria-pressed]${t("Sell")}`).click();
+const inp = await p.waitForSelector('input[aria-label^="Amount in"]');
+await inp!.click({ clickCount: 3 }); await p.keyboard.press("Backspace"); await inp!.type(AMT);
+await new Promise(r => setTimeout(r, 4000));
+await p.screenshot({ path: `${OUT}/${TICK}-${SIDE}-before.png` });
+const panel = async () => (await p.evaluate(() => document.body.innerText)).replace(/\s+/g, " ");
+console.log("before:", (await panel()).match(/You hold.{0,120}/)?.[0]);
+const t0 = Date.now();
+await p.locator(`button${t(`${SIDE} ${TICK}`)}`).setTimeout(20000).click();
+for (let i = 0; i < 12; i++) {
+  await new Promise(r => setTimeout(r, 15000));
+  const txt = await panel();
+  const btn = await p.evaluate(() => [...document.querySelectorAll("button")].map(b => b.innerText.trim()).filter(Boolean).join(" | "));
+  console.log(`+${Math.round((Date.now()-t0)/1000)}s`, txt.match(/(Bought|Sold|failed|error|Error|can't|Couldn)[^.]{0,120}/)?.[0] ?? "-", "|| hold:", txt.match(/You hold.{0,60}/)?.[0], "|| buttons:", btn.slice(0,200));
+  await p.screenshot({ path: `${OUT}/${TICK}-${SIDE}-${i}.png` });
+  if (/(Bought|Sold) /.test(txt)) break;
+}
+await b.close();

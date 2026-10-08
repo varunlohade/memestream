@@ -1,0 +1,28 @@
+18:04:29 click 1: enabled
+18:04:32 pending text: Confirming "Buy SHIP". Trading is paused until we know, so you can't pay twice.
+18:04:51 idle after main: true
+18:04:54 PASS 1 main buy: on-chain ok tx +1 (all +1), SOL -0.5020
+18:04:54 buy again: enabled
+18:05:57 PASS 1b second buy right after (not stuck): on-chain ok tx +1 (all +1), SOL -0.4535
+18:05:57 click: none
+18:06:03 after reload buy: none none
+18:07:03 idle after reload: false
+18:07:06 reload end text: undefined
+18:07:06 FAIL 2 reload mid-trade: on-chain ok tx +0 (all +0), SOL 0.0000
+18:07:06 click A: none
+18:07:10 tab2 buy: none lock msg: undefined
+18:08:11 idle A: false
+18:08:14 FAIL 3 second tab mid-trade: on-chain ok tx +0 (all +0), SOL 0.0000
+18:08:29 tab2 idle w/o reload: false
+18:08:29 tab2 buy after: none
+18:09:32 FAIL 3b second tab trades after first finishes: on-chain ok tx +0 (all +0), SOL 0.0000
+18:09:34 ERROR Cannot read properties of undefined (reading 'click')
+18:09:34 tab0: 
+18:09:34 tab1: memestream | Local | CEmpNR | Live | $SHIP | Building a game in 24h by Cc3Bdh | Recent trades | Buy | 0.453 SOL | 77.0M SHIP | CEmpNR | 4m ago | Buy | 0.5 SOL | 160.5M SHIP | CEmpNR | 4m ago | Buy | 0.5 SOL | 158.5M SHIP | 2mJZDz | 6m ago | Buy | 0.6 SOL | 404.1M SHIP | 9Uafqo | 6m ago | Market cap | 7.5 SOL | +405.1% over recent trades | Graduation | 1.5 of 1.5 SOL | 100% | 80% of fees go to the streamer | The curve is full. Graduate the coin to open its Meteora pool. | Graduate to Meteora
+
+PASS 1 main buy: on-chain ok tx +1 (all +1), SOL -0.5020
+PASS 1b second buy right after (not stuck): on-chain ok tx +1 (all +1), SOL -0.4535
+FAIL 2 reload mid-trade: on-chain ok tx +0 (all +0), SOL 0.0000
+FAIL 3 second tab mid-trade: on-chain ok tx +0 (all +0), SOL 0.0000
+FAIL 3b second tab trades after first finishes: on-chain ok tx +0 (all +0), SOL 0.0000
+ERROR Cannot read properties of undefined (reading 'click')

@@ -1,0 +1,9 @@
+PASS  home lists the seeded coins
+PASS  connect the localhost test wallet
+PASS  streamer launches a coin from Go live  (http://127.0.0.1:3000/coin/9CgWD4rAwe6f9YRpsHCE5TSfZpFvkG44DDcPQ3iMXZGs)
+PASS  streamer can't buy their own coin
+FAIL  viewer buys 0.5 SOL of $MIRA and sees the trade  (Waiting failed)
+FAIL  viewer sells half their $MIRA with the 50% chip  (Timed out after waiting 20000ms)
+FAIL  an oversized buy is shown as a partial fill, then fills the curve  (Waiting failed)
+PASS  anyone graduates the coin to Meteora
+PASS  streamer claims earnings on their own coin

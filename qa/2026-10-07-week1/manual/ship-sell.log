@@ -1,0 +1,18 @@
+api 200 GET /api/dev-wallet
+api 200 GET /api/dev-wallet
+api 200 GET /api/dev-wallet
+api 200 GET /api/quote?mint=F1f4uLj7T8hmQEAGnGvhgvyMbuFZ9QegRUf1vLcneRdf&side=sell&amount=10000000
+before: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Sell SHIP
+api 200 POST /api/tx/trade
++15s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++30s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++45s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++60s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++75s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++90s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++105s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++120s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++136s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++151s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++166s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation
++181s - || hold: You hold 23.0M SHIP · 17.8 SOL You get about 0.011 SOL Check your wa || buttons: CEmpNR | Buy | Sell | 25% | 50% | Max | Check your wallet | Hot | New | Close to graduation

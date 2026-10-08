@@ -1,0 +1,94 @@
+"use client";
+/** Client-side data hooks. They call our own API routes; the browser never talks to RPC directly. */
+import { useCallback, useEffect, useState } from "react";
+import type { CoinDetail, CoinView, TradePreview } from "@/lib/api-types";
+import { fetchJson } from "@/lib/http";
+
+export type { CoinDetail, CoinView, Holdings, TradePreview, TradeView } from "@/lib/api-types";
+
+const POLL_MS = 5_000;
+
+/**
+ * Polls `url`: one request at a time (the next starts after the last ends), paused while the
+ * tab is hidden, and reset when the URL changes so stale data (e.g. another wallet's) never shows.
+ */
+function usePolled<T>(url: string, initial: T | null = null) {
+  const [state, setState] = useState<{ url: string; data: T | null; error: string | null }>({
+    url,
+    data: initial,
+    error: null,
+  });
+  const [tick, setTick] = useState(0);
+  const refresh = useCallback(() => setTick((t) => t + 1), []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      if (document.hidden) {
+        timer = setTimeout(load, POLL_MS);
+        return;
+      }
+      try {
+        // A hung request can't freeze polling: each one gives up after 10 s and the next is scheduled.
+        const data = await fetchJson<T>(url, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10_000)]) });
+        setState({ url, data, error: null });
+      } catch (e) {
+        if (controller.signal.aborted) return;
+        setState((s) => ({ url, data: s.url === url ? s.data : null, error: (e as Error).message }));
+      }
+      if (!controller.signal.aborted) timer = setTimeout(load, POLL_MS);
+    };
+    void load();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [url, tick]);
+
+  const current = state.url === url;
+  return { data: current ? state.data : null, error: current ? state.error : null, refresh };
+}
+
+export const useCoins = () => usePolled<{ coins: CoinView[] }>("/api/coins");
+
+/** One coin, its recent trades, and (if a wallet is connected) that wallet's holdings. */
+export const useCoin = (mint: string, wallet: string | null, initial: CoinDetail | null = null) =>
+  usePolled<CoinDetail>(
+    `/api/coins/${encodeURIComponent(mint)}${wallet ? `?wallet=${encodeURIComponent(wallet)}` : ""}`,
+    wallet ? null : initial,
+  );
+
+const QUOTE_DEBOUNCE_MS = 300;
+
+/** Live price check for the trade box. Keeps the last good quote while a new one loads. */
+export function useQuote(mint: string, side: "buy" | "sell", amount: string) {
+  const [quote, setQuote] = useState<{ key: string; preview: TradePreview | null; error: string | null } | null>(null);
+  const key = `${mint}|${side}|${amount}`;
+
+  useEffect(() => {
+    if (!amount.trim()) return;
+    const controller = new AbortController();
+    const timer = setTimeout(async () => {
+      try {
+        const preview = await fetchJson<TradePreview>(`/api/quote?${new URLSearchParams({ mint, side, amount })}`, {
+          signal: controller.signal,
+        });
+        setQuote({ key, preview, error: null });
+      } catch (e) {
+        if (!controller.signal.aborted) setQuote({ key, preview: null, error: (e as Error).message });
+      }
+    }, QUOTE_DEBOUNCE_MS);
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [key, mint, side, amount]);
+
+  const fresh = quote?.key === key;
+  return {
+    preview: amount.trim() && fresh ? quote.preview : null,
+    error: amount.trim() && fresh ? quote.error : null,
+    loading: Boolean(amount.trim()) && !fresh,
+  };
+}
