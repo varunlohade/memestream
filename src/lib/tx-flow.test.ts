@@ -49,7 +49,12 @@ test("row 3: a wallet rejection removes the entry and frees the wallet", () => {
   const l = applyEvent(started(), "a", { type: "rejected" }, T0);
   assert.equal(l.entries.length, 0);
   assert.equal(l.last?.kind, "rejected");
-  assert.ok(isUserRejection({ code: 4001 }) && !isUserRejection(new Error("User rejected")));
+});
+
+test("only the wallet's code 4001 counts as a rejection; message text is never trusted", () => {
+  assert.equal(isUserRejection({ code: 4001 }), true);
+  assert.equal(isUserRejection(new Error("User rejected")), false);
+  assert.equal(isUserRejection(null), false);
 });
 
 test("row 4: signed -> tracking, and the clock restarts at signing", () => {
@@ -115,7 +120,13 @@ test("row 11: status errors or endless 'busy' give up only past the minimum wait
   assert.equal(entry(busy)?.phase, "tracking");
   busy = applyEvent(busy, "a", { type: "status-error", busy: true }, T0 + BUSY_GIVE_UP_MS);
   assert.equal(entry(busy)?.phase, "check-wallet");
-  assert.ok(isBusy({ status: 503 }) && isBusy({ status: 429 }) && !isBusy({ status: 500 }));
+});
+
+test("busy means rate limited (429) or out of RPC budget (503), not any server error", () => {
+  assert.equal(isBusy({ status: 429 }), true);
+  assert.equal(isBusy({ status: 503 }), true);
+  assert.equal(isBusy({ status: 500 }), false);
+  assert.equal(isBusy(null), false);
 });
 
 const toCheckWallet = (l: Ledger) =>

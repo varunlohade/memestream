@@ -7,5 +7,9 @@ test("splits into pieces of at most the size, keeping order (250 coins → 3 RPC
   const pieces = chunks(items, 100);
   assert.deepEqual(pieces.map((p) => p.length), [100, 100, 50]);
   assert.deepEqual(pieces.flat(), items);
+});
+
+test("an exact multiple makes full pieces only; an empty list makes none", () => {
+  assert.deepEqual(chunks([1, 2, 3, 4], 2), [[1, 2], [3, 4]]);
   assert.deepEqual(chunks([], 100), []);
 });
