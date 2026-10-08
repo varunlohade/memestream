@@ -46,3 +46,6 @@ next-env.d.ts
 
 # cached devnet program/account snapshots for the offline local chain
 .cache/
+
+# agent worktrees (local only)
+.claude/worktrees/
