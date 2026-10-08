@@ -7,7 +7,7 @@ const NOW = 1_800_000_000;
 const coin = (mint: string, symbol: string, status: CoinView["status"] = "trading", progress = 0.5) =>
   ({ mint, symbol, status, progress }) as CoinView;
 const trade = (signature: string, time: number | null, side: "buy" | "sell" = "buy"): TradeView =>
-  ({ signature, side, sol: "0.5", coins: "1", wallet: "7xKp3fWallet", time, priceSol: 1, byStreamer: false });
+  ({ signature, side, sol: "0.5", coins: "1", wallet: `wallet-${signature}`, time, priceSol: 1, byStreamer: false });
 
 test("no coins: empty tape (the strip hides)", () => {
   assert.deepEqual(buildTape([], new Map(), NOW), []);
@@ -32,4 +32,14 @@ test("trades are capped, deduplicated, and only for coins the list shows", () =>
   const tape = buildTape([coin("m", "M")], new Map([["m", [...many, many[0]]], ["hidden", [trade("x", NOW)]]]), NOW);
   assert.equal(tape.filter((t) => t.kind === "trade").length, TAPE_MAX_TRADES);
   assert.ok(!tape.some((t) => t.mint === "hidden"));
+});
+
+test("back-to-back trades by one wallet, side and coin merge into one line", () => {
+  const t = (sig: string, time: number, side: "buy" | "sell", wallet = "W1") => ({ ...trade(sig, time, side), sol: "0.005", wallet });
+  const trades = [t("a", NOW, "buy"), t("b", NOW - 1, "buy"), t("c", NOW - 2, "buy"), t("d", NOW - 3, "sell"), t("e", NOW - 4, "buy", "W2")];
+  const lines = buildTape([coin("m", "SYNTH")], new Map([["m", trades]]), NOW).filter((i) => i.kind === "trade");
+  assert.deepEqual(
+    lines.map((i) => (i.kind === "trade" ? `${i.wallet} ${i.side} ${i.sol}` : "")),
+    ["W1 buy 0.015", "W1 sell 0.005", "W2 buy 0.005"],
+  );
 });

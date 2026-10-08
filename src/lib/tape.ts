@@ -23,12 +23,21 @@ export function buildTape(coins: CoinView[], tradesByMint: Map<string, TradeView
     .sort((a, b) => (b.t.time ?? 0) - (a.t.time ?? 0))
     .slice(0, TAPE_MAX_TRADES);
 
+  // Back-to-back trades by the same wallet, side and coin read as one ("bought 0.015 SOL"), so the
+  // tape never shows the same line three times in a row.
+  const merged: { mint: string; t: TradeView; sol: number }[] = [];
+  for (const entry of trades) {
+    const last = merged.at(-1);
+    if (last && last.mint === entry.mint && last.t.wallet === entry.t.wallet && last.t.side === entry.t.side) last.sol += Number(entry.t.sol);
+    else merged.push({ ...entry, sol: Number(entry.t.sol) });
+  }
+
   const items: TapeItem[] = coins
     .filter((c) => c.status === "graduated")
     .map((c) => ({ kind: "graduated", mint: c.mint, symbol: c.symbol }));
   items.push(
-    ...trades.map(({ mint, t }): TapeItem => ({
-      kind: "trade", mint, symbol: symbolOf.get(mint) ?? "", side: t.side, sol: t.sol, wallet: t.wallet, time: t.time,
+    ...merged.map(({ mint, t, sol }): TapeItem => ({
+      kind: "trade", mint, symbol: symbolOf.get(mint) ?? "", side: t.side, sol: String(Number(sol.toFixed(9))), wallet: t.wallet, time: t.time,
     })),
   );
 

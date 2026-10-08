@@ -140,12 +140,18 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
         ))}
       </div>
       {holdings && (
-        <div className="get mute" style={{ fontSize: 22 }}>
-          <span>You hold</span>
-          <span className="num">
-            {compact(Number(holdings.coins))} {coin.symbol} · {compact(Number(holdings.sol))} SOL
-          </span>
-        </div>
+        <>
+          <div className="get mute" style={{ fontSize: 22 }}>
+            <span>You hold</span>
+            <span className="num">
+              {compact(Number(holdings.coins))} {coin.symbol}
+            </span>
+          </div>
+          <div className="get mute" style={{ fontSize: 22 }}>
+            <span>Wallet</span>
+            <span className="num">{compact(Number(holdings.sol))} SOL</span>
+          </div>
+        </>
       )}
       <div className="get">
         <span className="mute">You get about</span>

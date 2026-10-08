@@ -102,6 +102,8 @@ Board: `design/boards/MS-unverified.png`. Mock: `mc.html?opt=B&screen=home|coin&
 ## Ticker tape (2026-10-08): FINAL = B, Live trades
 Boss man picked B (2026-10-08, in this session: "b"). Build B only; A and C stay for the record.
 - Thin data rule: B shows the latest trades the app already has, newest first (max ~20). If there are fewer than 5 trades from the last 30 minutes, fill the rest with C-style items ("$TICKER, mini XP bar, %") from the cached coin list, so the tape is never empty or stuck on old trades. If there are no coins at all, hide the strip.
+- Repeats: merge back-to-back trades with the same wallet, side and coin into one item with the summed SOL ("CEmpNR bought 0.015 SOL of $SYNTH"), so the tape never shows the same line three times in a row.
+- Signed off 2026-10-08 on qa/2026-10-08-tickertape/ and design/build/e2e/05.png, with the repeat merge as the one tweak.
 A strip under the top bar, on every page except the OBS overlay. Board: `design/boards/MS-tickertape.png`. Mock: `mc.html?opt=B&screen=home&tape=A|B|C`.
 - Strip: 48px tall (40px on phones), `#111113`, 4px black bottom border, VT323 26px (22px on phones). Items are separated by a 6px gray square `#5A5A62`, not "·". No emoji: a graduation uses the coin sprite and XP green `#80FF20`.
 - A Market cap: stream thumbnail (32×18), $TICKER, market cap. No change % (that costs ~25 RPC calls per coin).
