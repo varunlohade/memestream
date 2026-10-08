@@ -39,30 +39,21 @@ export function GoLiveView() {
       <div className="p" style={{ padding: 32 }}>
         <h1>Go live</h1>
         <p className="sub mute">Launch a coin for this stream in one transaction.</p>
-        <div className="two">
-          <div className="f">
-            <span className="flabel">Image</span>
-            <div className="slot drop">
-              <span>Your coin gets its own pixel art</span>
-            </div>
-          </div>
-          <div>
-            <label className="f">
-              <span className="flabel">Stream name</span>
-              <input className="slot in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ranked till Diamond" maxLength={32} required />
-            </label>
-            <label className="f">
-              <span className="flabel">Ticker</span>
-              <input
-                className="slot in"
-                value={symbol ? `$${symbol}` : ""}
-                onChange={(e) => setSymbol(e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 10))}
-                placeholder="$MIRA"
-                required
-              />
-            </label>
-          </div>
-        </div>
+        {/* No image field yet: the coin icon is the stream's picture (SPEC: upload not built). */}
+        <label className="f">
+          <span className="flabel">Stream name</span>
+          <input className="slot in" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ranked till Diamond" maxLength={32} required />
+        </label>
+        <label className="f">
+          <span className="flabel">Ticker</span>
+          <input
+            className="slot in"
+            value={symbol ? `$${symbol}` : ""}
+            onChange={(e) => setSymbol(e.target.value.replace(/[^a-zA-Z0-9]/g, "").toUpperCase().slice(0, 10))}
+            placeholder="$MIRA"
+            required
+          />
+        </label>
         <label className="f">
           <span className="flabel">Stream link</span>
           <input

@@ -1,6 +1,6 @@
 # memestream: design spec (FINAL: option B, Deepslate night)
 
-2026-10-07, updated 2026-10-08. Owner: art_design. Status: FINAL. Boss man picked B as-is (2026-10-07, via varun-14). Overlay A and wordmark 1 are FINAL (2026-10-08, relayed by varun-14).
+2026-10-07, updated 2026-10-08. Owner: art_design. Status: FINAL. Boss man picked B as-is (2026-10-07, via varun-14). Overlay A and wordmark 1 are FINAL (2026-10-08). Boss man delegated both picks to varun-14 ("figure out which is best", "any wordmark that you prefer").
 
 **Name:** the product is "memestream", always lowercase (domain memestream.lol). It replaces "Chat Coins" (and the short-lived long name). Body copy may still say "stream coins". In the B mock, the logo is the coin sprite plus the word.
 
@@ -64,7 +64,7 @@ Shared rules (apply to B):
 - B layout: 3-column tiles. Each tile: the stream picture (16:9) with Live tag, `$TICKER`, stream name by streamer, market cap, 1-hour change, small XP bar with "% to graduation".
 
 **Go live**
-- One panel: Image slot (square), Stream name, Ticker, Stream link ("Twitch, YouTube or Kick link").
+- One panel: Image slot (square; NOT BUILT, the app has no upload yet, so leave it out until it does), Stream name, Ticker, Stream link ("Twitch, YouTube or Kick link").
 - Heart row: "80% of trade fees go to you. Your wallet can't buy this coin."
 - Primary button "Launch coin".
 
@@ -73,7 +73,7 @@ Sentence case. No ellipses. No arrows on buttons. Ticker always has `$` in title
 
 ## Stream pictures (2026-10-08, Boss man: real stream video, not pixel art)
 - Home tile: the stream's live picture from YouTube or Twitch.
-- Coin icon (header slot, overlay slot): the image the streamer uploaded. Without one, a square center crop of the stream picture.
+- Coin icon (header slot, overlay slot): a square center crop of the stream picture, else the pixel scene. Later, when image upload exists, the uploaded image comes first.
 - Coin page: the stream plays muted. People unmute it in the player.
 - Fallback: if there is no picture (stream offline, bad link, load error), show the pixel scene. Do not show a broken image or an empty box.
 - The pixel scenes in the mock stills stand in for these real pictures.

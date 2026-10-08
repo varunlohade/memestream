@@ -163,14 +163,10 @@ canvas { image-rendering: pixelated; }
 .flabel { display: block; font-size: 26px; margin-bottom: 6px; }
 .in { width: 100%; height: 60px; padding: 0 18px; border: 0; font-size: 30px; color: #fff; text-shadow: 2px 2px 0 #3f3f3f; outline: none; }
 .in::placeholder { color: #8a8a90; text-shadow: none; }
-.two { display: grid; grid-template-columns: 170px 1fr; gap: 20px; }
-.drop { width: 170px; height: 170px; padding: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 24px; text-align: center; }
 .earn { display: flex; gap: 14px; align-items: center; font-size: 26px; margin: 6px 0 20px; padding: 14px; background: rgba(255,255,255,.06); }
 .earn canvas { width: 40px; height: 40px; flex: none; }
 @media (max-width: 640px) {
   .form { margin-top: 20px; }
-  .two { grid-template-columns: 1fr; }
-  .drop { width: 120px; height: 120px; }
 }
 .chips.four { grid-template-columns: repeat(4, 1fr); }
 .chips button:disabled { opacity: .45; cursor: not-allowed; }
