@@ -117,5 +117,6 @@ export function toPoolView({ address, pool, config }: CurveState & Pick<PoolSnap
     thresholdSol: lamportsToSol(threshold),
     streamerUnclaimedSol: lamportsToSol(poolState.creatorQuoteFee),
     launchedAt: poolState.activationPoint.toNumber(),
+    meteoraPool: null, // set by the server for graduated coins (lib/damm/pool.ts)
   };
 }

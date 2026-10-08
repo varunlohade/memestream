@@ -30,6 +30,8 @@ type WalletState = {
    * Throws "Connect a wallet first" without opening any prompt if no wallet is connected.
    */
   signAndSend: (base64Tx: string) => Promise<string>;
+  /** The app's cluster as a Wallet Standard id, e.g. "solana:devnet" (read-only; for links). */
+  chain: IdentifierString;
 };
 
 const DEV_WALLET_NAME = "Test wallet (localhost)";
@@ -187,6 +189,6 @@ export function WalletProvider({ chain, children }: { chain: IdentifierString; c
   );
 
   const address = active ? (active.kind === "dev" ? active.address : active.account.address) : null;
-  const value = useMemo(() => ({ address, options, disconnect, signAndSend }), [address, options, disconnect, signAndSend]);
+  const value = useMemo(() => ({ address, options, disconnect, signAndSend, chain }), [address, options, disconnect, signAndSend, chain]);
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

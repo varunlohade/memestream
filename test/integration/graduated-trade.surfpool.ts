@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import type { Surfnet } from "@solana/surfpool";
-import { Connection, Keypair, type PublicKey, Transaction } from "@solana/web3.js";
+import { Connection, Keypair, type PublicKey, PublicKey as PublicKeyCtor, Transaction } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
@@ -88,4 +88,21 @@ test("after graduation a trade still never fills below the minimum the user saw"
   assert.equal(outcome.status, "failed", "the seen minimum makes it fail rather than fill worse");
   // DAMM v2's ExceededSlippage is also 6002, so people read the same "price moved" message.
   assert.match("error" in outcome ? (outcome.error ?? "") : "", /price moved since your quote/);
+});
+
+test("a graduated coin shows its Meteora pool, live price and the trades made there", async () => {
+  const { getCoinDetail, listCoins } = await import("../../src/server/coins");
+  const { dammPriceInSol, loadDammSnapshot } = await import("../../src/lib/damm/pool");
+  const detail = await getCoinDetail(mint.toBase58(), viewer.publicKey.toBase58());
+  assert.ok(detail?.coin.meteoraPool, "has its Meteora pool");
+  assert.equal(detail.coin.status, "graduated");
+  const live = await loadDammSnapshot(connection, new PublicKeyCtor(detail.coin.meteoraPool));
+  assert.ok(live);
+  assert.equal(detail.coin.priceSol, dammPriceInSol(live.state), "price is the pool's, not the frozen curve's");
+  assert.ok(detail.trades.some((t) => t.wallet === viewer.publicKey.toBase58() && t.side === "buy"), "the viewer's pool buy shows");
+  assert.ok(detail.trades.some((t) => t.wallet === viewer.publicKey.toBase58() && t.side === "sell"), "the viewer's pool sell shows");
+
+  const listed = (await listCoins()).find((c) => c.mint === mint.toBase58());
+  assert.equal(listed?.meteoraPool, detail.coin.meteoraPool);
+  assert.equal(listed?.priceSol, detail.coin.priceSol);
 });

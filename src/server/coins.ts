@@ -1,11 +1,12 @@
 /** Read-side of the app: lists coins, one coin's detail, its recent trades, a wallet's holdings. */
 import "server-only";
-import type { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import type { DynamicBondingCurveClient, PoolConfig } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import type { CoinDetail, CoinView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
+import { fetchDammPools, graduatedPoolAddress, withGraduatedPool } from "@/lib/damm/pool";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
 import { isCanonicalTicker } from "@/lib/short-link";
@@ -43,13 +44,34 @@ async function scanCoins(): Promise<CoinView[]> {
   const { client, connection, config } = getChain();
   const [pools, poolConfig] = await Promise.all([client.state.getPoolsByConfig(config), loadConfig(client, config)]);
   // The scan already returns each pool's state, so build views from it: no per-pool refetch.
-  const views = pools.map((p) => toPoolView({ address: p.publicKey, pool: p.account, config: poolConfig }));
+  const views = await withGraduatedPrices(
+    connection,
+    poolConfig,
+    pools.map((p) => toPoolView({ address: p.publicKey, pool: p.account, config: poolConfig })),
+  );
   // Only tickers our launch could have written: on-chain launches with look-alike tickers are hidden.
   return (await withMetadata(connection, views)).filter((coin) => isCanonicalTicker(coin.symbol));
 }
 
-/** A scan: one program-account scan, the config, and one metadata call per 100 coins (last known count). */
-const listScanCalls = () => 2 + Math.max(1, Math.ceil((listCache?.coins.length ?? 0) / MAX_ACCOUNTS_PER_CALL));
+/**
+ * A scan: one program-account scan, the config, one metadata call per 100 coins, and one Meteora
+ * pool read per 100 graduated coins (from the last known list).
+ */
+const listScanCalls = () => {
+  const coins = listCache?.coins ?? [];
+  const graduated = coins.filter((c) => c.status === "graduated").length;
+  return 2 + Math.max(1, Math.ceil(coins.length / MAX_ACCOUNTS_PER_CALL)) + Math.ceil(graduated / MAX_ACCOUNTS_PER_CALL);
+};
+
+/** Graduated coins get their live Meteora price (their curve froze at graduation): one read per 100. */
+async function withGraduatedPrices(connection: Connection, config: PoolConfig, views: PoolView[]): Promise<PoolView[]> {
+  const graduated = views.filter((v) => v.status === "graduated");
+  if (graduated.length === 0) return views;
+  const addresses = graduated.map((v) => graduatedPoolAddress(config, new PublicKey(v.mint)));
+  const states = await fetchDammPools(connection, addresses);
+  const priced = new Map(graduated.map((v, i) => [v.mint, withGraduatedPool(v, addresses[i], states[i])]));
+  return views.map((v) => priced.get(v.mint) ?? v);
+}
 
 /**
  * Every coin launched on our config. `allowScan` is asked before a fresh scan (the RPC budget);
@@ -83,14 +105,26 @@ async function refreshList(allowScan: () => Promise<boolean>): Promise<CoinView[
 }
 
 /** A coin's view plus the vault addresses its trade history needs. */
-async function loadCoin(mint: string): Promise<{ coin: CoinView; vaults: PoolVaults } | null> {
+/** Where a coin's trades happen: its curve, or after graduation its Meteora pool. */
+type TradeVenue = { address: PublicKey; vaults: PoolVaults };
+
+async function loadCoin(mint: string): Promise<{ coin: CoinView; venue: TradeVenue } | null> {
   const { client, connection } = getChain();
   const address = poolForMint(mint);
   const pool = address && (await client.state.getPool(address));
   if (!address || !pool) return null;
   const config = await loadConfig(client, pool.poolState.config);
-  const [coin] = await withMetadata(connection, [toPoolView({ address, pool, config })]);
-  return { coin, vaults: { quote: pool.poolState.quoteVault, base: pool.poolState.baseVault } };
+  let view = toPoolView({ address, pool, config });
+  let venue: TradeVenue = { address, vaults: { quote: pool.poolState.quoteVault, base: pool.poolState.baseVault } };
+  if (view.status === "graduated") {
+    // Live price and trades come from the Meteora pool; the curve froze at graduation.
+    const damm = graduatedPoolAddress(config, pool.poolState.baseMint);
+    const [state] = await fetchDammPools(connection, [damm]);
+    view = withGraduatedPool(view, damm, state);
+    if (state) venue = { address: damm, vaults: { quote: state.tokenBVault, base: state.tokenAVault } };
+  }
+  const [coin] = await withMetadata(connection, [view]);
+  return { coin, venue };
 }
 
 /**
@@ -103,8 +137,8 @@ async function loadCoin(mint: string): Promise<{ coin: CoinView; vaults: PoolVau
 const DETAIL_CACHE_MS = 4_000;
 const HOLDINGS_CACHE_MS = 2_000;
 const MISS_CACHE_MS = 30_000;
-/** A miss reads the pool, config, metadata and ~25 trades: roughly this many RPC calls. */
-const COIN_RPC_CALLS = 24;
+/** A miss reads the pool, config, metadata, the Meteora pool once graduated, and ~25 trades: roughly this many RPC calls. */
+const COIN_RPC_CALLS = 25;
 /** A wallet's SOL balance and its token account. */
 const HOLDINGS_RPC_CALLS = 2;
 /** Checking that the coin's pool exists first costs one call, so junk addresses can't drain the budget. */
@@ -171,8 +205,8 @@ function remember<T>(cache: Map<string, { at: number; value: T }>, key: string, 
 async function readCoinAndTrades(mint: string): Promise<CoinAndTrades | null> {
   const loaded = await loadCoin(mint);
   if (!loaded) return null;
-  const { coin, vaults } = loaded;
-  const trades = await recentTrades(getChain().client, coin, vaults).catch((error) => {
+  const { coin, venue } = loaded;
+  const trades = await recentTrades(getChain().client, coin, venue).catch((error) => {
     console.warn("trade history unavailable:", (error as Error).message);
     return [];
   });
@@ -205,8 +239,8 @@ export async function getTape(): Promise<TapeItem[]> {
 const TRADE_HISTORY_LIMIT = 25;
 
 /** The pool's last few swaps (two RPC calls); other transactions on the pool are skipped. */
-async function recentTrades(client: DynamicBondingCurveClient, coin: CoinView, vaults: PoolVaults): Promise<TradeView[]> {
-  const signatures = await client.connection.getSignaturesForAddress(new PublicKey(coin.pool), { limit: TRADE_HISTORY_LIMIT });
+async function recentTrades(client: DynamicBondingCurveClient, coin: CoinView, { address, vaults }: TradeVenue): Promise<TradeView[]> {
+  const signatures = await client.connection.getSignaturesForAddress(address, { limit: TRADE_HISTORY_LIMIT });
   const transactions = await client.connection.getParsedTransactions(
     signatures.map((s) => s.signature),
     { maxSupportedTransactionVersion: 0 },

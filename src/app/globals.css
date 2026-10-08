@@ -245,3 +245,6 @@ button.unv { cursor: help; }
   .tape-track { animation: none; }
   .tape-track > ul { display: none; }
 }
+
+.meteora-note { font-size: 22px; margin: 10px 0 0; }
+.meteora-note a { color: var(--fg); }

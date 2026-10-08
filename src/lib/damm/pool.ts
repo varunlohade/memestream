@@ -7,6 +7,7 @@ import { ActivationType, CpAmm, getPriceFromSqrtPrice, type PoolState } from "@m
 import { deriveDammV2PoolAddress, type PoolConfig } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { type Connection, type PublicKey, SYSVAR_CLOCK_PUBKEY } from "@solana/web3.js";
 import BN from "bn.js";
+import type { PoolView } from "../dbc/pool";
 import { dammConfigFor } from "../dbc/graduate";
 import { BASE_DECIMALS, QUOTE } from "../dbc/units";
 
@@ -46,3 +47,23 @@ async function clockPoint(connection: Connection, activationType: number): Promi
 /** SOL per coin in the graduated pool. */
 export const dammPriceInSol = (state: PoolState): number =>
   Number(getPriceFromSqrtPrice(state.sqrtPrice, BASE_DECIMALS, QUOTE.decimals));
+
+/**
+ * Many DAMM v2 pools in batched reads (Anchor's fetchMultiple: up to 99 accounts per call), in
+ * order; null where a pool doesn't exist.
+ */
+export async function fetchDammPools(connection: Connection, addresses: PublicKey[]): Promise<(PoolState | null)[]> {
+  if (addresses.length === 0) return [];
+  return (await new CpAmm(connection)._program.account.pool.fetchMultiple(addresses)) as (PoolState | null)[];
+}
+
+/**
+ * A graduated coin's view with its live Meteora price: the curve's numbers froze at graduation.
+ * Market cap keeps the curve's supply basis (the full supply never changes).
+ */
+export function withGraduatedPool<T extends PoolView>(view: T, address: PublicKey, state: PoolState | null): T {
+  if (!state) return { ...view, meteoraPool: address.toBase58() };
+  const price = dammPriceInSol(state);
+  const supply = view.priceSol > 0 ? view.marketCapSol / view.priceSol : 0;
+  return { ...view, meteoraPool: address.toBase58(), priceSol: price, marketCapSol: price * supply };
+}

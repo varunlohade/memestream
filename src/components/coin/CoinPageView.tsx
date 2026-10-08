@@ -32,6 +32,29 @@ function StreamEmbed({ coin }: { coin: CoinView }) {
   );
 }
 
+/** A graduated coin trades in its Meteora pool: say so, with links to the pool (and Jupiter on mainnet). */
+function MeteoraNote({ coin }: { coin: CoinView }) {
+  const { chain } = useWallet();
+  if (!coin.meteoraPool) return null;
+  const cluster = chain === "solana:mainnet" ? "" : `?cluster=${chain.replace("solana:", "")}`;
+  return (
+    <p className="mute meteora-note">
+      Graduated: trades in its Meteora pool.{" "}
+      <a href={`https://explorer.solana.com/address/${coin.meteoraPool}${cluster}`} target="_blank" rel="noopener noreferrer">
+        View pool
+      </a>
+      {chain === "solana:mainnet" && (
+        <>
+          {" · "}
+          <a href={`https://jup.ag/swap/SOL-${coin.mint}`} target="_blank" rel="noopener noreferrer">
+            Jupiter
+          </a>
+        </>
+      )}
+    </p>
+  );
+}
+
 function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) {
   if (trades.length === 0) return <p className="mute" style={{ fontSize: 24 }}>No trades yet.</p>;
   return (
@@ -163,9 +186,10 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
           </div>
         </section>
         {graduated ? (
-          <div className="p">
-            <p style={{ fontSize: 26 }}>This coin graduated. It now trades in a Meteora pool.</p>
-          </div>
+          <>
+            <TradeBox key={coin.mint} coin={coin} holdings={holdings} onTraded={refresh} />
+            <MeteoraNote coin={coin} />
+          </>
         ) : coin.status === "graduating" ? (
           <div className="p">
             <p style={{ fontSize: 26 }}>The curve is full. Graduate the coin to open its Meteora pool.</p>

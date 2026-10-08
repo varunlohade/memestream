@@ -167,6 +167,18 @@ await step("anyone graduates the coin to Meteora", async (p) => {
   await waitForChain(mint, "LOFI graduated", (d) => d.coin.status === "graduated");
 });
 
+await step("after graduation the viewer buys $LOFI in its Meteora pool", async (p) => {
+  const mint = await mintOf("LOFI");
+  const before = held(await detail(mint));
+  await openCoin(p, "LOFI");
+  await waitText(p, "trades in its Meteora pool");
+  await clickTab(p, "Buy");
+  await typeAmount(p, "0.01");
+  await waitText(p, "You get about");
+  await p.locator(`button${text("Buy LOFI")}:not([disabled])`).setTimeout(20_000).click();
+  await waitForChain(mint, "LOFI balance went up in the Meteora pool", (d) => held(d) > before);
+});
+
 await step("streamer claims earnings on their own coin", async (p) => {
   const mint = await mintOf("DEV");
   await openCoin(p, "DEV");

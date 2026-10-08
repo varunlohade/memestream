@@ -29,6 +29,8 @@ export type CoinView = {
   symbol: string;
   /** Normalised Twitch/YouTube/Kick link, if the streamer gave one. */
   streamUrl: string | null;
+  /** The Meteora DAMM v2 pool a graduated coin trades in (null before graduation). */
+  meteoraPool: string | null;
 };
 
 export type TradeView = {
