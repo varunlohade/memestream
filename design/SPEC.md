@@ -88,6 +88,15 @@ Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B
 - Graduated state (all): the bar fills, the % becomes "Graduated", and A adds "Now trading on Meteora".
 - The real overlay page has a transparent body. The game picture in the mocks is a stand-in. Text sizes are for a 1920×1080 canvas; the XP number has an 8px black stroke for busy backgrounds.
 
+## Unverified badge (2026-10-08): waiting for Boss man's pick
+Why: anyone can launch a coin with any YouTube/Twitch link, and there's no channel check until channel OAuth (week 3). Audit M2; steve approved an honest label. Not on the OBS overlay.
+Board: `design/boards/MS-unverified.png`. Mock: `mc.html?opt=B&screen=home|coin&unv=A|B|C`.
+- A Gray tag: "Unverified" tag next to Live on the tile picture (`#3E3E44`, `#D8D8DC` text, VT323 22px, 3px black border). On the coin page, the same tag after $TICKER, with a hover/tap note.
+- B Quiet word: muted "Unverified" at the right of tile row 2. On the coin page, a muted line under "by <wallet>": "Unverified. We haven't checked that this streamer owns the channel." No hover needed.
+- C Icon: small gray "?" block after $TICKER on tiles and the coin page, with the hover/tap note.
+- Note text (all): "We haven't checked that this streamer owns the channel."
+- art_design recommends B: the quietest, and the note is readable without hover (phones have no hover).
+
 ## Open
 - Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.
 - Overlay on the deployed site signed off 2026-10-08 (672c701, qa/.../overlay-deployed.png), with one tweak: the link row in `#EDEDED`.

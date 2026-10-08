@@ -3,6 +3,10 @@
 Every item needs Boss man's explicit go. The DBC config is fixed once created on mainnet:
 none of its parameters can change later, so all of them must be right first.
 
+## Process (steve, 2026-10-08)
+- From mainnet onward, a money change (tx builders, presets, fees, tx-flow) deploys only AFTER a fresh
+  auditor reports it clean. On devnet, deploy-then-audit is acceptable.
+
 ## Decisions (Boss man)
 - [x] **Launch fee: 0.05 SOL** (Boss man, 2026-10-08, via steve). `COIN_PRESETS["mainnet-beta"].launchFeeSol`,
       pinned in `config.test.ts`; `mainnet-config.surfpool.ts` proves a launch costs exactly 0.05 SOL
