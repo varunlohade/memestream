@@ -10,8 +10,8 @@ import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk
 import type { Surfnet } from "@solana/surfpool";
 import { Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
+import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
-import { buildCreateConfigTx } from "../../src/lib/dbc/config";
 import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
 import { loadPoolSnapshot } from "../../src/lib/dbc/pool";
 import { COIN_PRESETS, LAUNCH_FEE } from "../../src/lib/dbc/preset";
@@ -30,13 +30,8 @@ test("with a real-time clock, the launch fee settles to the base after the first
   surfnet = await startOfflineSurfnet([partner, streamer], { realTimeClock: true });
   const client = new DynamicBondingCurveClient(new Connection(surfnet.rpcUrl, "confirmed"), "confirmed");
 
-  const config = await buildCreateConfigTx(client, COIN_PRESETS.devnet, {
-    payer: partner.publicKey,
-    feeClaimer: partner.publicKey,
-    leftoverReceiver: partner.publicKey,
-  });
-  await sendAndConfirm(client.connection, config, [partner]);
-  const launch = await buildCreateStreamCoinTx(client, { name: "Clock", symbol: "CLK", uri: "https://x.io/c" }, { config: config.config, creator: streamer.publicKey });
+  const { config } = await createConfigOwnedBy(client, COIN_PRESETS.devnet, partner);
+  const launch = await buildCreateStreamCoinTx(client, { name: "Clock", symbol: "CLK", uri: "https://x.io/c" }, { config, creator: streamer.publicKey });
   await sendAndConfirm(client.connection, launch, [streamer]);
   const pool = (await client.state.getPoolByBaseMint(launch.mint))?.publicKey as PublicKey;
 

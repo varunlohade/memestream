@@ -5,11 +5,10 @@
  */
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { LAMPORTS_PER_SOL } from "@solana/web3.js";
-import { buildCreateConfigTx } from "../src/lib/dbc/config";
 import { COIN_PRESETS } from "../src/lib/dbc/preset";
 import { connectToDevnet } from "./devnet";
 import { readKeypair } from "./keys";
-import { sendAndConfirm } from "./local-chain/send-and-confirm";
+import { createConfigOwnedBy } from "./local-chain/partner-config";
 
 const MIN_SOL = 0.05;
 
@@ -19,10 +18,5 @@ const balance = (await connection.getBalance(partner.publicKey)) / LAMPORTS_PER_
 if (balance < MIN_SOL) throw new Error(`Partner ${partner.publicKey.toBase58()} has ${balance} devnet SOL; fund it first.`);
 
 const client = new DynamicBondingCurveClient(connection, "confirmed");
-const configTx = await buildCreateConfigTx(client, COIN_PRESETS.devnet, {
-  payer: partner.publicKey,
-  feeClaimer: partner.publicKey,
-  leftoverReceiver: partner.publicKey,
-});
-const signature = await sendAndConfirm(connection, configTx, [partner]);
-console.log(`config ${configTx.config.toBase58()}\nsignature ${signature}\nSet MEMESTREAM_CONFIG to the config address.`);
+const { config, signature } = await createConfigOwnedBy(client, COIN_PRESETS.devnet, partner);
+console.log(`config ${config.toBase58()}\nsignature ${signature}\nSet MEMESTREAM_CONFIG to the config address.`);

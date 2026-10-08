@@ -7,7 +7,6 @@
 import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { Connection, Keypair } from "@solana/web3.js";
-import { buildCreateConfigTx } from "../src/lib/dbc/config";
 import { buildCreateStreamCoinTx } from "../src/lib/dbc/launch";
 import { loadPoolSnapshot } from "../src/lib/dbc/pool";
 import { COIN_PRESETS } from "../src/lib/dbc/preset";
@@ -16,6 +15,7 @@ import { solToLamports } from "../src/lib/dbc/units";
 import { metadataUri, parseStreamLink } from "../src/lib/stream-link";
 import { readOrCreateKeypair } from "./keys";
 import { startOfflineSurfnet } from "./local-chain/offline-surfnet";
+import { createConfigOwnedBy } from "./local-chain/partner-config";
 import { sendAndConfirm } from "./local-chain/send-and-confirm";
 
 const KEYS_DIR = ".keys";
@@ -48,18 +48,13 @@ async function main() {
   const connection = new Connection(surfnet.rpcUrl, "confirmed");
   const client = new DynamicBondingCurveClient(connection, "confirmed");
 
-  const configTx = await buildCreateConfigTx(client, COIN_PRESETS.devnet, {
-    payer: partner.publicKey,
-    feeClaimer: partner.publicKey,
-    leftoverReceiver: partner.publicKey,
-  });
-  await sendAndConfirm(connection, configTx, [partner]);
+  const { config } = await createConfigOwnedBy(client, COIN_PRESETS.devnet, partner);
 
   for (const [i, stream] of SAMPLE_STREAMS.entries()) {
     const launch = await buildCreateStreamCoinTx(
       client,
       { name: stream.name, symbol: stream.symbol, uri: (mint) => metadataUri(APP_ORIGIN, mint.toBase58(), parseStreamLink(stream.link)) },
-      { config: configTx.config, creator: streamers[i].publicKey },
+      { config, creator: streamers[i].publicKey },
     );
     await sendAndConfirm(connection, launch, [streamers[i]]);
     const pool = (await client.state.getPoolByBaseMint(launch.mint))?.publicKey;
@@ -78,7 +73,7 @@ async function main() {
     [
       "# Written by scripts/dev-chain.ts. Local Surfpool fork; regenerated on every run.",
       `MEMESTREAM_RPC_URL=${surfnet.rpcUrl}`,
-      `MEMESTREAM_CONFIG=${configTx.config.toBase58()}`,
+      `MEMESTREAM_CONFIG=${config.toBase58()}`,
       `MEMESTREAM_PUBLIC_URL=${APP_ORIGIN}`,
       "MEMESTREAM_NETWORK_LABEL=Local",
       `MEMESTREAM_DEV_WALLET_KEY=${process.cwd()}/${KEYS_DIR}/local-dev-wallet.json`,
@@ -87,7 +82,7 @@ async function main() {
   );
   renameSync(".env.local.tmp", ".env.local");
   console.log(`\nlocal chain ready at ${surfnet.rpcUrl}`);
-  console.log(`config ${configTx.config.toBase58()}`);
+  console.log(`config ${config.toBase58()}`);
   console.log(`dev wallet ${devWallet.publicKey.toBase58()} (20 SOL)`);
   console.log("wrote .env.local. Now run: npm run dev. Ctrl+C here stops the chain.");
 

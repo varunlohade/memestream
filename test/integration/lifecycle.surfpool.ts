@@ -7,7 +7,6 @@ import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk
 import { getAccount, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { Surfnet } from "@solana/surfpool";
 import { Connection, Keypair, type PublicKey } from "@solana/web3.js";
-import { buildCreateConfigTx } from "../../src/lib/dbc/config";
 import { buildClaimEarningsTx, unclaimedStreamerFees } from "../../src/lib/dbc/fees";
 import { buildGraduateTx } from "../../src/lib/dbc/graduate";
 import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
@@ -17,6 +16,7 @@ import { prepareTrade, quoteTrade, type TradeInput } from "../../src/lib/dbc/tra
 import { solToLamports, toBN } from "../../src/lib/dbc/units";
 import { stepRunner } from "../support/steps";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
+import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 
 const preset = COIN_PRESETS.devnet;
@@ -60,13 +60,7 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
   };
 
   await step("platform creates the config with the preset's threshold", async () => {
-    const built = await buildCreateConfigTx(client, preset, {
-      payer: partner.publicKey,
-      feeClaimer: partner.publicKey,
-      leftoverReceiver: partner.publicKey,
-    });
-    await sendAndConfirm(client.connection, built, [partner]);
-    config = built.config;
+    config = (await createConfigOwnedBy(client, preset, partner)).config;
 
     const onChain = await client.state.getPoolConfig(config);
     assert.ok(onChain);

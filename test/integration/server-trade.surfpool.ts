@@ -7,8 +7,8 @@ import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk
 import type { Surfnet } from "@solana/surfpool";
 import { Connection, Keypair, type PublicKey, Transaction } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
+import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
-import { buildCreateConfigTx } from "../../src/lib/dbc/config";
 import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
 import { COIN_PRESETS } from "../../src/lib/dbc/preset";
 import { pollUntil } from "../../src/lib/poll";
@@ -24,18 +24,13 @@ before(async () => {
   surfnet = await startOfflineSurfnet([partner, streamer, viewer]);
   connection = new Connection(surfnet.rpcUrl, "confirmed");
   const client = new DynamicBondingCurveClient(connection, "confirmed");
-  const config = await buildCreateConfigTx(client, COIN_PRESETS.devnet, {
-    payer: partner.publicKey,
-    feeClaimer: partner.publicKey,
-    leftoverReceiver: partner.publicKey,
-  });
-  await sendAndConfirm(client.connection, config, [partner]);
-  const launch = await buildCreateStreamCoinTx(client, { name: "Rule", symbol: "RULE", uri: "https://x.io/r" }, { config: config.config, creator: streamer.publicKey });
+  const { config } = await createConfigOwnedBy(client, COIN_PRESETS.devnet, partner);
+  const launch = await buildCreateStreamCoinTx(client, { name: "Rule", symbol: "RULE", uri: "https://x.io/r" }, { config, creator: streamer.publicKey });
   await sendAndConfirm(client.connection, launch, [streamer]);
   mint = launch.mint;
 
   process.env.MEMESTREAM_RPC_URL = surfnet.rpcUrl;
-  process.env.MEMESTREAM_CONFIG = config.config.toBase58();
+  process.env.MEMESTREAM_CONFIG = config.toBase58();
   process.env.MEMESTREAM_PUBLIC_URL = "http://127.0.0.1:3000";
   server = await import("../../src/server/transactions");
 });
