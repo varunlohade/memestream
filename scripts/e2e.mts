@@ -99,7 +99,8 @@ const held = (d: Detail) => Number(d.holdings?.coins ?? 0);
 
 async function openCoin(p: Page, ticker: string) {
   await p.goto(BASE, { waitUntil: "domcontentloaded" });
-  await click(p, `$${ticker}`);
+  // The coin's tile in the grid (the ticker tape at the top also names coins, and it moves).
+  await p.locator(`.grid ${text(`$${ticker}`)}`).setTimeout(20_000).click();
   await waitText(p, "Graduation");
 }
 
@@ -114,14 +115,17 @@ await step("connect the localhost test wallet", async (p) => {
   await p.waitForFunction(() => !document.querySelector(".wallet")?.textContent?.includes("Connect"), { timeout: 15_000 });
 });
 
+// A new ticker each run: the server refuses a ticker that's already taken (first coin keeps it).
+const E2E_TICKER = `E2E${Date.now().toString(36).slice(-5).toUpperCase()}`;
+
 await step("streamer launches a coin from Go live", async (p) => {
   await click(p, "Go live");
   await typeInto(p, "Ranked till Diamond", "E2E launch stream");
-  await typeInto(p, "$MIRA", "E2E");
+  await typeInto(p, "$MIRA", E2E_TICKER);
   await typeInto(p, "YouTube or Twitch live link", "https://www.youtube.com/watch?v=M3HKLzjvKPc");
   await click(p, "Launch coin");
   await p.waitForFunction(() => location.pathname.startsWith("/coin/"), { timeout: 120_000 });
-  await waitText(p, "$E2E");
+  await waitText(p, `$${E2E_TICKER}`);
   return p.url();
 });
 
