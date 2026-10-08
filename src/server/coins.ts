@@ -11,7 +11,7 @@ import { streamLinkFromUri } from "@/lib/stream-link";
 import { getChain, poolForMint } from "./chain";
 import { BusyError } from "./errors";
 import { takeRpcBudget } from "./rpc-budget";
-import { loadMetadata } from "./metadata";
+import { loadMetadata, MAX_ACCOUNTS_PER_CALL } from "./metadata";
 
 async function withMetadata(connection: Connection, views: PoolView[]): Promise<CoinView[]> {
   const metadata = await loadMetadata(connection, views.map((v) => new PublicKey(v.mint)));
@@ -44,10 +44,10 @@ async function scanCoins(): Promise<CoinView[]> {
  * Every coin launched on our config. `allowScan` is asked before a fresh scan (the RPC budget);
  * if it says no, the last good list is served.
  */
-/** A scan: one program-account scan, the config, and one metadata batch. */
-const LIST_SCAN_CALLS = 3;
+/** A scan: one program-account scan, the config, and one metadata call per 100 coins (last known count). */
+const listScanCalls = () => 2 + Math.max(1, Math.ceil((listCache?.coins.length ?? 0) / MAX_ACCOUNTS_PER_CALL));
 
-export async function listCoins(allowScan: () => Promise<boolean> = () => takeRpcBudget(LIST_SCAN_CALLS)): Promise<CoinView[]> {
+export async function listCoins(allowScan: () => Promise<boolean> = () => takeRpcBudget(listScanCalls())): Promise<CoinView[]> {
   if (listCache && Date.now() - listCache.at < LIST_TTL_MS) return listCache.coins;
   // Set synchronously, so concurrent callers share one budget check and one scan.
   listInFlight ??= refreshList(allowScan).finally(() => {
@@ -87,65 +87,80 @@ async function loadCoin(mint: string): Promise<{ coin: CoinView; vaults: { quote
 
 /**
  * Coin detail is read by the API route AND by server-rendered pages (coin page, OBS overlay), so
- * the cache and the RPC budget live here, shared by all of them. Many viewers cost about the same
- * RPC as one; unknown coins are remembered for 30 s so made-up addresses can't force reads; if
+ * the cache and the RPC budget live here, shared by all of them. The coin and its trades are cached
+ * per coin, and a wallet's holdings separately, so made-up wallet addresses cost 2 calls, not a
+ * full read. Unknown coins are remembered for 30 s so made-up addresses can't force reads; if
  * trade history briefly fails, the last good trades are kept.
  */
 const DETAIL_CACHE_MS = 4_000;
-const WALLET_DETAIL_CACHE_MS = 2_000;
+const HOLDINGS_CACHE_MS = 2_000;
 const MISS_CACHE_MS = 30_000;
-/** A miss reads the pool, config, metadata, ~25 trades and holdings: roughly this many RPC calls. */
-const DETAIL_RPC_CALLS = 26;
+/** A miss reads the pool, config, metadata and ~25 trades: roughly this many RPC calls. */
+const COIN_RPC_CALLS = 24;
+/** A wallet's SOL balance and its token account. */
+const HOLDINGS_RPC_CALLS = 2;
 /** Checking that the coin's pool exists first costs one call, so junk addresses can't drain the budget. */
 const EXISTS_RPC_CALLS = 1;
-const detailCache = new Map<string, { at: number; detail: CoinDetail | null }>();
+const MAX_CACHED = 2_000;
+type CoinAndTrades = Omit<CoinDetail, "holdings">;
+const coinCache = new Map<string, { at: number; value: CoinAndTrades | null }>();
+const holdingsCache = new Map<string, { at: number; value: Holdings | null }>();
 
 /**
  * Coin, recent trades and (optionally) a wallet's holdings, or null if it isn't a memestream coin.
  * Throws BusyError when the RPC budget says no.
  */
 export async function getCoinDetail(mint: string, wallet: string | null): Promise<CoinDetail | null> {
-  const key = `${mint}|${wallet ?? ""}`;
+  const base = await coinAndTrades(mint);
+  if (!base) return null;
+  return { ...base, holdings: wallet ? await holdingsFor(mint, wallet) : null };
+}
+
+async function coinAndTrades(mint: string): Promise<CoinAndTrades | null> {
   const now = Date.now();
-  const hit = detailCache.get(key);
-  const ttl = hit?.detail === null ? MISS_CACHE_MS : wallet ? WALLET_DETAIL_CACHE_MS : DETAIL_CACHE_MS;
-  if (hit && now - hit.at < ttl) return hit.detail;
+  const hit = coinCache.get(mint);
+  if (hit && now - hit.at < (hit.value === null ? MISS_CACHE_MS : DETAIL_CACHE_MS)) return hit.value;
 
   // Cheap existence check first (only when we don't already know the coin): unknown or made-up
   // addresses cost one call and are remembered as misses for 30 s.
-  if (!hit?.detail) {
+  if (!hit?.value) {
     const pool = poolForMint(mint);
-    if (!pool) return remember(key, null, now);
+    if (!pool) return remember(coinCache, mint, null, now);
     if (!(await takeRpcBudget(EXISTS_RPC_CALLS))) throw new BusyError();
-    if (!(await getChain().connection.getAccountInfo(pool))) return remember(key, null, now);
+    if (!(await getChain().connection.getAccountInfo(pool))) return remember(coinCache, mint, null, now);
   }
-  if (!(await takeRpcBudget(DETAIL_RPC_CALLS - EXISTS_RPC_CALLS))) throw new BusyError();
+  if (!(await takeRpcBudget(COIN_RPC_CALLS - EXISTS_RPC_CALLS))) throw new BusyError();
 
-  const fetched = await readCoinDetail(mint, wallet);
-  const previous = hit?.detail;
-  const detail =
-    fetched && fetched.trades.length === 0 && previous?.trades.length ? { ...fetched, trades: previous.trades } : fetched;
-  return remember(key, detail, now);
+  const fetched = await readCoinAndTrades(mint);
+  const previous = hit?.value;
+  const value = fetched && fetched.trades.length === 0 && previous?.trades.length ? { ...fetched, trades: previous.trades } : fetched;
+  return remember(coinCache, mint, value, now);
 }
 
-function remember(key: string, detail: CoinDetail | null, now: number): CoinDetail | null {
-  detailCache.set(key, { at: now, detail });
-  if (detailCache.size > 2_000) for (const [k, v] of detailCache) if (now - v.at > MISS_CACHE_MS) detailCache.delete(k);
-  return detail;
+async function holdingsFor(mint: string, wallet: string): Promise<Holdings | null> {
+  const key = `${mint}|${wallet}`;
+  const now = Date.now();
+  const hit = holdingsCache.get(key);
+  if (hit && now - hit.at < HOLDINGS_CACHE_MS) return hit.value;
+  if (!(await takeRpcBudget(HOLDINGS_RPC_CALLS))) throw new BusyError();
+  return remember(holdingsCache, key, await walletHoldings(mint, wallet), now);
 }
 
-async function readCoinDetail(mint: string, wallet: string | null): Promise<CoinDetail | null> {
+function remember<T>(cache: Map<string, { at: number; value: T }>, key: string, value: T, now: number): T {
+  cache.set(key, { at: now, value });
+  if (cache.size > MAX_CACHED) for (const [k, v] of cache) if (now - v.at > MISS_CACHE_MS) cache.delete(k);
+  return value;
+}
+
+async function readCoinAndTrades(mint: string): Promise<CoinAndTrades | null> {
   const loaded = await loadCoin(mint);
   if (!loaded) return null;
   const { coin, vaults } = loaded;
-  const [trades, holdings] = await Promise.all([
-    recentTrades(getChain().client, coin, vaults).catch((error) => {
-      console.warn("trade history unavailable:", (error as Error).message);
-      return [];
-    }),
-    wallet ? walletHoldings(mint, wallet) : null,
-  ]);
-  return { coin, trades, holdings };
+  const trades = await recentTrades(getChain().client, coin, vaults).catch((error) => {
+    console.warn("trade history unavailable:", (error as Error).message);
+    return [];
+  });
+  return { coin, trades };
 }
 
 const TRADE_HISTORY_LIMIT = 25;

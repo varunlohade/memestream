@@ -3,6 +3,18 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   cacheComponents: true,
+  async headers() {
+    const safe = [
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+    ];
+    return [
+      // Trade pages can't be framed by other sites (clickjacking). The OBS overlay stays
+      // embeddable, since some streaming tools load browser sources inside an iframe.
+      { source: "/((?!overlay/).*)", headers: [...safe, { key: "Content-Security-Policy", value: "frame-ancestors 'none'" }] },
+      { source: "/overlay/:path*", headers: safe },
+    ];
+  },
   // YouTube and Twitch stream pictures on coin tiles and coin icons.
   images: {
     remotePatterns: [
