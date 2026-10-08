@@ -82,7 +82,7 @@ Sentence case. No ellipses. No arrows on buttons. Ticker always has `$` in title
 ## OBS overlay (week 2, style B): FINAL = A, Corner panel
 Build A only. B and C stay for the record. Reason given: A covers the least gameplay, and game HUDs often sit at bottom center, where C would go.
 Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B|C&phase=live|grad`. Stills: `design/mock/mc/B-overlay-*.png`.
-- A Corner panel: 600px panel bottom-left. Coin slot, $TICKER, memestream.lol/<ticker>, market cap, change, XP bar with %, "to graduation".
+- A Corner panel: 600px panel bottom-left. Row 1: coin slot, $TICKER, market cap (one line) over change. Row 2: the link, full width, 26px, text color `#EDEDED` (not muted: it is the one thing viewers act on), no "https://", one line, ellipsis only as a last resort. Then the XP bar with %, then "to graduation".
 - B Top strip: full-width strip at the top. Coin, ticker, cap, change, XP bar, %, link.
 - C Hotbar: bottom center, 1080px wide, like a game hotbar. XP bar on top, four slots below (ticker, cap, change, link).
 - Graduated state (all): the bar fills, the % becomes "Graduated", and A adds "Now trading on Meteora".
@@ -90,5 +90,5 @@ Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B
 
 ## Open
 - Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.
-- Still to check: the overlay link on the deployed site (memestream-iota.vercel.app/<ticker>, later memestream.lol) once the short-link route lands. Locally it shows 127.0.0.1:3000, which is expected.
+- Overlay on the deployed site signed off 2026-10-08 (672c701, qa/.../overlay-deployed.png), with one tweak: the link row in `#EDEDED`.
 - USD or SOL as the big price number: Boss man decides before the demo video.
