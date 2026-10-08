@@ -1,6 +1,6 @@
 /**
  * DEVNET ONLY: creates the memestream DBC config on real devnet, paid by .keys/partner.json.
- * Run once after funding the partner wallet with devnet SOL:  npx tsx scripts/devnet-config.ts
+ * Run once after funding the partner wallet with devnet SOL:  npx tsx scripts/devnet-config.mts
  * Prints the config address for MEMESTREAM_CONFIG. Never points at mainnet.
  */
 import { readFileSync } from "node:fs";
