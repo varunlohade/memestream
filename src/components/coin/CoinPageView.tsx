@@ -59,23 +59,24 @@ function CoinActions({ coin, onDone }: { coin: CoinView; onDone: () => void }) {
   const { address } = useWallet();
   const { run: runTx, locked } = useTx();
   const [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
+  /** The running action's stage ("Check your wallet"...), shown on its button; null when idle. */
+  const [stage, setStage] = useState<string | null>(null);
   const isStreamer = address === coin.creator;
   const canClaim = isStreamer && Number(coin.streamerUnclaimedSol) > 0;
   const canGraduate = coin.status === "graduating" && Boolean(address);
   if (!isStreamer && !canGraduate) return null;
 
-  const run = async (action: "claim" | "graduate", done: string) => {
+  const runAction = async (action: "claim" | "graduate", successText: string) => {
     if (!address) return;
     setStatus(null);
     try {
-      await runTx(action, `${action === "claim" ? "Claim" : "Graduate"} ${coin.symbol}`, { wallet: address, mint: coin.mint }, setBusy);
-      setStatus({ error: false, text: done });
+      await runTx(action, `${action === "claim" ? "Claim" : "Graduate"} ${coin.symbol}`, { wallet: address, mint: coin.mint }, setStage);
+      setStatus({ error: false, text: successText });
       onDone();
     } catch (e) {
       setStatus({ error: true, text: (e as Error).message });
     } finally {
-      setBusy(null);
+      setStage(null);
     }
   };
 
@@ -85,14 +86,14 @@ function CoinActions({ coin, onDone }: { coin: CoinView; onDone: () => void }) {
         <>
           <div className="lbl mute">Your earnings</div>
           <div className="cap num" style={{ fontSize: 34 }}>{formatSol(coin.streamerUnclaimedSol)} SOL</div>
-          <button type="button" className="mbtn buy" disabled={!canClaim || Boolean(busy) || Boolean(locked)} onClick={() => run("claim", "Earnings sent to your wallet")}>
-            {busy ?? "Claim earnings"}
+          <button type="button" className="mbtn buy" disabled={!canClaim || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim", "Earnings sent to your wallet")}>
+            {stage ?? "Claim earnings"}
           </button>
         </>
       )}
       {canGraduate && (
-        <button type="button" className="mbtn buy" disabled={Boolean(busy) || Boolean(locked)} onClick={() => run("graduate", "Graduated to Meteora")}>
-          {busy ?? "Graduate to Meteora"}
+        <button type="button" className="mbtn buy" disabled={Boolean(stage) || Boolean(locked)} onClick={() => runAction("graduate", "Graduated to Meteora")}>
+          {stage ?? "Graduate to Meteora"}
         </button>
       )}
       {status && (
