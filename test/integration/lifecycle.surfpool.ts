@@ -7,13 +7,16 @@ import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk
 import { getAccount, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import type { Surfnet } from "@solana/surfpool";
 import { Connection, Keypair, type PublicKey } from "@solana/web3.js";
+import type BN from "bn.js";
 import { buildClaimEarningsTx, unclaimedStreamerFees } from "../../src/lib/dbc/fees";
 import { buildGraduateTx } from "../../src/lib/dbc/graduate";
 import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
 import { graduationProgress, loadPoolSnapshot, priceInSol } from "../../src/lib/dbc/pool";
 import { COIN_PRESETS, LAUNCH_FEE } from "../../src/lib/dbc/preset";
 import { prepareTrade, quoteTrade, type TradeInput } from "../../src/lib/dbc/trade";
-import { solToLamports, toBN } from "../../src/lib/dbc/units";
+import { QUOTE, solToLamports, toBN } from "../../src/lib/dbc/units";
+import { dammPriceInSol, graduatedPoolAddress, loadDammSnapshot } from "../../src/lib/damm/pool";
+import { prepareDammTrade, quoteDammTrade } from "../../src/lib/damm/trade";
 import { buyFeeShare, shareOfBps } from "../support/fees";
 import { stepRunner } from "../support/steps";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
@@ -155,5 +158,43 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
   await step("anyone can graduate the coin into a DAMM v2 pool", async () => {
     await sendAndConfirm(client.connection, await buildGraduateTx(client, await snapshot(), partner.publicKey), [partner]);
     assert.equal((await snapshot()).status, "graduated");
+  });
+
+  // After graduation the coin trades in its DAMM v2 pool, found from the mint alone.
+  let dammPool: PublicKey | undefined;
+  const damm = async () => need((await loadDammSnapshot(client.connection, need(dammPool, "DAMM pool"))) ?? undefined, "DAMM pool state");
+  const dammTrade = async (input: TradeInput, atLeast?: BN) => {
+    const prepared = await prepareDammTrade(client.connection, await damm(), viewer.publicKey, input, SLIPPAGE_BPS, atLeast);
+    await sendAndConfirm(client.connection, prepared, [viewer]);
+    return prepared.quote;
+  };
+
+  await step("the graduated pool is found from the mint: coin is token A, SOL is token B", async () => {
+    const poolConfig = need((await client.state.getPoolConfig(need(config, "config"))) ?? undefined, "config state");
+    dammPool = graduatedPoolAddress(poolConfig, need(mint, "mint"));
+    const { state } = await damm();
+    assert.ok(state.tokenAMint.equals(need(mint, "mint")));
+    assert.ok(state.tokenBMint.equals(QUOTE.mint));
+    assert.ok(dammPriceInSol(state) > 0);
+  });
+
+  await step("after graduation a viewer buys and sells in the Meteora pool", async () => {
+    const coinsBefore = await viewerCoins();
+    const priceBefore = dammPriceInSol((await damm()).state);
+    const bought = await dammTrade({ side: "buy", lamports: ofThreshold(0.05) });
+    assert.ok((await viewerCoins()).sub(coinsBefore).gte(bought.minimumAmountOut), "got at least the minimum");
+    assert.ok(dammPriceInSol((await damm()).state) > priceBefore, "price went up");
+
+    const solBefore = await client.connection.getBalance(viewer.publicKey);
+    await dammTrade({ side: "sell", baseUnits: (await viewerCoins()).divn(2) });
+    assert.ok((await client.connection.getBalance(viewer.publicKey)) > solBefore, "SOL went up");
+  });
+
+  await step("after graduation too, a trade never fills below the minimum the user saw", async () => {
+    const input: TradeInput = { side: "buy", lamports: ofThreshold(0.02) };
+    const seen = quoteDammTrade(await damm(), input, SLIPPAGE_BPS);
+    await dammTrade({ side: "buy", lamports: ofThreshold(0.1) }); // someone else moves the price up first
+    await assert.rejects(dammTrade(input, seen.minimumAmountOut), /failed/i, "the seen minimum makes it fail");
+    await dammTrade(input); // the fresh quote's own floor goes through
   });
 });

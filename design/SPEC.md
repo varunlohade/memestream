@@ -77,6 +77,7 @@ Sentence case. No ellipses. No arrows on buttons. Ticker always has `$` in title
 - Coin page: the stream plays muted. People unmute it in the player.
 - Tags on the picture: "Live" = red `#C62828`, white text. "Graduated" = XP green `#80FF20`, black text, so the two never look alike.
 - Fallback: if there is no picture (stream offline, bad link, load error), show the pixel scene. Do not show a broken image or an empty box.
+- Ended or private YouTube streams: our page can't see inside the player, so YouTube shows its own "Video unavailable" panel. Follow-up (design wants it before real streamers in week 3, since every stream ends): check the stream on the server (oEmbed/thumbnail) before embedding; if it's gone, show the stream picture with an "Ended" tag (stone `#3E3E44`, like Unverified), else the pixel scene.
 - The pixel scenes in the mock stills stand in for these real pictures.
 
 ## OBS overlay (week 2, style B): FINAL = A, Corner panel
