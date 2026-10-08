@@ -4,11 +4,9 @@ Every item needs Boss man's explicit go. The DBC config is fixed once created on
 none of its parameters can change later, so all of them must be right first.
 
 ## Decisions (Boss man)
-- [ ] **Graduation threshold.** `COIN_PRESETS["mainnet-beta"].graduationThresholdSol` in
-      `src/lib/dbc/preset.ts` is a placeholder ("85"). Devnet uses "1.5".
-      **Proposal: 50 SOL.** It seeds a real DAMM v2 pool with deep enough liquidity, and one good
-      stream's viewers can still reach it live. pump.fun's ~85 SOL is too high for a single stream.
-      Boss man asked for "a good amount"; he confirms the number before the config is created.
+- [x] **Graduation threshold: 10 SOL** (Boss man, 2026-10-08, via steve). Set in
+      `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
+      programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).
 - [ ] **Partner wallet.** `feeClaimer` (receives memestream's 20% fee share) and
       `leftoverReceiver` (receives unsold tokens after graduation) must be Boss man's real wallet,
       not a local key. `scripts/dev-chain.ts` uses `.keys/local-partner.json`: never use it on mainnet.

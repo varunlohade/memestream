@@ -13,8 +13,10 @@ import { loadPoolSnapshot } from "@/lib/dbc/pool";
 import { prepareTrade, quoteTrade, type TradeInput, type TradeQuote } from "@/lib/dbc/trade";
 import type { BuiltTx } from "@/lib/dbc/tx";
 import { baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, solToLamports } from "@/lib/dbc/units";
+import { coinForTicker, parseTicker } from "@/lib/short-link";
 import { metadataUri, parseStreamLink } from "@/lib/stream-link";
 import { getChain, poolForMint, rememberBuilt } from "./chain";
+import { listCoins } from "./coins";
 import { asUserFacing, UserError } from "./errors";
 import { assertNotSelfBuy } from "./rules";
 
@@ -65,12 +67,18 @@ export async function buildLaunchForWallet(req: LaunchRequest): Promise<Prepared
   if (link?.platform !== "youtube" && link?.platform !== "twitch") {
     throw new UserError("Paste your YouTube or Twitch live link");
   }
+  // The ticker is the overlay's short link (/<ticker>): letters and digits only, and the first coin
+  // keeps it. This check is best effort (launches straight to the program skip it); coinForTicker
+  // still sends the link to the first coin.
+  const symbol = parseTicker(req.symbol);
+  if (!symbol) throw new UserError("Ticker: 1 to 10 letters or digits");
+  if (coinForTicker(await listCoins(), symbol)) throw new UserError(`$${symbol} is taken. Pick another ticker`);
   return userFacing(async () => {
     const built = await buildCreateStreamCoinTx(
       client,
       {
         name: req.name,
-        symbol: req.symbol.replace(/^\$/, ""),
+        symbol,
         uri: (mint) => metadataUri(publicUrl, mint.toBase58(), link),
       },
       { config, creator: walletKey(req.wallet) },

@@ -9,7 +9,8 @@ Status: IN PROGRESS. Repo pushed (private: github.com/varunlohade/memestream). O
 - **Wordmark: 1, lowercase VT323.** It's already in the app.
 - **Hosting: Vercel**, on the free *.vercel.app URL for now. Buy memestream.lol later.
   Devnet first; mainnet waits on the checklist.
-- **Mainnet graduation: proposed 50 SOL** (see MAINNET-CHECKLIST.md). Needs Boss man's final yes before the config.
+- **Graduation: 10 SOL on mainnet, 0.1 SOL on devnet** (Boss man, via steve). Creating the mainnet config still needs his own go.
+- **Short links done** (overlay step 5): `/<ticker>` → the coin; the first coin keeps the ticker.
 Goal of week 2: streamers show their coin live on stream, and memestream runs on mainnet by Oct 20.
 
 ## 1. OBS overlay (the main week 2 feature)
@@ -47,7 +48,7 @@ Each one has a "Graduated" state. art_design's mock: `design/mock/mc.html?opt=B&
 Follow `MAINNET-CHECKLIST.md`. Blockers that need Boss man:
 - **Hosting** (Vercel or other, and who pays). The domain, `MEMESTREAM_PUBLIC_URL`, the shared rate
   limiter (e.g. Upstash on Vercel) and the trusted client-IP header all depend on it.
-- Graduation threshold (placeholder 85 SOL); config params are fixed once created.
+- Graduation threshold: decided, 10 SOL. Config params are fixed once created.
 - His real partner wallet for `feeClaimer` and `leftoverReceiver`.
 - Domain (`memestream.lol`) and `MEMESTREAM_PUBLIC_URL`; on-chain metadata URIs never change.
 - One full pass on real devnet first (needs faucet SOL for 6wVWwYoF4gEP5mVMcTLYAhgNpvXpYTWcY8hdfi68m4o5).

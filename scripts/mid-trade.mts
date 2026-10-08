@@ -40,7 +40,13 @@ async function openCoin(p: Page) {
   await p.goto(`${BASE}/coin/${mint}`, { waitUntil: "domcontentloaded" });
   await waitText(p, "Graduation");
 }
+/** A small buy (devnet graduates at 0.1 SOL, so the 0.5 default would fill the curve). */
 async function buyButton(p: Page) {
+  const input = await p.waitForSelector('input[aria-label^="Amount in"]');
+  await input!.click({ clickCount: 3 });
+  await p.keyboard.press("Backspace");
+  await input!.type("0.005");
+  await waitText(p, "You get about");
   return p.locator("button::-p-text(Buy SYNTH):not([disabled])").setTimeout(30_000);
 }
 

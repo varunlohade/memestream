@@ -11,14 +11,14 @@ function routeFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) return routeFiles(path);
-    return name === "route.ts" ? [path] : [];
+    return /^route\.(ts|tsx|js|mjs)$/.test(name) ? [path] : [];
   });
 }
 
 test("every route handler that touches the chain uses withRpcGuard on every exported handler", () => {
   // All of src/app, not just /api: the /<ticker> short link is a route handler too.
   const routes = routeFiles("src/app");
-  assert.ok(routes.length >= 7, "found the API routes");
+  assert.ok(routes.length >= 8, "found the route handlers (API routes and the /<ticker> short link)");
   for (const file of routes) {
     const source = readFileSync(file, "utf8");
     if (!CHAIN_IMPORTS.some((name) => source.includes(`from "${name}`))) continue;

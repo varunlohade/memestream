@@ -11,6 +11,7 @@ Built on **Meteora's Dynamic Bonding Curve (DBC)** for the Superteam "Best use o
   1B supply priced in SOL, an anti-sniper fee that falls from 50% to a 1% base over the first
   minute (plus a small volatility fee during wild swings),
   80% of trading fees to the creator (the streamer), and 100% of graduated liquidity locked forever.
+  Graduation threshold: 0.1 SOL on devnet (so testers graduate with faucet SOL), 10 SOL on mainnet.
 - **Launch** (`launch.ts`): a streamer creates a pool on that config in one transaction. The
   stream link rides in the token's metadata URI, so no database is needed.
 - **Trade** (`trade.ts`): partial-fill swaps, so the last buy before graduation fills exactly up
@@ -18,6 +19,9 @@ Built on **Meteora's Dynamic Bonding Curve (DBC)** for the Superteam "Best use o
 - **Earn** (`fees.ts`): the streamer claims their SOL fee share at any time.
 - **Graduate** (`graduate.ts`): once the curve holds the threshold, anyone can migrate the coin
   to a DAMM v2 pool. We call it ourselves instead of waiting for a migrator service.
+
+Short links: `/<ticker>` redirects to the coin (the OBS overlay shows it). The first coin with a
+ticker keeps its link; the server refuses a taken ticker at launch.
 
 App rule (memestream's server and UI, not on-chain): a streamer's own wallet can't buy their coin
 here. DBC swaps are open to anyone, so another wallet still can; the streamer's trades are tagged

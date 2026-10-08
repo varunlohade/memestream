@@ -32,11 +32,11 @@ function localKeypair(name: string): Keypair {
 
 const SAMPLE_STREAMS = [
   // Real public YouTube live streams (checked live and embeddable 2026-10-08). Live IDs change when a stream restarts: re-check with the channel's /live page.
-  { name: "lofi beats to study to", symbol: "LOFI", link: "https://www.youtube.com/watch?v=1-LpQekNa9g", buys: ["0.4", "0.3", "0.2"] },
-  { name: "synthwave radio", symbol: "SYNTH", link: "https://www.youtube.com/watch?v=4xDzrJKXOOY", buys: ["0.6", "0.5"] },
-  { name: "NASA Live", symbol: "NASA", link: "https://www.youtube.com/watch?v=M3HKLzjvKPc", buys: ["0.15"] },
+  { name: "lofi beats to study to", symbol: "LOFI", link: "https://www.youtube.com/watch?v=1-LpQekNa9g", buys: ["0.03", "0.02", "0.015"] },
+  { name: "synthwave radio", symbol: "SYNTH", link: "https://www.youtube.com/watch?v=4xDzrJKXOOY", buys: ["0.04", "0.03"] },
+  { name: "NASA Live", symbol: "NASA", link: "https://www.youtube.com/watch?v=M3HKLzjvKPc", buys: ["0.01"] },
   // Owned by the dev wallet, so the streamer's claim can be clicked through locally.
-  { name: "Tokyo night walk", symbol: "DEV", link: "https://www.youtube.com/watch?v=28ZjrtD_iL0", buys: ["0.3"], ownedByDevWallet: true },
+  { name: "Tokyo night walk", symbol: "DEV", link: "https://www.youtube.com/watch?v=28ZjrtD_iL0", buys: ["0.02"], ownedByDevWallet: true },
 ] as { name: string; symbol: string; link: string; buys: string[]; ownedByDevWallet?: boolean }[];
 
 async function main() {

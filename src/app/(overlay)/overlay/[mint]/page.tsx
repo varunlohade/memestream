@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { Overlay, type OverlayLayout } from "@/components/overlay/Overlay";
+import { coinForTicker } from "@/lib/short-link";
 import { getChain } from "@/server/chain";
-import { getCoinDetail } from "@/server/coins";
+import { getCoinDetail, listCoins } from "@/server/coins";
 
 export const metadata: Metadata = { title: "Overlay", robots: { index: false } };
 
@@ -19,9 +20,12 @@ async function OverlayPage({ params, searchParams }: PageProps<"/overlay/[mint]"
   // OBS loads this once and runs it for hours: on a missing coin or an RPC hiccup render nothing
   // (never an opaque error box over the stream) and let the 5 s poll fill it in.
   const detail = await getCoinDetail(mint, null).catch(() => null);
-  // From the configured public URL, never the request host. The overlay adds /<ticker>.
+  // From the configured public URL, never the request host. The short /<ticker> link only when
+  // this coin owns its ticker (a copycat's overlay must not advertise the original's link).
   const site = new URL(getChain().publicUrl).host;
-  return <Overlay mint={mint} initial={detail} layout={layout} site={site} preview={query.preview === "1"} />;
+  const owner = detail && coinForTicker(await listCoins().catch(() => []), detail.coin.symbol);
+  const link = owner?.mint === mint ? `${site}/${owner.symbol}` : site;
+  return <Overlay mint={mint} initial={detail} layout={layout} link={link} preview={query.preview === "1"} />;
 }
 
 export default function Page(props: PageProps<"/overlay/[mint]">) {

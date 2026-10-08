@@ -20,6 +20,8 @@ import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 
 const preset = COIN_PRESETS.devnet;
+/** Trade sizes as a share of the graduation threshold, so the test fits any preset. */
+const ofThreshold = (share: number) => solToLamports((Number(preset.graduationThresholdSol) * share).toFixed(9));
 const SLIPPAGE_BPS = 100;
 /** Comfortably past the preset's 60-second launch fee schedule. */
 const LAUNCH_FEE_WINDOW_SECONDS = 120;
@@ -89,7 +91,7 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
 
   await step("viewer buys: gets coins; price and progress go up", async () => {
     const before = await snapshot();
-    const quote = await trade({ side: "buy", lamports: solToLamports("0.2") });
+    const quote = await trade({ side: "buy", lamports: ofThreshold(0.15) });
     const after = await snapshot();
 
     assert.ok((await viewerCoins()).gte(quote.minimumAmountOut));
@@ -120,7 +122,7 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
   });
 
   await step("launch fee is ~50%; after a minute it's the 1% base plus a small volatility fee", async () => {
-    const probe: TradeInput = { side: "buy", lamports: solToLamports("0.1") };
+    const probe: TradeInput = { side: "buy", lamports: ofThreshold(0.05) };
     /** Total fee (trading + protocol) as a share of the SOL paid in. Buy fees are taken in SOL. */
     const feeShare = async () => {
       const quote = quoteTrade(await snapshot(), probe, SLIPPAGE_BPS);
@@ -149,7 +151,7 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
   });
 
   await step("an oversized last buy fills only up to the threshold", async () => {
-    const asked = solToLamports("2");
+    const asked = ofThreshold(1.5);
     const quote = await trade({ side: "buy", lamports: asked });
     const after = await snapshot();
 

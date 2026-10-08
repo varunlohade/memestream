@@ -139,11 +139,11 @@ await step("streamer can't buy their own coin", async (p) => {
   await waitText(p, "Streamers can't buy their own coin here");
 });
 
-await step("viewer buys 0.5 SOL of $LOFI", async (p) => {
+await step("viewer buys 0.02 SOL of $LOFI", async (p) => {
   const mint = await mintOf("LOFI");
   const before = held(await detail(mint));
   await openCoin(p, "LOFI");
-  await setAmount(p, "0.5");
+  await setAmount(p, "0.02");
   await waitText(p, "You get about");
   await p.locator(`button${text("Buy LOFI")}:not([disabled])`).setTimeout(20_000).click();
   await waitForChain(mint, "LOFI balance went up", (d) => held(d) > before);
@@ -161,7 +161,7 @@ await step("viewer sells half their $LOFI with the 50% chip", async (p) => {
 await step("an oversized buy is shown as a partial fill, then fills the curve", async (p) => {
   const mint = await mintOf("LOFI");
   await clickTab(p, "Buy");
-  await setAmount(p, "3");
+  await setAmount(p, "0.5");
   await waitText(p, "This fills the curve");
   await p.locator(`button${text("Buy LOFI")}:not([disabled])`).setTimeout(20_000).click();
   await waitForChain(mint, "LOFI curve full", (d) => d.coin.status === "graduating");

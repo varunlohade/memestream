@@ -28,10 +28,11 @@ export type CoinPreset = {
 };
 
 export const COIN_PRESETS: Record<Network, CoinPreset> = {
-  // Low, so a tester can reach graduation with faucet SOL.
-  devnet: { graduationThresholdSol: "1.5" },
-  // TODO(mainnet): tune on devnet first. Config params are fixed once created.
-  "mainnet-beta": { graduationThresholdSol: "85" },
+  // Tiny, so a tester graduates a coin with faucet SOL. The real programs accept it, including
+  // graduation to DAMM v2 (test/integration/lifecycle.surfpool.ts).
+  devnet: { graduationThresholdSol: "0.1" },
+  // Boss man's pick (2026-10-08). Config params are fixed once the mainnet config is created.
+  "mainnet-beta": { graduationThresholdSol: "10" },
 };
 
 const TOTAL_SUPPLY = 1_000_000_000;
