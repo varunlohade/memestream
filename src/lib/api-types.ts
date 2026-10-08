@@ -3,6 +3,11 @@
  * No runtime dependencies, so client code can import it freely.
  */
 
+/**
+ * - trading: the curve is open.
+ * - graduating: the curve holds the threshold; waiting for migration to DAMM v2.
+ * - graduated: liquidity moved to DAMM v2; trade there, not here.
+ */
 export type CoinStatus = "trading" | "graduating" | "graduated";
 
 export type CoinView = {

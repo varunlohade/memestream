@@ -12,14 +12,6 @@ import BN from "bn.js";
 import type { CoinStatus, CoinView } from "../api-types";
 import { baseUnitsToCoins, lamportsToSol, QUOTE } from "./units";
 
-/**
- * CoinStatus:
- * - trading: the curve is open.
- * - graduating: the curve holds the threshold; waiting for migration to DAMM v2.
- * - graduated: liquidity moved to DAMM v2; trade there, not here.
- */
-export type { CoinStatus };
-
 /** Fresh on-chain state needed to price a trade. Load a new one before every quote. */
 export type PoolSnapshot = {
   address: PublicKey;
