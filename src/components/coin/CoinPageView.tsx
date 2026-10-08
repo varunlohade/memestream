@@ -5,6 +5,7 @@ import { useTx } from "@/components/tx";
 import { useHostname } from "@/components/use-hostname";
 import { Scene, Sprite, StepChart, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
+import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, percentChange, shortAddress, signedPercent, sol } from "@/lib/format";
 import { parseStreamLink } from "@/lib/stream-link";
@@ -123,7 +124,10 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
               <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="84px" />
             </div>
             <div>
-              <h1>${coin.symbol}</h1>
+              <div className="ticker-row">
+                <h1>${coin.symbol}</h1>
+                <UnverifiedTag tappable />
+              </div>
               <p>
                 {coin.name} by {shortAddress(coin.creator)}
               </p>

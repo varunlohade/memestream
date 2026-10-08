@@ -106,6 +106,15 @@ canvas { image-rendering: pixelated; }
 .tile { padding: 14px; display: block; }
 .tile .thumb { aspect-ratio: 16/9; padding: 6px; position: relative; }
 .tile .live { left: 14px; top: 14px; }
+/* Tags on a tile picture: Live/Graduated, then Unverified. */
+.tags { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; align-items: center; }
+.tags .live { position: static; }
+/* "Unverified" (SPEC design A): gray tag, VT323, 3px black border. */
+.unv { background: #3E3E44; color: #D8D8DC; font-family: var(--bf); font-size: 22px; line-height: 1.1; padding: 3px 10px; border: 3px solid #000; }
+button.unv { cursor: help; }
+.ticker-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.unv-wrap { position: relative; display: inline-flex; }
+.unv-note { position: absolute; left: 0; top: calc(100% + 6px); z-index: 5; width: max-content; max-width: 280px; padding: 8px 12px; background: #1b1b1f; color: #ededed; border: 3px solid #000; font-size: 20px; }
 .live.grad { background: #80FF20; color: #000; }
 .tile .meta { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-top: 14px; white-space: nowrap; }
 .tile h4 { font-size: 22px; }

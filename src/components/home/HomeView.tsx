@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { type CoinView, useCoins } from "@/components/hooks";
 import { useTexture, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
+import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { sol } from "@/lib/format";
 
 const SORTS = {
@@ -19,7 +20,10 @@ function CoinTile({ coin }: { coin: CoinView }) {
     <Link href={`/coin/${coin.mint}`} className="p tile">
       <div className="slot thumb">
         <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="(max-width: 640px) 100vw, 33vw" />
-        <span className={`live${graduated ? " grad" : ""}`}>{graduated ? "Graduated" : "Live"}</span>
+        <div className="tags">
+          <span className={`live${graduated ? " grad" : ""}`}>{graduated ? "Graduated" : "Live"}</span>
+          <UnverifiedTag />
+        </div>
       </div>
       <div className="meta">
         <h4>${coin.symbol}</h4>
