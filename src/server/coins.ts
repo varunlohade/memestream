@@ -7,6 +7,8 @@ import BN from "bn.js";
 import type { CoinDetail, CoinView, Holdings, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
+import { shareInFlight } from "@/lib/in-flight";
+import { isCanonicalTicker } from "@/lib/short-link";
 import { streamLinkFromUri } from "@/lib/stream-link";
 import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
 import { getChain, poolForMint } from "./chain";
@@ -41,7 +43,8 @@ async function scanCoins(): Promise<CoinView[]> {
   const [pools, poolConfig] = await Promise.all([client.state.getPoolsByConfig(config), loadConfig(client, config)]);
   // The scan already returns each pool's state, so build views from it: no per-pool refetch.
   const views = pools.map((p) => toPoolView({ address: p.publicKey, pool: p.account, config: poolConfig }));
-  return withMetadata(connection, views);
+  // Only tickers our launch could have written: on-chain launches with look-alike tickers are hidden.
+  return (await withMetadata(connection, views)).filter((coin) => isCanonicalTicker(coin.symbol));
 }
 
 /** A scan: one program-account scan, the config, and one metadata call per 100 coins (last known count). */
@@ -113,16 +116,6 @@ const holdingsCache = new Map<string, { at: number; value: Holdings | null }>();
 const coinInFlight = new Map<string, Promise<CoinAndTrades | null>>();
 const holdingsInFlight = new Map<string, Promise<Holdings | null>>();
 
-/** Runs `read` once per key at a time; callers that arrive meanwhile get the same promise. */
-function shared<T>(inFlight: Map<string, Promise<T>>, key: string, read: () => Promise<T>): Promise<T> {
-  let pending = inFlight.get(key);
-  if (!pending) {
-    pending = read().finally(() => inFlight.delete(key));
-    inFlight.set(key, pending);
-  }
-  return pending;
-}
-
 /**
  * Coin, recent trades and (optionally) a wallet's holdings, or null if it isn't a memestream coin.
  * Throws BusyError when the RPC budget says no.
@@ -136,7 +129,7 @@ export async function getCoinDetail(mint: string, wallet: string | null): Promis
 async function coinAndTrades(mint: string): Promise<CoinAndTrades | null> {
   const hit = coinCache.get(mint);
   if (hit && Date.now() - hit.at < (hit.value === null ? MISS_CACHE_MS : DETAIL_CACHE_MS)) return hit.value;
-  return shared(coinInFlight, mint, () => refreshCoin(mint, hit?.value));
+  return shareInFlight(coinInFlight, mint, () => refreshCoin(mint, hit?.value));
 }
 
 async function refreshCoin(mint: string, previous: CoinAndTrades | null | undefined): Promise<CoinAndTrades | null> {
@@ -162,7 +155,7 @@ async function holdingsFor(mint: string, wallet: string): Promise<Holdings | nul
   const now = Date.now();
   const hit = holdingsCache.get(key);
   if (hit && now - hit.at < HOLDINGS_CACHE_MS) return hit.value;
-  return shared(holdingsInFlight, key, async () => {
+  return shareInFlight(holdingsInFlight, key, async () => {
     if (!(await takeRpcBudget(HOLDINGS_RPC_CALLS))) throw new BusyError();
     return remember(holdingsCache, key, await walletHoldings(mint, wallet), Date.now());
   });
