@@ -1,7 +1,8 @@
 "use client";
 /** Client-side data hooks. They call our own API routes; the browser never talks to RPC directly. */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CoinDetail, CoinView, TradePreview } from "@/lib/api-types";
+import { percentChange } from "@/lib/format";
 import { fetchJson } from "@/lib/http";
 
 export type { CoinDetail, CoinView, Holdings, TradePreview, TradeView } from "@/lib/api-types";
@@ -58,6 +59,13 @@ export const useCoin = (mint: string, wallet: string | null, initial: CoinDetail
     `/api/coins/${encodeURIComponent(mint)}${wallet ? `?wallet=${encodeURIComponent(wallet)}` : ""}`,
     wallet ? null : initial,
   );
+
+/** Recent trade prices, oldest first (for the chart), and the % change from the oldest to now. */
+export function usePriceTrend(detail: CoinDetail | null) {
+  const prices = useMemo(() => [...(detail?.trades ?? [])].reverse().map((t) => t.priceSol), [detail]);
+  const change = detail && prices.length > 1 ? percentChange(prices[0], detail.coin.priceSol) : null;
+  return { prices, change };
+}
 
 const QUOTE_DEBOUNCE_MS = 300;
 

@@ -4,13 +4,12 @@
  * Read-only (no wallet, no transactions). Three layouts from design/boards/MS-overlay.png.
  * `preview` paints a stand-in stream behind it so it can be checked outside OBS.
  */
-import { useMemo } from "react";
-import { type CoinDetail, useCoin } from "@/components/hooks";
+import { type CoinDetail, useCoin, usePriceTrend } from "@/components/hooks";
 import { Scene, Sprite, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { useHostname } from "@/components/use-hostname";
 import { parseStreamLink } from "@/lib/stream-link";
-import { formatSol, percentChange, signedPercent } from "@/lib/format";
+import { formatSol, signedPercent } from "@/lib/format";
 
 export type OverlayLayout = "a" | "b" | "c";
 
@@ -20,7 +19,7 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
   // Polls every 5 s and keeps the last good value through errors (never flashes empty).
   const { data } = useCoin(mint, null, initial);
   const detail = data ?? initial;
-  const prices = useMemo(() => [...(detail?.trades ?? [])].reverse().map((t) => t.priceSol), [detail]);
+  const { change } = usePriceTrend(detail);
   // OBS composites the page over the stream: the server HTML itself must not paint a background.
   const transparent = preview ? null : <style>{"html,body{background:transparent!important}"}</style>;
   if (!detail) {
@@ -32,7 +31,6 @@ export function Overlay({ mint, initial, layout, link, preview }: Props) {
     );
   }
   const { coin } = detail;
-  const change = prices.length > 1 ? percentChange(prices[0], coin.priceSol) : null;
   const graduated = coin.status === "graduated";
 
   const ticker = <span className="hf">${coin.symbol}</span>;

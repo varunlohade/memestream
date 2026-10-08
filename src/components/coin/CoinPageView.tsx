@@ -1,13 +1,13 @@
 "use client";
-import { useMemo, useState } from "react";
-import { type CoinDetail, type CoinView, type TradeView, useCoin } from "@/components/hooks";
+import { useState } from "react";
+import { type CoinDetail, type CoinView, type TradeView, useCoin, usePriceTrend } from "@/components/hooks";
 import { useTx } from "@/components/tx";
 import { useHostname } from "@/components/use-hostname";
 import { Scene, Sprite, StepChart, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
-import { ago, compact, formatSol, percentChange, shortAddress, signedPercent } from "@/lib/format";
+import { ago, compact, formatSol, shortAddress, signedPercent } from "@/lib/format";
 import { parseStreamLink } from "@/lib/stream-link";
 import { TradeBox } from "./TradeBox";
 
@@ -108,10 +108,9 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
   const { address } = useWallet();
   const { data, refresh } = useCoin(mint, address, initial);
   const detail = data ?? initial;
-  const prices = useMemo(() => [...(detail?.trades ?? [])].reverse().map((t) => t.priceSol), [detail]);
+  const { prices, change } = usePriceTrend(detail);
 
   const { coin, trades, holdings } = detail;
-  const change = prices.length > 1 ? percentChange(prices[0], coin.priceSol) : null;
   const graduated = coin.status === "graduated";
 
   return (
