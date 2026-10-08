@@ -25,14 +25,21 @@ export type Network = "devnet" | "mainnet-beta";
 export type CoinPreset = {
   /** SOL in the curve that triggers graduation to DAMM v2, as a decimal string. */
   graduationThresholdSol: string;
+  /**
+   * SOL a streamer pays to launch a coin, collected for the partner (claimed later with
+   * claimPartnerPoolCreationFee). 0 = free. Meteora allows 0, or 0.001 to 100 SOL.
+   */
+  launchFeeSol: number;
 };
 
 export const COIN_PRESETS: Record<Network, CoinPreset> = {
   // Tiny, so a tester graduates a coin with faucet SOL. The real programs accept it, including
   // graduation to DAMM v2 (test/integration/lifecycle.surfpool.ts).
-  devnet: { graduationThresholdSol: "0.1" },
-  // Boss man's pick (2026-10-08). Config params are fixed once the mainnet config is created.
-  "mainnet-beta": { graduationThresholdSol: "10" },
+  // Free: the devnet config already exists with 0, and config params are fixed once created.
+  devnet: { graduationThresholdSol: "0.1", launchFeeSol: 0 },
+  // Boss man's picks (2026-10-08). Config params are fixed once the mainnet config is created.
+  // The launch fee makes squatting a famous streamer's ticker cost something (audit M2).
+  "mainnet-beta": { graduationThresholdSol: "10", launchFeeSol: 0.05 },
 };
 
 const TOTAL_SUPPLY = 1_000_000_000;
@@ -65,9 +72,6 @@ const LP_LOCK_PERCENT = { partner: 50, creator: 50 };
 
 /** Swap fee on the graduated DAMM v2 pool (not a fee taken at migration). */
 const GRADUATED_POOL_FEE = MigrationFeeOption.FixedBps100;
-
-/** Streamers launch for free. */
-const POOL_CREATION_FEE_SOL = 0;
 
 /**
  * No creator vesting. Graduation (graduate.ts) relies on this: with vesting, a locker
@@ -109,7 +113,7 @@ export function buildCoinConfig(preset: CoinPreset): ConfigParameters {
       dynamicFeeEnabled: true,
       collectFeeMode: CollectFeeMode.QuoteToken,
       creatorTradingFeePercentage: CREATOR_FEE_SHARE_PERCENT,
-      poolCreationFee: POOL_CREATION_FEE_SOL,
+      poolCreationFee: preset.launchFeeSol,
       // The streamer should not buy their own coin, so no cheap first swap.
       enableFirstSwapWithMinFee: false,
     },

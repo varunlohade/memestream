@@ -8,7 +8,7 @@ import { Sprite } from "@/components/pixel/Pixel";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { parseStreamLink } from "@/lib/stream-link";
 
-export function GoLiveView() {
+export function GoLiveView({ launchFeeSol }: { launchFeeSol: string | null }) {
   const router = useRouter();
   const { address } = useWallet();
   const { run, locked } = useTx();
@@ -76,6 +76,11 @@ export function GoLiveView() {
           <Sprite name="heart" />
           <span>80% of trade fees go to you. memestream won&apos;t let your wallet buy your own coin.</span>
         </div>
+        {launchFeeSol && (
+          <p className="mute" style={{ fontSize: 22, margin: "-8px 0 16px" }}>
+            Launch costs {launchFeeSol} SOL.
+          </p>
+        )}
         <button type="submit" className="mbtn buy" style={{ width: "100%" }} disabled={!ready}>
           {!address ? "Connect a wallet" : status?.busy ? status.text : "Launch coin"}
         </button>

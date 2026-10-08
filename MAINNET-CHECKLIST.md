@@ -4,6 +4,13 @@ Every item needs Boss man's explicit go. The DBC config is fixed once created on
 none of its parameters can change later, so all of them must be right first.
 
 ## Decisions (Boss man)
+- [x] **Launch fee: 0.05 SOL** (Boss man, 2026-10-08, via steve). `COIN_PRESETS["mainnet-beta"].launchFeeSol`,
+      pinned in `config.test.ts`; `mainnet-config.surfpool.ts` proves a launch costs exactly 0.05 SOL
+      more on the real program. It collects in each pool: the partner claims it with
+      `claimPartnerPoolCreationFee` (a claim script is still to write). Go live shows
+      "Launch costs 0.05 SOL" (read from the on-chain config). Devnet stays free.
+- [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). It also receives the
+      partner's locked LP position.
 - [x] **Graduation threshold: 10 SOL** (Boss man, 2026-10-08, via steve). Set in
       `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
       programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).

@@ -163,6 +163,18 @@ async function readCoinAndTrades(mint: string): Promise<CoinAndTrades | null> {
   return { coin, trades };
 }
 
+/** Our config's launch fee in SOL ("0" = free). The config is fixed on-chain, so it's read once. */
+let launchFee: string | undefined;
+export async function getLaunchFeeSol(): Promise<string | null> {
+  if (launchFee !== undefined) return launchFee;
+  if (!(await takeRpcBudget(1))) return null;
+  const { client, config } = getChain();
+  const read = await loadConfig(client, config).catch(() => null);
+  if (!read) return null;
+  launchFee = lamportsToSol(read.poolCreationFee);
+  return launchFee;
+}
+
 const TRADE_HISTORY_LIMIT = 25;
 
 type TokenBalances = { accountIndex: number; uiTokenAmount: { amount: string } }[] | null | undefined;

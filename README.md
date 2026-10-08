@@ -12,6 +12,7 @@ Built on **Meteora's Dynamic Bonding Curve (DBC)** for the Superteam "Best use o
   minute (plus a small volatility fee during wild swings),
   80% of trading fees to the creator (the streamer), and 100% of graduated liquidity locked forever.
   Graduation threshold: 0.1 SOL on devnet (so testers graduate with faucet SOL), 10 SOL on mainnet.
+  Launching is free on devnet and costs 0.05 SOL on mainnet (paid to the partner).
 - **Launch** (`launch.ts`): a streamer creates a pool on that config in one transaction. The
   stream link rides in the token's metadata URI, so no database is needed.
 - **Trade** (`trade.ts`): partial-fill swaps, so the last buy before graduation fills exactly up

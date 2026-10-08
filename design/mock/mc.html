@@ -181,6 +181,22 @@ body.ov .slot canvas{width:100%;height:100%}
 .wm{font-family:"VT323",monospace;font-size:44px;letter-spacing:.01em;line-height:1;text-transform:none}
 body.wm1 .wm{font-family:var(--hf),monospace;font-size:inherit}
 @media (max-width:520px){.top{padding:0 16px;height:72px}.brand{gap:10px}.brand canvas{width:32px;height:32px}.wm{font-size:38px}.net{font-size:18px;padding:1px 6px}.wallet{height:48px;width:48px;padding:0;justify-content:center}.wallet span{display:none}}
+
+/* Unverified badge options (?unv=A|B|C) */
+.tile .tags{position:absolute;left:14px;top:14px;display:flex;gap:8px;align-items:center}
+.tile .tags .live{position:static}
+.unvtag{position:relative;display:inline-flex;align-items:center;vertical-align:middle;margin-left:14px;background:#3E3E44;color:#D8D8DC;font-family:"VT323",monospace;font-size:24px;line-height:1;padding:5px 10px 4px;border:3px solid #000;letter-spacing:0}
+.tile .tags .unvtag{margin-left:0;font-size:22px}
+.unvic{position:relative;display:inline-block;vertical-align:middle;margin-left:12px}
+.unvic canvas{width:27px;height:27px;display:block}
+h1 .unvic canvas{width:36px;height:36px}
+.tip{position:absolute;left:0;top:calc(100% + 10px);width:440px;z-index:5;background:#111113;color:#EDEDED;font-family:"VT323",monospace;font-size:24px;line-height:1.15;letter-spacing:0;padding:12px 14px;border:4px solid #000;box-shadow:inset 3px 3px 0 #3E3E44,inset -3px -3px 0 #0B0B0C;text-transform:none;white-space:normal}
+.unvline{font-size:24px!important;color:var(--mute);margin-top:4px!important}
+.m2{display:flex;justify-content:space-between;align-items:baseline;margin-top:14px;gap:16px}
+.m2 h4{display:flex;align-items:center}
+.r2{margin:4px 0 12px}
+.r2 p{margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.r2 .unvw{color:var(--mute);flex:none}
 </style>
 <body>
 <script>
@@ -226,11 +242,12 @@ function tex(kind, seed=1){
 // ---------- original pixel sprites ----------
 const SPR = {
   coin:['....aaaa....','..aabbbbaa..','.abbccccbba.','.abccddccba.','abccdccdccba','abcddccddcba','abcdccccdcba','abccdccdccba','.abccddccba.','.abbccccbba.','..aabbbbaa..','....aaaa....'],
+  unv:['.aaaaaaa.','abbbbbbba','abbcccbba','abcbbbcba','abbbbcbba','abbbcbbba','abbbbbbba','abbbcbbba','.aaaaaaa.'],
   heart:['.aa...aa.','abba.abba','abbbabbba','abbbbbbba','.abbbbba.','..abbba..','...aba...','....a....'],
   pick:['.....aaaa.','....abbbba','.....aaaba','......acba','.....acaba','....aca.a.','...aca....','..aca.....','.aca......','aaa.......'],
   img:['aaaaaaaaaa','abbbbbbbba','abbbbccbba','abbbbccbba','abbbbbbbba','abdbbbbbba','addbbbbdba','adddbbddda','adddddddda','aaaaaaaaaa'],
 };
-const SC = {coin:{a:'#3b2a00',b:'#c98f00',c:'#ffd23f',d:'#fff3a8'},heart:{a:'#2b0000',b:'#e0352b'},pick:{a:'#1d1d1d',b:'#47e0d0',c:'#8a6a3a'},img:{a:'#1d1d1d',b:'#9fd3ff',c:'#ffe066',d:'#4e8a32'}};
+const SC = {unv:{a:'#000',b:'#5A5A62',c:'#EDEDED'},coin:{a:'#3b2a00',b:'#c98f00',c:'#ffd23f',d:'#fff3a8'},heart:{a:'#2b0000',b:'#e0352b'},pick:{a:'#1d1d1d',b:'#47e0d0',c:'#8a6a3a'},img:{a:'#1d1d1d',b:'#9fd3ff',c:'#ffe066',d:'#4e8a32'}};
 function sprite(name, cls=''){return `<canvas class="${cls}" data-spr="${name}"></canvas>`}
 function drawSprites(){document.querySelectorAll('canvas[data-spr]').forEach(cv=>{const m=SPR[cv.dataset.spr],col=SC[cv.dataset.spr];cv.width=m[0].length;cv.height=m.length;const x=cv.getContext('2d');m.forEach((row,y)=>[...row].forEach((ch,i)=>{if(col[ch]){x.fillStyle=col[ch];x.fillRect(i,y,1,1)}}))})}
 
@@ -256,12 +273,16 @@ const sc = (seed,w,h) => `<canvas class="scene" data-seed="${seed}" width="${w}"
 const xp = (g, sm) => `<div class="xp${sm?' sm':''}"><b style="width:${g}%"></b><i></i></div>`;
 const topBar = () => `<div class="top" data-tex="${OPT==='B'?'deep':'grassside'}"><div class="brand">${sprite('coin')}<span class="wm">memestream</span><span class="net">Devnet</span></div><div class="wallet">${sprite('heart')}<span class="num">7xKp3f</span></div></div>`;
 
+const UNV = q.get('unv');
+const TIP = `<div class="tip">We haven't checked that this streamer owns the channel.</div>`;
+const unvTag = (tip) => `<span class="unvtag">Unverified${tip?TIP:''}</span>`;
+const unvIcon = (tip) => `<span class="unvic">${sprite('unv')}${tip?TIP:''}</span>`;
 function coinPage(){
   const c = COINS[0];
   const trades = TRADES.map(t=>`<div class="tr num"><span class="${t[0]=='Buy'?'up':'down'}">${t[0]}</span><span>${t[1]} SOL</span><span>${t[2]} ${c.tk}</span><span class="mute">${t[3]}</span><span class="r mute">${t[4]} ago</span></div>`).join('');
   return topBar() + `<div class="coin">
     <div><div class="embed">${sc(c.seed,192,108)}<span class="live">Live</span></div>
-      <div class="p" style="margin-top:24px"><div class="ident"><div class="slot">${sc(c.seed,16,16)}</div><div><h1>$${c.tk}</h1><p>${c.name} by ${c.by}</p></div></div>
+      <div class="p" style="margin-top:24px"><div class="ident"><div class="slot">${sc(c.seed,16,16)}</div><div><h1>$${c.tk}${UNV==='A'?unvTag(1):UNV==='C'?unvIcon(1):''}</h1><p>${c.name} by ${UNV?'5NSMpd':c.by}</p>${UNV==='B'?'<p class="unvline">Unverified. We haven\'t checked that this streamer owns the channel.</p>':''}</div></div>
       <div class="trades"><h3>Recent trades</h3>${trades}</div></div></div>
     <div style="display:flex;flex-direction:column;gap:24px">
       <div class="p"><div class="lbl mute">Market cap</div><div class="cap num">${c.mc}</div><div class="chg up num">${pct(c.ch)} in the last hour</div>
@@ -280,8 +301,9 @@ function coinPage(){
 function home(){
   const hero = `<div class="hero"><div><h1>Live coins</h1><p>Buy the stream you think will pop.</p></div><div class="mbtn">Go live</div></div>
     <div class="sort"><div class="mbtn">Hot</div><div class="mbtn off">New</div><div class="mbtn off">Close to graduation</div></div>`;
-  if (OPT === 'B') return topBar() + `<div class="home">${hero}<div class="grid">${COINS.map(c=>`<div class="p tile"><div class="slot">${sc(c.seed,96,54)}<span class="live">Live</span></div>
-    <div class="meta"><div><h4>$${c.tk}</h4><p>${c.name}</p></div><div style="text-align:right"><h4 class="num">${c.mc}</h4><p class="num ${cls(c.ch)}">${pct(c.ch)}</p></div></div>${xp(c.g,1)}</div>`).join('')}</div></div>`;
+  if (OPT === 'B') return topBar() + `<div class="home">${hero}<div class="grid">${COINS.map(c=>`<div class="p tile"><div class="slot">${sc(c.seed,96,54)}<span class="tags"><span class="live">Live</span>${UNV==='A'?unvTag():''}</span></div>
+    ${UNV ? `<div class="m2"><h4>$${c.tk}${UNV==='C'?unvIcon():''}</h4><h4 class="num">${c.mc}</h4></div><div class="m2 r2"><p>${c.name}</p>${UNV==='B'?'<p class="unvw">Unverified</p>':''}</div>`
+      : `<div class="meta"><div><h4>$${c.tk}</h4><p>${c.name}</p></div><div style="text-align:right"><h4 class="num">${c.mc}</h4><p class="num ${cls(c.ch)}">${pct(c.ch)}</p></div></div>`}${xp(c.g,1)}</div>`).join('')}</div></div>`;
   return topBar() + `<div class="home">${hero}<div class="p">${COINS.map(c=>`<div class="row"><div class="slot">${sc(c.seed,48,27)}</div>
     <div><h4>$${c.tk}</h4><p>${c.name} by ${c.by}</p></div><div class="m num">${c.mc}</div><div class="c num ${cls(c.ch)}">${pct(c.ch)}</div>
     <div class="g num"><div style="margin-bottom:6px">${c.g}% to graduation</div>${xp(c.g,1)}</div></div>`).join('')}</div></div>`;
