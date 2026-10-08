@@ -32,7 +32,7 @@ test("every route handler that touches the chain uses withRpcGuard on every expo
 
 /** What server-rendered pages and layouts may import from server modules: budgeted readers or config only. */
 const PAGE_ALLOWED: Record<string, string[]> = {
-  "@/server/coins": ["getCoinDetail", "listCoins", "getLaunchFeeSol"], // all draw the RPC budget and share caches
+  "@/server/coins": ["getCoinDetail", "listCoins"], // both draw the RPC budget and share caches
   "@/server/chain": ["networkInfo", "getChain"], // config only; RPC handles must not be used (checked below)
 };
 /** Modules a page may never import: they reach the chain without the budget. */

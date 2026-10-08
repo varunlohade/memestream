@@ -6,23 +6,40 @@ import { useTx } from "@/components/tx";
 import type { PreparedTx } from "@/lib/api-types";
 import { Sprite } from "@/components/pixel/Pixel";
 import { useWallet } from "@/components/wallet/WalletProvider";
+import { fetchJson } from "@/lib/http";
 import { parseStreamLink } from "@/lib/stream-link";
 
-/** How often to re-ask the server while the launch fee is still unknown (RPC busy). */
+/** How often to re-ask while the launch fee is still unknown (RPC busy). */
 const FEE_RETRY_MS = 5_000;
 
 /**
- * `launchFeeSol`: the config's launch fee ("0" = free), or null while unknown. A streamer must see
- * the cost before paying it, so Launch stays disabled until the fee is known.
+ * Our config's launch fee in SOL ("0" = free), or null while unknown. It's fixed on-chain, so
+ * one answer is enough; until then, retry.
  */
-export function GoLiveView({ launchFeeSol }: { launchFeeSol: string | null }) {
-  const router = useRouter();
-  const feeKnown = launchFeeSol !== null;
+function useLaunchFee(): string | null {
+  const [fee, setFee] = useState<string | null>(null);
   useEffect(() => {
-    if (feeKnown) return;
-    const timer = setInterval(() => router.refresh(), FEE_RETRY_MS); // re-renders the server part; the form keeps its state
-    return () => clearInterval(timer);
-  }, [feeKnown, router]);
+    if (fee !== null) return;
+    let stopped = false;
+    const ask = () =>
+      fetchJson<{ sol: string }>("/api/launch-fee")
+        .then(({ sol }) => !stopped && setFee(sol))
+        .catch(() => {}); // busy: the timer asks again
+    void ask();
+    const timer = setInterval(ask, FEE_RETRY_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [fee]);
+  return fee;
+}
+
+/** A streamer must see the launch cost before paying it, so Launch stays disabled until it's known. */
+export function GoLiveView() {
+  const router = useRouter();
+  const launchFeeSol = useLaunchFee();
+  const feeKnown = launchFeeSol !== null;
   const { address } = useWallet();
   const { run, locked } = useTx();
   const [name, setName] = useState("");
