@@ -74,17 +74,22 @@ export async function loadPoolSnapshot(
   return { address, pool, config, currentPoint, status: statusOf(pool, config) };
 }
 
+/** A pool and its config: enough to price a coin and measure its progress, no clock needed. */
+type CurveState = Pick<PoolSnapshot, "pool" | "config">;
+
+const BPS_PER_WHOLE = 10_000;
+
 /** Share of the graduation threshold already in the curve, from 0 to 1. Drives the XP bar. */
-export function graduationProgress(snapshot: Pick<PoolSnapshot, "pool" | "config">): number {
+export function graduationProgress(snapshot: CurveState): number {
   const threshold = snapshot.config.migrationQuoteThreshold;
   if (threshold.isZero()) return 0;
   // Basis points keep the BN division exact enough for a progress bar.
-  const bps = snapshot.pool.poolState.quoteReserve.muln(10_000).div(threshold).toNumber();
-  return Math.min(Math.max(bps / 10_000, 0), 1);
+  const bps = snapshot.pool.poolState.quoteReserve.muln(BPS_PER_WHOLE).div(threshold).toNumber();
+  return Math.min(Math.max(bps / BPS_PER_WHOLE, 0), 1);
 }
 
 /** Price of one coin in SOL on the curve. After graduation this is the last curve price. */
-export function priceInSol(snapshot: Pick<PoolSnapshot, "pool" | "config">): number {
+export function priceInSol(snapshot: CurveState): number {
   return getPriceFromSqrtPrice(
     snapshot.pool.poolState.sqrtPrice,
     snapshot.config.tokenDecimal as TokenDecimal,
@@ -95,12 +100,9 @@ export function priceInSol(snapshot: Pick<PoolSnapshot, "pool" | "config">): num
 /** Plain, JSON-safe view of a coin pool for the UI (metadata fields are added by the server). */
 export type PoolView = Omit<CoinView, "name" | "symbol" | "streamUrl">;
 
-/** Pool state plus its config; enough to describe a coin without a fresh clock reading. */
-type PoolState = Pick<PoolSnapshot, "address" | "pool" | "config">;
-
-export function toPoolView({ address, pool, config }: PoolState): PoolView {
+export function toPoolView({ address, pool, config }: CurveState & Pick<PoolSnapshot, "address">): PoolView {
   const { poolState } = pool;
-  const price = getPriceFromSqrtPrice(poolState.sqrtPrice, config.tokenDecimal as TokenDecimal, QUOTE.decimals).toNumber();
+  const price = priceInSol({ pool, config });
   const supply = Number(baseUnitsToCoins(config.preMigrationTokenSupply));
   const threshold = config.migrationQuoteThreshold;
   return {
