@@ -1,6 +1,6 @@
 /** Token metadata JSON that wallets and explorers fetch from a coin's on-chain URI. */
 import { PublicKey } from "@solana/web3.js";
-import { parseStreamLink } from "@/lib/stream-link";
+import { streamLinkFromUri } from "@/lib/stream-link";
 import { getChain, poolForMint } from "@/server/chain";
 import { loadCoinMetadata, type TokenMetadata } from "@/server/metadata";
 import { busy, withRpcGuard } from "@/server/rpc-guard";
@@ -14,7 +14,7 @@ const MISS_CACHE_MS = 30_000;
 const MAX_CACHED = 5_000;
 const metadataCache = new Map<string, { at: number; meta: TokenMetadata | null }>();
 
-export const GET = withRpcGuard({ name: "meta", burst: 30, perSecond: 3 }, async (request: Request, { params }: RouteContext<"/api/meta/[mint]">, guard) => {
+export const GET = withRpcGuard({ name: "meta", burst: 30, perSecond: 3 }, async (_request: Request, { params }: RouteContext<"/api/meta/[mint]">, guard) => {
   const { mint } = await params;
   let mintKey: PublicKey;
   try {
@@ -38,8 +38,9 @@ export const GET = withRpcGuard({ name: "meta", burst: 30, perSecond: 3 }, async
   // Not on our config (or the read failed): never describe it as a memestream coin.
   if (!cached.meta) return jsonError("Not a memestream coin", 404);
 
-  // Only a valid Twitch/YouTube/Kick link is echoed; anything else is ignored (it can't vary the cache).
-  const link = parseStreamLink(new URL(request.url).searchParams.get("link") ?? "");
+  // The stream link comes from this coin's own on-chain URI, never from the request: another token
+  // pointing its URI here can't make us vouch for a stream of its choosing.
+  const link = streamLinkFromUri(cached.meta.uri);
   return Response.json(
     {
       name: cached.meta.name,

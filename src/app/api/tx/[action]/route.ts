@@ -1,7 +1,7 @@
 import { parseTxRequest } from "@/server/requests";
 import { buildClaimForWallet, buildGraduateForWallet, buildLaunchForWallet, buildTradeForWallet } from "@/server/transactions";
 import { withRpcGuard } from "@/server/rpc-guard";
-import { fail, jsonBody, ok } from "../../respond";
+import { failOrBusy, jsonBody, ok } from "../../respond";
 
 /** Building a transaction reads the pool, config and a blockhash: ~6 RPC calls. */
 export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1, calls: 6 }, async (request: Request, { params }: RouteContext<"/api/tx/[action]">) => {
@@ -18,6 +18,6 @@ export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1, ca
         return ok(await buildGraduateForWallet(parsed.req));
     }
   } catch (error) {
-    return fail(error);
+    return failOrBusy(error);
   }
 });

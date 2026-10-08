@@ -109,6 +109,19 @@ const MAX_CACHED = 2_000;
 type CoinAndTrades = Omit<CoinDetail, "holdings">;
 const coinCache = new Map<string, { at: number; value: CoinAndTrades | null }>();
 const holdingsCache = new Map<string, { at: number; value: Holdings | null }>();
+/** Reads in progress: concurrent requests for the same coin (or holdings) share one read and one budget charge. */
+const coinInFlight = new Map<string, Promise<CoinAndTrades | null>>();
+const holdingsInFlight = new Map<string, Promise<Holdings | null>>();
+
+/** Runs `read` once per key at a time; callers that arrive meanwhile get the same promise. */
+function shared<T>(inFlight: Map<string, Promise<T>>, key: string, read: () => Promise<T>): Promise<T> {
+  let pending = inFlight.get(key);
+  if (!pending) {
+    pending = read().finally(() => inFlight.delete(key));
+    inFlight.set(key, pending);
+  }
+  return pending;
+}
 
 /**
  * Coin, recent trades and (optionally) a wallet's holdings, or null if it isn't a memestream coin.
@@ -121,13 +134,17 @@ export async function getCoinDetail(mint: string, wallet: string | null): Promis
 }
 
 async function coinAndTrades(mint: string): Promise<CoinAndTrades | null> {
-  const now = Date.now();
   const hit = coinCache.get(mint);
-  if (hit && now - hit.at < (hit.value === null ? MISS_CACHE_MS : DETAIL_CACHE_MS)) return hit.value;
+  if (hit && Date.now() - hit.at < (hit.value === null ? MISS_CACHE_MS : DETAIL_CACHE_MS)) return hit.value;
+  return shared(coinInFlight, mint, () => refreshCoin(mint, hit?.value));
+}
+
+async function refreshCoin(mint: string, previous: CoinAndTrades | null | undefined): Promise<CoinAndTrades | null> {
+  const now = Date.now();
 
   // Cheap existence check first (only when we don't already know the coin): unknown or made-up
   // addresses cost one call and are remembered as misses for 30 s.
-  if (!hit?.value) {
+  if (!previous) {
     const pool = poolForMint(mint);
     if (!pool) return remember(coinCache, mint, null, now);
     if (!(await takeRpcBudget(EXISTS_RPC_CALLS))) throw new BusyError();
@@ -136,7 +153,6 @@ async function coinAndTrades(mint: string): Promise<CoinAndTrades | null> {
   if (!(await takeRpcBudget(COIN_RPC_CALLS - EXISTS_RPC_CALLS))) throw new BusyError();
 
   const fetched = await readCoinAndTrades(mint);
-  const previous = hit?.value;
   const value = fetched && fetched.trades.length === 0 && previous?.trades.length ? { ...fetched, trades: previous.trades } : fetched;
   return remember(coinCache, mint, value, now);
 }
@@ -146,8 +162,10 @@ async function holdingsFor(mint: string, wallet: string): Promise<Holdings | nul
   const now = Date.now();
   const hit = holdingsCache.get(key);
   if (hit && now - hit.at < HOLDINGS_CACHE_MS) return hit.value;
-  if (!(await takeRpcBudget(HOLDINGS_RPC_CALLS))) throw new BusyError();
-  return remember(holdingsCache, key, await walletHoldings(mint, wallet), now);
+  return shared(holdingsInFlight, key, async () => {
+    if (!(await takeRpcBudget(HOLDINGS_RPC_CALLS))) throw new BusyError();
+    return remember(holdingsCache, key, await walletHoldings(mint, wallet), Date.now());
+  });
 }
 
 function remember<T>(cache: Map<string, { at: number; value: T }>, key: string, value: T, now: number): T {

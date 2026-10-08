@@ -16,7 +16,7 @@ import { readFileSync } from "node:fs";
 import { Keypair, Transaction } from "@solana/web3.js";
 import bs58 from "bs58";
 import { getChain, wasBuiltHere } from "@/server/chain";
-import { withRpcGuard } from "@/server/rpc-guard";
+import { busy, withRpcGuard } from "@/server/rpc-guard";
 import { fail, jsonBody, ok } from "../respond";
 
 let wallet: Keypair | null | undefined;
@@ -44,7 +44,7 @@ export const GET = withRpcGuard({ name: "dev-wallet-get", burst: 20, perSecond: 
   return ok({ address: devWallet.publicKey.toBase58() });
 });
 
-export const POST = withRpcGuard({ name: "dev-wallet-post", burst: 10, perSecond: 1, calls: 1 }, async (request: Request) => {
+export const POST = withRpcGuard({ name: "dev-wallet-post", burst: 10, perSecond: 1 }, async (request: Request, _context, guard) => {
   const devWallet = loadWallet();
   if (!devWallet || !fromOurPage(request)) return disabled();
   try {
@@ -52,6 +52,7 @@ export const POST = withRpcGuard({ name: "dev-wallet-post", burst: 10, perSecond
     if (typeof transaction !== "string") return Response.json({ error: "Missing transaction" }, { status: 400 });
     const tx = Transaction.from(Buffer.from(transaction, "base64"));
     if (!wasBuiltHere(tx)) return Response.json({ error: "Not a transaction this server built" }, { status: 403 });
+    if (!(await guard.spend(1))) return busy(); // charged only once every guard has passed
     tx.partialSign(devWallet);
     const { connection } = getChain();
     const delayMs = Number(process.env.MEMESTREAM_DEV_SEND_DELAY_MS ?? 0);
