@@ -5,12 +5,13 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import type { Surfnet } from "@solana/surfpool";
-import { Connection, Keypair, type PublicKey } from "@solana/web3.js";
+import { Connection, Keypair, type PublicKey, Transaction } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 import { buildCreateConfigTx } from "../../src/lib/dbc/config";
 import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
 import { COIN_PRESETS } from "../../src/lib/dbc/preset";
+import { pollUntil } from "../../src/lib/poll";
 import { signatureStatus } from "../../src/lib/tx-status";
 
 const [partner, streamer, viewer] = [Keypair.generate(), Keypair.generate(), Keypair.generate()];
@@ -66,9 +67,30 @@ test("an unseen transaction is pending while its blockhash is valid, expired onc
   assert.equal((await signatureStatus(connection, { signature: null, blockhash: neverIssued })).status, "expired");
 });
 
+test("a landed buy shows in the coin's trades and the buyer's holdings", async () => {
+  const prepared = await server.buildTradeForWallet({ wallet: viewer.publicKey.toBase58(), mint: mint.toBase58(), side: "buy", amount: "0.01", slippageBps: 100 });
+  const tx = Transaction.from(Buffer.from(prepared.transaction, "base64"));
+  tx.partialSign(viewer);
+  const signature = await connection.sendRawTransaction(tx.serialize());
+  const landed = await pollUntil(
+    async () => ((await signatureStatus(connection, { signature, blockhash: prepared.blockhash })).status === "confirmed" ? true : undefined),
+    { timeoutMs: 30_000, intervalMs: 100 },
+  );
+  assert.ok(landed, "buy confirmed");
+
+  const { getCoinDetail } = await import("../../src/server/coins");
+  const detail = await getCoinDetail(mint.toBase58(), viewer.publicKey.toBase58());
+  assert.equal(detail?.coin.symbol, "RULE");
+  assert.deepEqual(
+    detail?.trades.map((t) => [t.signature, t.side, t.wallet, t.byStreamer]),
+    [[signature, "buy", viewer.publicKey.toBase58(), false]],
+  );
+  assert.equal(detail?.trades[0].coins, prepared.preview.received);
+  assert.ok(Number(detail?.holdings?.coins) > 0, "the buyer holds coins");
+});
+
 /** Sign a server-built transaction as `wallet`, send it, and read its outcome (status and error). */
 async function sendAndRead(prepared: { transaction: string; blockhash: string }, wallet: Keypair) {
-  const { Transaction } = await import("@solana/web3.js");
   const tx = Transaction.from(Buffer.from(prepared.transaction, "base64"));
   tx.partialSign(wallet);
   const signature = await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true });
