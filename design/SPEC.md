@@ -88,14 +88,16 @@ Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B
 - Graduated state (all): the bar fills, the % becomes "Graduated", and A adds "Now trading on Meteora".
 - The real overlay page has a transparent body. The game picture in the mocks is a stand-in. Text sizes are for a 1920×1080 canvas; the XP number has an 8px black stroke for busy backgrounds.
 
-## Unverified badge (2026-10-08): waiting for Boss man's pick
+## Unverified badge (2026-10-08): FINAL = A, Gray tag
+Boss man picked A ("a makes sense"). Build A only; B and C stay for the record. Built and signed off on stills in qa/2026-10-08-unverified/, with one tweak: the tag has the same height as the LIVE/GRADUATED tag next to it.
+- Behavior: on the coin page a tap opens the note (phones have no hover) and a tap outside closes it; hover also shows it. On tiles, hover only (the tile is a link).
 Why: anyone can launch a coin with any YouTube/Twitch link, and there's no channel check until channel OAuth (week 3). Audit M2; steve approved an honest label. Not on the OBS overlay.
 Board: `design/boards/MS-unverified.png`. Mock: `mc.html?opt=B&screen=home|coin&unv=A|B|C`.
 - A Gray tag: "Unverified" tag next to Live on the tile picture (`#3E3E44`, `#D8D8DC` text, VT323 22px, 3px black border). On the coin page, the same tag after $TICKER, with a hover/tap note.
 - B Quiet word: muted "Unverified" at the right of tile row 2. On the coin page, a muted line under "by <wallet>": "Unverified. We haven't checked that this streamer owns the channel." No hover needed.
 - C Icon: small gray "?" block after $TICKER on tiles and the coin page, with the hover/tap note.
 - Note text (all): "We haven't checked that this streamer owns the channel."
-- art_design recommends B: the quietest, and the note is readable without hover (phones have no hover).
+- (art_design had recommended B; Boss man chose A.)
 
 ## Open
 - Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.

@@ -107,10 +107,10 @@ canvas { image-rendering: pixelated; }
 .tile .thumb { aspect-ratio: 16/9; padding: 6px; position: relative; }
 .tile .live { left: 14px; top: 14px; }
 /* Tags on a tile picture: Live/Graduated, then Unverified. */
-.tags { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; align-items: center; }
+.tags { position: absolute; left: 14px; top: 14px; display: flex; gap: 8px; align-items: stretch; }
 .tags .live { position: static; }
 /* "Unverified" (SPEC design A): gray tag, VT323, 3px black border. */
-.unv { background: #3E3E44; color: #D8D8DC; font-family: var(--bf); font-size: 22px; line-height: 1.1; padding: 3px 10px; border: 3px solid #000; }
+.unv { display: inline-flex; align-items: center; background: #3E3E44; color: #D8D8DC; font-family: var(--bf); font-size: 22px; line-height: 1.1; padding: 3px 10px; border: 3px solid #000; }
 button.unv { cursor: help; }
 .ticker-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
 .unv-wrap { position: relative; display: inline-flex; }
