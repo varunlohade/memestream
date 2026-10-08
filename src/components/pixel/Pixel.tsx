@@ -1,6 +1,7 @@
 "use client";
 /** Small React wrappers around the canvas pixel art in art.ts. */
 import { type CSSProperties, useEffect, useRef, useSyncExternalStore } from "react";
+import { noSubscription } from "@/components/no-subscription";
 import { drawScene, drawSprite, drawStepChart, seedFrom, type SpriteName, type TextureKind, textureUrl } from "./art";
 
 export function Sprite({ name, className }: { name: SpriteName; className?: string }) {
@@ -35,7 +36,6 @@ const cachedTexture = (kind: TextureKind, seed: number) => {
   if (!textureCache.has(key)) textureCache.set(key, textureUrl(kind, seed));
   return textureCache.get(key) ?? "";
 };
-const noSubscription = () => () => {};
 
 /** `background-image` for a noise texture. Empty on the server (textures need a canvas). */
 export function useTexture(kind: TextureKind, seed = 1): CSSProperties {

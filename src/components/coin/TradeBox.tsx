@@ -2,6 +2,7 @@
 /** Buy/sell panel. Quotes as you type; the server builds the swap; the wallet signs it. */
 import { useState, useSyncExternalStore } from "react";
 import { type CoinView, type Holdings, useQuote } from "@/components/hooks";
+import { noSubscription } from "@/components/no-subscription";
 import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { COIN_DECIMALS, DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
@@ -37,7 +38,6 @@ type Status = { kind: "busy" | "done" | "error"; text: string };
 /** The typed amount survives a reload (per coin and side) via sessionStorage; this tab only. */
 const amountKey = (mint: string, side: Side) => `memestream.amount.${mint}.${side}`;
 const DEFAULT_AMOUNT: Record<Side, string> = { buy: "0.5", sell: "" };
-const noSubscription = () => () => {};
 function readAmount(mint: string, side: Side): string | null {
   try {
     return sessionStorage.getItem(amountKey(mint, side));
