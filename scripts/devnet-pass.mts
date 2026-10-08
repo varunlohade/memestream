@@ -4,25 +4,17 @@
  * Two throwaway keypairs in .keys/ (git-ignored) are funded from .keys/partner.json.
  * Run:  npx tsx scripts/devnet-pass.mts [https://memestream-iota.vercel.app]
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { Connection, Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
+import { type Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
 import { sleep } from "../src/lib/poll";
+import { connectToDevnet } from "./devnet";
+import { readKeypair, readOrCreateKeypair } from "./keys";
 
 const SITE = process.argv[2] ?? "https://memestream-iota.vercel.app";
-const connection = new Connection("https://api.devnet.solana.com", "confirmed");
-if ((await connection.getGenesisHash()) !== "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG") throw new Error("Not devnet. Stopping.");
+const connection = await connectToDevnet();
 
-function keypair(name: string, create: boolean): Keypair {
-  const path = `.keys/${name}.json`;
-  if (existsSync(path)) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
-  if (!create) throw new Error(`missing ${path}`);
-  const k = Keypair.generate();
-  writeFileSync(path, JSON.stringify(Array.from(k.secretKey)), { mode: 0o600 });
-  return k;
-}
-const partner = keypair("partner", false);
-const creator = keypair("devnet-creator", true);
-const viewer = keypair("devnet-viewer", true);
+const partner = readKeypair(".keys/partner.json");
+const creator = readOrCreateKeypair(".keys/devnet-creator.json");
+const viewer = readOrCreateKeypair(".keys/devnet-viewer.json");
 const signatures: [string, string][] = [];
 
 async function fund(to: Keypair, sol: number) {

@@ -4,7 +4,7 @@
  * memestream config, seeds a few stream coins with trades, writes .env.local, and stays up.
  * Run: npm run dev:chain   (then, in another terminal: npm run dev)
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { renameSync, rmSync, writeFileSync } from "node:fs";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { Connection, Keypair } from "@solana/web3.js";
 import { buildCreateConfigTx } from "../src/lib/dbc/config";
@@ -14,21 +14,15 @@ import { COIN_PRESETS } from "../src/lib/dbc/preset";
 import { prepareTrade } from "../src/lib/dbc/trade";
 import { solToLamports } from "../src/lib/dbc/units";
 import { metadataUri, parseStreamLink } from "../src/lib/stream-link";
+import { readOrCreateKeypair } from "./keys";
 import { startOfflineSurfnet } from "./local-chain/offline-surfnet";
 import { sendAndConfirm } from "./local-chain/send-and-confirm";
 
 const KEYS_DIR = ".keys";
 const APP_ORIGIN = "http://127.0.0.1:3000"; // must match how the dev server is opened (npm run dev binds 127.0.0.1)
 
-/** Loads a local test keypair, creating it on first run. Kept in .keys/ (git-ignored). */
-function localKeypair(name: string): Keypair {
-  if (!existsSync(KEYS_DIR)) mkdirSync(KEYS_DIR);
-  const path = `${KEYS_DIR}/${name}.json`;
-  if (existsSync(path)) return Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, "utf8"))));
-  const keypair = Keypair.generate();
-  writeFileSync(path, JSON.stringify(Array.from(keypair.secretKey)), { mode: 0o600 });
-  return keypair;
-}
+/** A local test keypair, created on first run. */
+const localKeypair = (name: string) => readOrCreateKeypair(`${KEYS_DIR}/${name}.json`);
 
 const SAMPLE_STREAMS = [
   // Real public YouTube live streams (checked live and embeddable 2026-10-08). Live IDs change when a stream restarts: re-check with the channel's /live page.
