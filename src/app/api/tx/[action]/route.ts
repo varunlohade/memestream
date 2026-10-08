@@ -1,5 +1,5 @@
 import { parseTxRequest } from "@/server/requests";
-import { buildClaimForWallet, buildGraduateForWallet, buildLaunchForWallet, buildTradeForWallet } from "@/server/transactions";
+import { buildClaimForWallet, buildClaimPoolFeesForWallet, buildGraduateForWallet, buildLaunchForWallet, buildTradeForWallet } from "@/server/transactions";
 import { withRpcGuard } from "@/server/rpc-guard";
 import { failOrBusy, jsonBody, ok } from "../../respond";
 
@@ -16,6 +16,8 @@ export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1, ca
         return ok(await buildClaimForWallet(parsed.req));
       case "graduate":
         return ok(await buildGraduateForWallet(parsed.req));
+      case "claim-lp":
+        return ok(await buildClaimPoolFeesForWallet(parsed.req));
     }
   } catch (error) {
     return failOrBusy(error);

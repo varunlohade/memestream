@@ -7,6 +7,7 @@ import BN from "bn.js";
 import type { CoinDetail, CoinView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
 import { fetchDammPools, graduatedPoolAddress, withGraduatedPool } from "@/lib/damm/pool";
+import { lpPositionsOf, unclaimedPoolFees } from "@/lib/damm/positions";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
 import { isCanonicalTicker } from "@/lib/short-link";
@@ -141,6 +142,8 @@ const MISS_CACHE_MS = 30_000;
 const COIN_RPC_CALLS = 25;
 /** A wallet's SOL balance and its token account. */
 const HOLDINGS_RPC_CALLS = 2;
+/** For a graduated coin: the wallet's position NFTs, their positions, and the pool. */
+const LP_FEES_RPC_CALLS = 3;
 /** Checking that the coin's pool exists first costs one call, so junk addresses can't drain the budget. */
 const EXISTS_RPC_CALLS = 1;
 const MAX_CACHED = 2_000;
@@ -158,7 +161,7 @@ const holdingsInFlight = new Map<string, Promise<Holdings | null>>();
 export async function getCoinDetail(mint: string, wallet: string | null): Promise<CoinDetail | null> {
   const base = await coinAndTrades(mint);
   if (!base) return null;
-  return { ...base, holdings: wallet ? await holdingsFor(mint, wallet) : null };
+  return { ...base, holdings: wallet ? await holdingsFor(mint, wallet, base.coin.meteoraPool) : null };
 }
 
 async function coinAndTrades(mint: string): Promise<CoinAndTrades | null> {
@@ -185,14 +188,15 @@ async function refreshCoin(mint: string, previous: CoinAndTrades | null | undefi
   return remember(coinCache, mint, value, now);
 }
 
-async function holdingsFor(mint: string, wallet: string): Promise<Holdings | null> {
+async function holdingsFor(mint: string, wallet: string, meteoraPool: string | null): Promise<Holdings | null> {
   const key = `${mint}|${wallet}`;
   const now = Date.now();
   const hit = holdingsCache.get(key);
   if (hit && now - hit.at < HOLDINGS_CACHE_MS) return hit.value;
   return shareInFlight(holdingsInFlight, key, async () => {
-    if (!(await takeRpcBudget(HOLDINGS_RPC_CALLS))) throw new BusyError();
-    return remember(holdingsCache, key, await walletHoldings(mint, wallet), Date.now());
+    const calls = HOLDINGS_RPC_CALLS + (meteoraPool ? LP_FEES_RPC_CALLS : 0);
+    if (!(await takeRpcBudget(calls))) throw new BusyError();
+    return remember(holdingsCache, key, await walletHoldings(mint, wallet, meteoraPool), Date.now());
   });
 }
 
@@ -249,7 +253,7 @@ async function recentTrades(client: DynamicBondingCurveClient, coin: CoinView, {
 }
 
 /** A wallet's SOL and its balance of one coin (0 if it has no token account yet). */
-async function walletHoldings(mint: string, wallet: string): Promise<Holdings | null> {
+async function walletHoldings(mint: string, wallet: string, meteoraPool: string | null): Promise<Holdings | null> {
   let owner: PublicKey;
   let mintKey: PublicKey;
   try {
@@ -266,5 +270,16 @@ async function walletHoldings(mint: string, wallet: string): Promise<Holdings | 
       .then((r) => r.value.amount)
       .catch(() => "0"),
   ]);
-  return { sol: lamportsToSol(new BN(lamports)), coins: baseUnitsToCoins(new BN(tokens)) };
+  return { sol: lamportsToSol(new BN(lamports)), coins: baseUnitsToCoins(new BN(tokens)), lpFees: await lpFeesOf(meteoraPool, owner) };
+}
+
+/** Unclaimed fees on the LP position NFTs `owner` holds in a graduated coin's pool; null if none. */
+async function lpFeesOf(meteoraPool: string | null, owner: PublicKey): Promise<Holdings["lpFees"]> {
+  if (!meteoraPool) return null;
+  const { connection } = getChain();
+  const pool = new PublicKey(meteoraPool);
+  const [positions, [state]] = await Promise.all([lpPositionsOf(connection, pool, owner), fetchDammPools(connection, [pool])]);
+  if (positions.length === 0 || !state) return null;
+  const { coins, lamports } = unclaimedPoolFees(state, positions);
+  return { sol: lamportsToSol(lamports), coins: baseUnitsToCoins(coins) };
 }

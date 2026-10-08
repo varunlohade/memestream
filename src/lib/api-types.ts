@@ -46,7 +46,12 @@ export type TradeView = {
   byStreamer: boolean;
 };
 
-export type Holdings = { sol: string; coins: string };
+export type Holdings = {
+  sol: string;
+  coins: string;
+  /** Unclaimed fees on the LP position NFTs this wallet holds in a graduated coin's pool (null: none). */
+  lpFees: { sol: string; coins: string } | null;
+};
 
 export type CoinDetail = { coin: CoinView; trades: TradeView[]; holdings: Holdings | null };
 
@@ -58,7 +63,7 @@ export type TradePreview = { spent: string; received: string; minimumReceived: s
  */
 export type PreparedTx = { transaction: string; blockhash: string };
 
-export type TxAction = "launch" | "trade" | "claim" | "graduate";
+export type TxAction = "launch" | "trade" | "claim" | "graduate" | "claim-lp";
 
 /** expired = the server's blockhash ran out with the signature unseen; the user must check their wallet. */
 export type TxStatus = { status: "pending" | "confirmed" | "failed" | "expired"; error?: string };

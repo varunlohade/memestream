@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { type CoinDetail, type CoinView, type TradeView, useCoin, usePriceTrend } from "@/components/hooks";
+import { type CoinDetail, type CoinView, type Holdings, type TradeView, useCoin, usePriceTrend } from "@/components/hooks";
 import { useTx } from "@/components/tx";
 import { useHostname } from "@/components/use-hostname";
 import { Scene, Sprite, StepChart, XpBar } from "@/components/pixel/Pixel";
@@ -77,8 +77,11 @@ function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) 
   );
 }
 
-/** Claim (for the streamer) and Graduate (for anyone, once the curve is full). */
-function CoinActions({ coin, onDone }: { coin: CoinView; onDone: () => void }) {
+/**
+ * Claim (for the streamer), Graduate (for anyone, once the curve is full), and after graduation
+ * Claim pool fees (for whoever holds an LP position NFT in the coin's Meteora pool).
+ */
+function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Holdings | null; onDone: () => void }) {
   const { address } = useWallet();
   const { run: runTx, locked } = useTx();
   const [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
@@ -87,13 +90,16 @@ function CoinActions({ coin, onDone }: { coin: CoinView; onDone: () => void }) {
   const isStreamer = address === coin.creator;
   const canClaim = isStreamer && Number(coin.streamerUnclaimedSol) > 0;
   const canGraduate = coin.status === "graduating" && Boolean(address);
-  if (!isStreamer && !canGraduate) return null;
+  const lpFees = holdings?.lpFees ?? null;
+  const canClaimLp = Boolean(lpFees) && (Number(lpFees?.sol) > 0 || Number(lpFees?.coins) > 0);
+  if (!isStreamer && !canGraduate && !lpFees) return null;
 
-  const runAction = async (action: "claim" | "graduate", successText: string) => {
+  const ACTION_LABEL = { claim: "Claim", graduate: "Graduate", "claim-lp": "Claim pool fees" } as const;
+  const runAction = async (action: keyof typeof ACTION_LABEL, successText: string) => {
     if (!address) return;
     setStatus(null);
     try {
-      await runTx(action, `${action === "claim" ? "Claim" : "Graduate"} ${coin.symbol}`, { wallet: address, mint: coin.mint }, setStage);
+      await runTx(action, `${ACTION_LABEL[action]} ${coin.symbol}`, { wallet: address, mint: coin.mint }, setStage);
       setStatus({ error: false, text: successText });
       onDone();
     } catch (e) {
@@ -111,6 +117,18 @@ function CoinActions({ coin, onDone }: { coin: CoinView; onDone: () => void }) {
           <div className="cap num" style={{ fontSize: 34 }}>{formatSol(coin.streamerUnclaimedSol)} SOL</div>
           <button type="button" className="mbtn buy" disabled={!canClaim || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim", "Earnings sent to your wallet")}>
             {stage ?? "Claim earnings"}
+          </button>
+        </>
+      )}
+      {lpFees && (
+        <>
+          <div className="lbl mute">Your LP NFT: pool fees (the liquidity stays locked)</div>
+          <div className="cap num" style={{ fontSize: 34 }}>
+            {formatSol(lpFees.sol)} SOL
+            {Number(lpFees.coins) > 0 && <span className="mute"> + {compact(Number(lpFees.coins))} {coin.symbol}</span>}
+          </div>
+          <button type="button" className="mbtn buy" disabled={!canClaimLp || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim-lp", "Pool fees sent to your wallet")}>
+            {stage ?? "Claim pool fees"}
           </button>
         </>
       )}
@@ -198,7 +216,7 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
           // key: a fresh trade box per coin, so typed state never carries over between coins.
           <TradeBox key={coin.mint} coin={coin} holdings={holdings} onTraded={refresh} />
         )}
-        <CoinActions coin={coin} onDone={refresh} />
+        <CoinActions coin={coin} holdings={holdings} onDone={refresh} />
       </div>
     </div>
   );

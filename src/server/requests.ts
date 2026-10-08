@@ -29,9 +29,9 @@ export function parseQuote(params: URLSearchParams): QuoteRequest {
 export type ParsedTx =
   | { action: "launch"; req: LaunchRequest }
   | { action: "trade"; req: TradeRequest }
-  | { action: "claim" | "graduate"; req: { wallet: string; mint: string } };
+  | { action: "claim" | "graduate" | "claim-lp"; req: { wallet: string; mint: string } };
 
-const ACTIONS: readonly TxAction[] = ["launch", "trade", "claim", "graduate"];
+const ACTIONS: readonly TxAction[] = ["launch", "trade", "claim", "graduate", "claim-lp"];
 
 export function parseTxRequest(action: string, body: Body): ParsedTx {
   if (!(ACTIONS as readonly string[]).includes(action)) throw new UserError("Unknown action");
@@ -62,6 +62,7 @@ export function parseTxRequest(action: string, body: Body): ParsedTx {
       };
     case "claim":
     case "graduate":
+    case "claim-lp":
       return { action: knownAction, req: { wallet, mint: requiredText(body, "mint") } };
   }
 }

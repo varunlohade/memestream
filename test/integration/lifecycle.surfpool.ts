@@ -17,6 +17,7 @@ import { prepareTrade, quoteTrade, type TradeInput } from "../../src/lib/dbc/tra
 import { QUOTE, solToLamports, toBN } from "../../src/lib/dbc/units";
 import { dammPriceInSol, graduatedPoolAddress, loadDammSnapshot } from "../../src/lib/damm/pool";
 import { prepareDammTrade, quoteDammTrade } from "../../src/lib/damm/trade";
+import { buildClaimPoolFeesTx, lpPositionsOf, unclaimedPoolFees } from "../../src/lib/damm/positions";
 import { buyFeeShare, shareOfBps } from "../support/fees";
 import { stepRunner } from "../support/steps";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
@@ -196,5 +197,22 @@ test("a stream coin's life: launch, trade, earn, graduate", async (t) => {
     await dammTrade({ side: "buy", lamports: ofThreshold(0.1) }); // someone else moves the price up first
     await assert.rejects(dammTrade(input, seen.minimumAmountOut), /failed/i, "the seen minimum makes it fail");
     await dammTrade(input); // the fresh quote's own floor goes through
+  });
+
+  await step("the streamer's LP NFT earned pool fees; only its holder can claim them", async () => {
+    const pool = need(dammPool, "DAMM pool");
+    const { state } = await damm();
+    const streamerLp = await lpPositionsOf(client.connection, pool, streamer.publicKey);
+    assert.equal(streamerLp.length, 1, "graduation gave the streamer one position NFT");
+    assert.ok(unclaimedPoolFees(state, streamerLp).lamports.gtn(0), "the pool trades earned it SOL fees");
+    assert.equal((await lpPositionsOf(client.connection, pool, viewer.publicKey)).length, 0);
+    await assert.rejects(buildClaimPoolFeesTx(client.connection, { address: pool, state }, viewer.publicKey, []), /no LP position/);
+
+    const solBefore = await client.connection.getBalance(streamer.publicKey);
+    await sendAndConfirm(client.connection, await buildClaimPoolFeesTx(client.connection, { address: pool, state }, streamer.publicKey, streamerLp), [streamer]);
+    assert.ok((await client.connection.getBalance(streamer.publicKey)) > solBefore, "streamer got SOL");
+    const after = await lpPositionsOf(client.connection, pool, streamer.publicKey);
+    assert.ok(unclaimedPoolFees((await damm()).state, after).lamports.isZero(), "nothing left to claim");
+    await assert.rejects(buildClaimPoolFeesTx(client.connection, { address: pool, state: (await damm()).state }, streamer.publicKey, after), /No pool fees/);
   });
 });

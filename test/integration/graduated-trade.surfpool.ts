@@ -106,3 +106,21 @@ test("a graduated coin shows its Meteora pool, live price and the trades made th
   assert.equal(listed?.meteoraPool, detail.coin.meteoraPool);
   assert.equal(listed?.priceSol, detail.coin.priceSol);
 });
+
+test("the streamer sees their LP NFT's pool fees and claims them; a viewer can't", async () => {
+  const { getCoinDetail } = await import("../../src/server/coins");
+  const streamerView = await getCoinDetail(mint.toBase58(), streamer.publicKey.toBase58());
+  assert.ok(streamerView?.holdings?.lpFees, "the streamer holds an LP position");
+  assert.ok(Number(streamerView.holdings.lpFees.sol) > 0, "pool trades earned it SOL");
+  const viewerView = await getCoinDetail(mint.toBase58(), viewer.publicKey.toBase58());
+  assert.equal(viewerView?.holdings?.lpFees, null, "a viewer holds no LP position");
+
+  await assert.rejects(server.buildClaimPoolFeesForWallet({ wallet: viewer.publicKey.toBase58(), mint: mint.toBase58() }), /no LP position/);
+  const before = await connection.getBalance(streamer.publicKey);
+  const claim = await server.buildClaimPoolFeesForWallet({ wallet: streamer.publicKey.toBase58(), mint: mint.toBase58() });
+  assert.equal((await signAndSend(claim, streamer)).status, "confirmed");
+  // Net of the network fee, the streamer gains the fees: no rent left behind in an empty coin account.
+  const gained = (await connection.getBalance(streamer.publicKey)) - before;
+  const fees = Number(solToLamports(streamerView.holdings.lpFees.sol));
+  assert.ok(gained > fees - 10_000 && gained <= fees, `gained ${gained} lamports for ${fees} lamports of fees`);
+});

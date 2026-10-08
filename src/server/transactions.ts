@@ -14,6 +14,7 @@ import { loadPoolSnapshot, type PoolSnapshot } from "@/lib/dbc/pool";
 import { prepareTrade, quoteTrade, type TradeInput } from "@/lib/dbc/trade";
 import { type DammSnapshot, graduatedPoolAddress, loadDammSnapshot } from "@/lib/damm/pool";
 import { prepareDammTrade, quoteDammTrade } from "@/lib/damm/trade";
+import { buildClaimPoolFeesTx, lpPositionsOf } from "@/lib/damm/positions";
 import type { BuiltTx } from "@/lib/dbc/tx";
 import { baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, solToLamports } from "@/lib/dbc/units";
 import { coinForTicker, parseTicker } from "@/lib/short-link";
@@ -162,6 +163,19 @@ export async function buildTradeForWallet(req: TradeRequest): Promise<PreparedTx
 export async function buildClaimForWallet(req: { wallet: string; mint: string }): Promise<PreparedTx> {
   const { client } = getChain();
   return userFacing(async () => toPreparedTx(await buildClaimEarningsTx(client, await snapshotForMint(req.mint), walletKey(req.wallet))));
+}
+
+/** Claims the pool fees on an LP position NFT the wallet holds in a graduated coin's Meteora pool. */
+export async function buildClaimPoolFeesForWallet(req: { wallet: string; mint: string }): Promise<PreparedTx> {
+  const { connection } = getChain();
+  return userFacing(async () => {
+    const snapshot = await snapshotForMint(req.mint);
+    if (snapshot.status !== "graduated") throw new UserError("Pool fees start once the coin graduates");
+    const pool = await graduatedPool(snapshot);
+    const owner = walletKey(req.wallet);
+    const positions = await lpPositionsOf(connection, pool.address, owner);
+    return toPreparedTx(await buildClaimPoolFeesTx(connection, pool, owner, positions));
+  });
 }
 
 export async function buildGraduateForWallet(req: { wallet: string; mint: string }): Promise<PreparedTx> {
