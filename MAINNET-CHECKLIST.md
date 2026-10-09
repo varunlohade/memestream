@@ -13,10 +13,14 @@ none of its parameters can change later, so all of them must be right first.
       more on the real program. It collects in each pool: the partner claims it with
       `claimPartnerPoolCreationFee` (a claim script is still to write). Go live shows
       "Launch costs 0.05 SOL" (read from the on-chain config). Devnet stays free.
-- [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). It also receives the
-      partner's locked LP position NFT. The app's "Claim pool fees" builds a transaction the
-      holder signs directly, so for a multisig claim the partner's LP fees through Squads
-      (audit #3, INFO-3).
+- [x] **Graduated liquidity: 100% to the streamer, 0% to the partner** (Boss man, 2026-10-09, via
+      steve). `COIN_PRESETS["mainnet-beta"].lockedLpPercent`, pinned in `config.test.ts`;
+      `mainnet-config.surfpool.ts` graduates a coin on the mainnet preset and proves exactly one
+      position NFT exists, held by the streamer. The partner earns the 0.05 SOL launch fee and its
+      20% share of curve fees. Devnet stays 50/50 (its config is fixed).
+- [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). On mainnet the partner
+      gets no LP position, so there are no partner LP fees to claim (on devnet, claim through the
+      app, or for a multisig through Squads: audit #3, INFO-3).
 - [x] **Graduation threshold: 10 SOL** (Boss man, 2026-10-08, via steve). Set in
       `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
       programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).
@@ -25,7 +29,8 @@ none of its parameters can change later, so all of them must be right first.
       not a local key. `scripts/dev-chain.ts` uses `.keys/local-partner.json`: never use it on mainnet.
 - [ ] **Fee settings.** Confirm: 50% launch fee falling to a 1% base over 60 s, plus a small
       volatility fee (`dynamicFeeEnabled: true`); 80% of fees to the streamer; graduated pool fee 1%
-      (`MigrationFeeOption.FixedBps100`); 100% of graduated liquidity locked forever.
+      (`MigrationFeeOption.FixedBps100`); 100% of graduated liquidity locked forever, all of it the
+      streamer's (see above).
 - [ ] **Public URL.** `MEMESTREAM_PUBLIC_URL` is baked into every coin's on-chain metadata URI and
       can never change for coins already launched. Set it to the final domain (e.g. https://memestream.lol).
       Devnet runs on the *.vercel.app URL for now; buy the domain before mainnet.

@@ -29,6 +29,16 @@ test("mainnet preset validates and graduates at 10 SOL (Boss man's number)", () 
   const params = buildCreateConfigParams(COIN_PRESETS["mainnet-beta"], accounts);
   assert.equal(params.migrationQuoteThreshold.toString(), "10000000000"); // 10 SOL
   assert.equal(params.poolCreationFee.toString(), "50000000"); // 0.05 SOL launch fee
+  // All graduated liquidity to the streamer, locked forever.
+  assert.equal(params.creatorPermanentLockedLiquidityPercentage, 100);
+  assert.equal(params.partnerPermanentLockedLiquidityPercentage, 0);
+  assert.equal(params.creatorLiquidityPercentage + params.partnerLiquidityPercentage, 0, "nothing unlocked");
+});
+
+test("devnet keeps the 50/50 locked split its existing config was created with", () => {
+  const params = buildCreateConfigParams(COIN_PRESETS.devnet, accounts);
+  assert.equal(params.partnerPermanentLockedLiquidityPercentage, 50);
+  assert.equal(params.creatorPermanentLockedLiquidityPercentage, 50);
 });
 
 test("devnet launches stay free (the devnet config already exists with 0)", () => {

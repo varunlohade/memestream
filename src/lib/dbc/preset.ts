@@ -30,16 +30,24 @@ export type CoinPreset = {
    * claimPartnerPoolCreationFee). 0 = free. Meteora allows 0, or 0.001 to 100 SOL.
    */
   launchFeeSol: number;
+  /**
+   * Who gets the graduated pool's liquidity, as percentages that sum to 100. All of it is
+   * locked forever; each side gets a position NFT that earns that share of the pool's fees.
+   */
+  lockedLpPercent: { partner: number; creator: number };
 };
 
 export const COIN_PRESETS: Record<Network, CoinPreset> = {
   // Tiny, so a tester graduates a coin with faucet SOL. The real programs accept it, including
   // graduation to DAMM v2 (test/integration/lifecycle.surfpool.ts).
   // Free: the devnet config already exists with 0, and config params are fixed once created.
-  devnet: { graduationThresholdSol: "0.1", launchFeeSol: 0 },
+  // Split 50/50 between platform and streamer (the devnet config already exists with that).
+  devnet: { graduationThresholdSol: "0.1", launchFeeSol: 0, lockedLpPercent: { partner: 50, creator: 50 } },
   // Boss man's picks (2026-10-08). Config params are fixed once the mainnet config is created.
   // The launch fee makes squatting a famous streamer's ticker cost something (audit M2).
-  "mainnet-beta": { graduationThresholdSol: "10", launchFeeSol: 0.05 },
+  // All graduated liquidity to the streamer: after graduation, 100% of pool fees go to them
+  // (Boss man, 2026-10-09). The platform earns the launch fee and its curve fee share.
+  "mainnet-beta": { graduationThresholdSol: "10", launchFeeSol: 0.05, lockedLpPercent: { partner: 0, creator: 100 } },
 };
 
 const TOTAL_SUPPLY = 1_000_000_000;
@@ -66,9 +74,6 @@ const CREATOR_FEE_SHARE_PERCENT = 80;
 
 /** Supply that moves into the DAMM v2 pool at graduation; the rest is sold on the curve. */
 const SUPPLY_FOR_GRADUATION_PERCENT = 20;
-
-/** All graduated liquidity is locked forever, split between platform and streamer. */
-const LP_LOCK_PERCENT = { partner: 50, creator: 50 };
 
 /** Swap fee on the graduated DAMM v2 pool (not a fee taken at migration). */
 const GRADUATED_POOL_FEE = MigrationFeeOption.FixedBps100;
@@ -123,9 +128,9 @@ export function buildCoinConfig(preset: CoinPreset): ConfigParameters {
       migrationFee: { feePercentage: 0, creatorFeePercentage: 0 },
     },
     liquidityDistribution: {
-      partnerPermanentLockedLiquidityPercentage: LP_LOCK_PERCENT.partner,
+      partnerPermanentLockedLiquidityPercentage: preset.lockedLpPercent.partner,
       partnerLiquidityPercentage: 0,
-      creatorPermanentLockedLiquidityPercentage: LP_LOCK_PERCENT.creator,
+      creatorPermanentLockedLiquidityPercentage: preset.lockedLpPercent.creator,
       creatorLiquidityPercentage: 0,
     },
     lockedVesting: NO_LOCKED_VESTING,

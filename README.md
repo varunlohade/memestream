@@ -11,6 +11,9 @@ Built on **Meteora's Dynamic Bonding Curve (DBC)** for the Superteam "Best use o
   1B supply priced in SOL, an anti-sniper fee that falls from 50% to a 1% base over the first
   minute (plus a small volatility fee during wild swings),
   80% of trading fees to the creator (the streamer), and 100% of graduated liquidity locked forever.
+  On mainnet all of that locked liquidity goes to the streamer: after graduation, 100% of the pool's
+  fees go to them, via an LP position NFT they claim in the app. (Devnet's existing config splits
+  it 50/50 with the platform.)
   Graduation threshold: 0.1 SOL on devnet (so testers graduate with faucet SOL), 10 SOL on mainnet.
   Launching is free on devnet and costs 0.05 SOL on mainnet (paid to the partner).
 - **Launch** (`launch.ts`): a streamer creates a pool on that config in one transaction. The

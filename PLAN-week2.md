@@ -120,7 +120,8 @@ skip anyone who streams casino/gambling content.
 ### DM draft (Boss man sends it himself)
 > Hey {name}, I'm building memestream: a coin for a single live stream, on Solana. Viewers buy if
 > they think the stream will pop, and 80% of every trade fee goes straight to you, claimable any
-> time. When enough people buy, the coin graduates to a Meteora pool live on stream.
+> time. When enough people buy, the coin graduates to a Meteora pool live on stream, and from then on
+> 100% of that pool's fees go to you, forever.
 > We're looking for 3 to 5 streamers to try one stream with us in the next two weeks, on YouTube Live
 > or X Live. It takes two minutes to launch, there's an OBS overlay with a progress bar, and
 > you never have to buy your own coin (the app won't let you).
