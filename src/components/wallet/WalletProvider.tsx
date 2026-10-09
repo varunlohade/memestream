@@ -4,7 +4,12 @@
  * localhost-only test wallet. The browser never builds transactions: the server returns
  * bytes and the wallet signs and sends them.
  */
-import { SolanaSignAndSendTransaction, type SolanaSignAndSendTransactionFeature } from "@solana/wallet-standard-features";
+import {
+  SolanaSignAndSendTransaction,
+  type SolanaSignAndSendTransactionFeature,
+  SolanaSignMessage,
+  type SolanaSignMessageFeature,
+} from "@solana/wallet-standard-features";
 import { getWallets } from "@wallet-standard/app";
 import type { IdentifierString, Wallet, WalletAccount } from "@wallet-standard/base";
 import {
@@ -32,6 +37,11 @@ type WalletState = {
   signAndSend: (base64Tx: string) => Promise<string>;
   /** The app's cluster as a Wallet Standard id, e.g. "solana:devnet" (read-only; for links). */
   chain: IdentifierString;
+  /**
+   * Signs a plain text message, never a transaction (used only to sign in to free-points
+   * predictions). Resolves to the 64-byte signature. Null if the connected wallet can't sign messages.
+   */
+  signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | null;
 };
 
 const DEV_WALLET_NAME = "Test wallet (localhost)";
@@ -188,7 +198,20 @@ export function WalletProvider({ chain, children }: { chain: IdentifierString; c
     [active, chain],
   );
 
+  const signMessage = useMemo(() => {
+    if (active?.kind !== "standard") return null;
+    const feature = (active.wallet.features as Partial<SolanaSignMessageFeature>)[SolanaSignMessage];
+    if (!feature) return null;
+    return async (message: Uint8Array) => {
+      const [output] = await feature.signMessage({ account: active.account, message });
+      return output.signature;
+    };
+  }, [active]);
+
   const address = active ? (active.kind === "dev" ? active.address : active.account.address) : null;
-  const value = useMemo(() => ({ address, options, disconnect, signAndSend, chain }), [address, options, disconnect, signAndSend, chain]);
+  const value = useMemo(
+    () => ({ address, options, disconnect, signAndSend, chain, signMessage }),
+    [address, options, disconnect, signAndSend, chain, signMessage],
+  );
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

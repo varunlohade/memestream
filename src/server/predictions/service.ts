@@ -6,7 +6,8 @@
  */
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { type Action, apply, type Game, GameError, newGame, type Prediction } from "@/lib/predictions/engine";
-import { AUTO_CANCEL_MS, MAX_PREDICTIONS_PER_STREAM, type Outcome, type Side, STARTER_AFTER_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import { AUTO_CANCEL_MS, MAX_PREDICTIONS_PER_STREAM, STARTER_AFTER_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import type { PredictionsView, Standing } from "@/lib/predictions/view";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile } from "@/lib/predictions/watch";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Leader, PredictionStore } from "./store";
@@ -30,46 +31,6 @@ export class UnknownCoinError extends Error {}
 const coinKey = (mint: string) => `coin:${mint}`;
 const watchKey = (wallet: string) => `watch:${wallet}`;
 const LEADER_CANDIDATES = 50;
-
-export type Standing = { points: number; rank: number | null };
-export type PredictionsView = {
-  now: number;
-  launched: number;
-  maxPerStream: number;
-  me: {
-    wallet: string;
-    balance: number;
-    watchMinutes: number;
-    eligible: boolean;
-    /** Minutes left until the starter grant, or null once it is unlocked. */
-    starterInMinutes: number | null;
-    role: "streamer" | "mod" | null;
-    hasSuggestion: boolean;
-  } | null;
-  live: {
-    id: string;
-    text: string;
-    launchedAt: number;
-    lockAt: number;
-    autoCancelAt: number;
-    yes: number;
-    no: number;
-    bettors: number;
-    myBet: { side: Side; amount: number } | null;
-  } | null;
-  queue: { id: string; text: string; upvotes: number; expiresAt: number; mine: boolean; upvoted: boolean }[];
-  resolved: {
-    id: string;
-    text: string;
-    outcome: Outcome;
-    resolvedAt: number;
-    resolvedBy: { role: "streamer" | "mod" | "auto"; wallet: string | null };
-    disputed: boolean;
-    my: { side: Side; bet: number; payout: number; flagged: boolean } | null;
-  }[];
-  mods: string[];
-  leaderboard: { stream: Leader[]; allTime: Leader[]; me: { stream: Standing | null; allTime: Standing | null } };
-};
 
 export function predictionsService(deps: ServiceDeps) {
   const { store, now } = deps;
