@@ -95,7 +95,6 @@ const URL_LIKE = /(https?:|www\.|:\/\/|\b[a-z0-9-]+\.(com|net|org|io|gg|tv|xyz|l
 /** Cleans a question: trims, collapses whitespace; 5 to 80 characters, plain text, no links. */
 export function cleanQuestion(text: unknown): { ok: true; question: string } | { ok: false; error: string } {
   if (typeof text !== "string") return { ok: false, error: "Type a question" };
-  // eslint-disable-next-line no-control-regex -- refusing control characters is the point
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) return { ok: false, error: "Plain text only" };
   const question = text.replace(/\s+/g, " ").trim();
   if (question.length < QUESTION_MIN || question.length > QUESTION_MAX) {
