@@ -280,6 +280,7 @@ button.pm-pool:disabled { cursor: wait; }
 .pm-res3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
 .pm-res3 .mbtn { height: 48px; font-size: 16px; }
 .mbtn.pm-no { background: #B3261E; }
+.mbtn.pm-no:disabled { background: #3A3A3A; }
 .pm-subh { font-size: 24px; margin: 18px 0 4px; }
 .pm-window { display: flex; align-items: center; gap: 6px; font-size: 22px; margin: 6px 0; }
 .pm-chip { width: 52px; height: 52px; border: 0; font-size: 22px; color: #ccc; }
