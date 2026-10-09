@@ -248,3 +248,6 @@ button.unv { cursor: help; }
 
 .meteora-note { font-size: 22px; margin: 10px 0 0; }
 .meteora-note a { color: var(--fg); }
+
+/* The anti-sniper fee notice in the trade box during a coin's first minute. */
+.launch-fee { font-size: 22px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }

@@ -7,6 +7,7 @@ import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { COIN_DECIMALS, DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
 import { compact, fractionOf, minusReserve, SIDE_LABEL } from "@/lib/format";
+import { LAUNCH_FEE, launchFeeAt } from "@/lib/launch-fee";
 
 type Side = "buy" | "sell";
 
@@ -153,6 +154,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
           </div>
         </>
       )}
+      {coin.status === "trading" && <LaunchFeeLine launchedAt={coin.launchedAt} />}
       <div className="get">
         <span className="mute">You get about</span>
         <span className="num" aria-live="polite">
@@ -186,4 +188,29 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
       {!address && <p className="mute" style={{ fontSize: 22, marginTop: 10 }}>Use the heart button at the top to connect.</p>}
     </section>
   );
+}
+
+/**
+ * During a coin's first minute: the anti-sniper fee right now and a live countdown to the 1% base,
+ * so early buyers aren't surprised. "You get about" already includes it (the quote uses the
+ * on-chain schedule). Gone once the minute is over. Times come from the viewer's clock, so they
+ * can be off by a second or two.
+ */
+function LaunchFeeLine({ launchedAt }: { launchedAt: number }) {
+  const nowSeconds = useSyncExternalStore(everySecond, () => Math.floor(Date.now() / 1000), () => null);
+  if (nowSeconds === null) return null; // server render: the clock is the viewer's
+  const fee = launchFeeAt(nowSeconds - launchedAt);
+  if (fee.secondsLeft <= 0) return null;
+  const percent = (fee.bps / 100).toFixed(fee.bps % 100 === 0 ? 0 : 1);
+  return (
+    <p className="mute launch-fee" role="status">
+      Launch fee now {percent}%, drops to {LAUNCH_FEE.endingFeeBps / 100}% in {fee.secondsLeft}s
+    </p>
+  );
+}
+
+/** Re-reads the clock once a second while the line is on screen. */
+function everySecond(onTick: () => void) {
+  const timer = setInterval(onTick, 1_000);
+  return () => clearInterval(timer);
 }

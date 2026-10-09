@@ -17,6 +17,7 @@ import {
   TokenAuthorityOption,
   TokenType,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import { LAUNCH_FEE } from "../launch-fee";
 import { BASE_DECIMALS, QUOTE } from "./units";
 
 export type Network = "devnet" | "mainnet-beta";
@@ -59,12 +60,8 @@ const ACTIVATION_TYPE = ActivationType.Timestamp;
  * Anti-sniper fee: 50% at launch, falling to a 1% base over the first minute.
  * The dynamic (volatility) fee below adds a small extra on top during wild price swings.
  */
-export const LAUNCH_FEE = {
-  startingFeeBps: 5_000,
-  endingFeeBps: 100,
-  numberOfPeriod: 60,
-  totalDuration: 60,
-} satisfies FeeSchedulerParams;
+export { LAUNCH_FEE }; // defined in lib/launch-fee.ts so the browser can use it without the SDK
+LAUNCH_FEE satisfies FeeSchedulerParams;
 
 /**
  * Share of trading fees paid to the pool creator (the streamer).
