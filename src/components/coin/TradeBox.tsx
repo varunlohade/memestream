@@ -90,7 +90,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const label = !address
     ? "Connect a wallet"
     : blocked
-      ? "Streamers can't buy their own coin here"
+      ? "Can't buy your own coin"
       : busy
         ? status.text
         : locked
@@ -204,10 +204,14 @@ function LaunchFeeLine({ launchedAt }: { launchedAt: number }) {
   const percent = (fee.bps / 100).toFixed(fee.bps % 100 === 0 ? 0 : 1);
   return (
     <p className="mute launch-fee" role="status">
-      Launch fee now {percent}%, drops to {LAUNCH_FEE.endingFeeBps / 100}% in {fee.secondsLeft}s
+      Launch fee now <span className={fee.bps > HIGH_FEE_BPS ? "down" : undefined}>{percent}%</span>, drops to{" "}
+      {LAUNCH_FEE.endingFeeBps / 100}% in {fee.secondsLeft}s
     </p>
   );
 }
+
+/** Above this the fee number shows in red, so a buyer about to pay it notices. */
+const HIGH_FEE_BPS = 1_000;
 
 /** Re-reads the clock once a second while the line is on screen. */
 function everySecond(onTick: () => void) {

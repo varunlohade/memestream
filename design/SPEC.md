@@ -57,6 +57,9 @@ Shared rules (apply to B):
 - Left: the live stream plays in a 16:9 slot, muted, with the Live tag on top (YouTube or Twitch player), then a panel with coin image slot, `$TICKER`, "<stream name> by <streamer>", and Recent trades (Buy/Sell, SOL, coins, wallet, time ago).
 - Right, panel 1: Market cap (hero number), change, pixel step chart (one connected line: flat steps joined by vertical segments, never loose dots, even with few trades), Graduation label + "52.7 of 85 SOL", XP bar with %, then the heart row **"80% of fees go to the streamer"** (must stay visible).
 - Right, panel 2: Buy/Sell tabs, amount slot in SOL, chips 0.1 / 0.5 / 1 / Max, "You get about N TICKER", primary "Buy TICKER".
+- Launch fee line (first 60 s, anti-sniper window; steve, 2026-10-09): "Launch fee now 45.9%, drops to 1% in 55s", VT323 22px, muted, tabular numbers, directly above "You get about". The fee number itself uses the sell red `#FF5A4E` while it is above 10%, then muted. The line disappears after the window. Signed off on design/build/e2e/04.png.
+- Empty chart (no trades yet): show the muted line "The chart starts with the first trade." in the chart area, not an empty gap.
+- Streamer's own coin: the disabled button reads "Can't buy your own coin" (one line). The longer reason stays in the fair-rule copy.
 
 **Home**
 - "Live coins", one line "Buy the stream you think will pop.", Go live button.

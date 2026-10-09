@@ -130,7 +130,7 @@ await step("streamer launches a coin from Go live", async (p) => {
 });
 
 await step("streamer can't buy their own coin", async (p) => {
-  await waitText(p, "Streamers can't buy their own coin here");
+  await waitText(p, "Can't buy your own coin");
 });
 
 await step("viewer buys 0.02 SOL of $LOFI", async (p) => {

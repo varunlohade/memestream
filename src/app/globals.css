@@ -251,3 +251,4 @@ button.unv { cursor: help; }
 
 /* The anti-sniper fee notice in the trade box during a coin's first minute. */
 .launch-fee { font-size: 22px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.chart-empty { font-size: 22px; margin: 0; display: flex; align-items: center; height: 100%; }

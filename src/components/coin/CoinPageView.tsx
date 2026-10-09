@@ -191,7 +191,7 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
             <div className={`chg num ${change >= 0 ? "up" : "down"}`}>{signedPercent(change)} over recent trades</div>
           )}
           <div className="chart">
-            <StepChart values={prices} />
+            {prices.length >= 2 ? <StepChart values={prices} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
           </div>
           <div className="gradlbl">
             <span>Graduation</span>
