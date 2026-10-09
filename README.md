@@ -1,35 +1,70 @@
 # memestream
 
-A coin for every live stream. Viewers buy the stream they think will pop; the streamer earns
-80% of every trade fee. When a coin's curve fills, it graduates into a Meteora DAMM v2 pool.
+**A coin for every live stream, built on Meteora's Dynamic Bonding Curve.**
+Viewers buy the stream they think will pop. The streamer earns 80% of every trade fee. When the
+coin's curve fills, it graduates live on stream into a Meteora DAMM v2 pool, where trading goes on
+and the streamer's locked LP position earns pool fees forever.
 
-Built on **Meteora's Dynamic Bonding Curve (DBC)** for the Superteam "Best use of Meteora DBC" track.
+- **Live app:** https://memestream-iota.vercel.app (devnet; mainnet addresses below once live)
+- **Demo video:** _[2-min video link]_
+- **Built for:** Superteam "Best use of Meteora's Dynamic Bonding Curve (DBC)"
 
-## How it uses Meteora DBC
+## The whole coin life runs on Meteora
 
-- **One shared config** (`src/lib/dbc/preset.ts`) defines every stream coin:
-  1B supply priced in SOL, an anti-sniper fee that falls from 50% to a 1% base over the first
-  minute (plus a small volatility fee during wild swings),
-  80% of trading fees to the creator (the streamer), and 100% of graduated liquidity locked forever.
-  On mainnet all of that locked liquidity goes to the streamer: after graduation, 100% of the pool's
-  fees go to them, via an LP position NFT they claim in the app. (Devnet's existing config splits
-  it 50/50 with the platform.)
-  Graduation threshold: 0.1 SOL on devnet (so testers graduate with faucet SOL), 10 SOL on mainnet.
-  Launching is free on devnet and costs 0.05 SOL on mainnet (paid to the partner).
-- **Launch** (`launch.ts`): a streamer creates a pool on that config in one transaction. The
-  stream link rides in the token's metadata URI, so no database is needed.
-- **Trade** (`trade.ts`): partial-fill swaps, so the last buy before graduation fills exactly up
-  to the threshold and the rest stays in the buyer's wallet.
-- **Earn** (`fees.ts`): the streamer claims their SOL fee share at any time.
-- **Graduate** (`graduate.ts`): once the curve holds the threshold, anyone can migrate the coin
-  to a DAMM v2 pool. We call it ourselves instead of waiting for a migrator service.
+| Step | What happens | Meteora |
+|---|---|---|
+| Go live | A streamer pastes a YouTube/Twitch link and launches a coin in one transaction | DBC pool on our shared config |
+| First minute | Anti-sniper fee falls from 50% to 1% (the trade box shows a live countdown) | DBC fee scheduler + dynamic fee |
+| Trade | Buy and sell on the curve; the last buy fills only up to the threshold | DBC `swap2` partial fill |
+| Earn | The streamer claims 80% of every trade fee, any time | DBC creator trading fee |
+| Graduate | Anyone can migrate the full curve, live on stream | DBC → DAMM v2 migration |
+| After graduation | Trading continues on memestream, in the coin's DAMM v2 pool | DAMM v2 swaps |
+| Forever | The streamer's locked LP position NFT earns the pool's fees; claim in one click | DAMM v2 position fees |
 
-Short links: `/<ticker>` redirects to the coin (the OBS overlay shows it). The first coin with a
-ticker keeps its link; the server refuses a taken ticker at launch.
+### Fee flow
 
-App rule (memestream's server and UI, not on-chain): a streamer's own wallet can't buy their coin
-here. DBC swaps are open to anyone, so another wallet still can; the streamer's trades are tagged
-in the trade list.
+| Who | Before graduation | After graduation (mainnet) |
+|---|---|---|
+| Streamer | 80% of curve trading fees | 100% of the pool's LP fees (all graduated liquidity is theirs, locked forever) |
+| Platform | 20% of curve trading fees + a 0.05 SOL launch fee | none |
+| Liquidity | locked in the curve | 100% permanently locked in DAMM v2 |
+
+Devnet's existing config uses a 0.1 SOL threshold (so testers graduate with faucet SOL), a free
+launch and a 50/50 LP split; the mainnet preset (10 SOL threshold, 0.05 SOL launch fee, 100% LP to
+the streamer) is proven on Meteora's real programs in `test/integration/mainnet-config.surfpool.ts`.
+
+### Addresses
+
+| | Devnet | Mainnet |
+|---|---|---|
+| memestream DBC config | `Buiw2JGkLJKgUcYPhsJ64L8x6xANqzHFxxnuc31mWyVg` | _[mainnet config]_ |
+| DBC program | `dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN` | same |
+| DAMM v2 program | `cpamdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG` | same |
+
+## What streamers and viewers get
+
+- **Go live in two minutes:** paste a stream link, pick a ticker, launch. Coin pages play the stream.
+- **OBS overlay:** price, change and the graduation bar on stream, plus a short link `/<TICKER>`.
+- **Fair by default:** a streamer's wallet can't buy their own coin here; the first coin keeps its
+  ticker; look-alike tickers are hidden; every coin shows "Unverified" until channels are verified.
+- **Can't pay twice:** reloads, second tabs and fast double clicks still make exactly one trade.
+- **Never fills worse than the price you saw:** a moved price makes the trade fail, not fill worse.
+- **Live ticker tape** of trades and graduations.
+
+## Proof it works
+
+- **Real devnet, through the app's own server code:** launch, buy, sell, fill the curve, graduate to
+  DAMM v2, buy and sell in the pool, and LP fee claims by both position holders. For example:
+  graduate `37taDtwdmpxRi2WLtUmVG4LC11Bgsn7Apzu5WCgbAMMmGrhtMgofq3n3NvoZzWgFJgwBLAZfpr2b2Arn2HsLdkQy`,
+  pool buy `4SsiqQ4G2KLwLKCdxjVcbyNLvvdW3NyKQivK8Wv2ewsBDFXcZTwvgXydp2CnMMhK9GYTYQSK73rGsnzM7hQ6ofSd`,
+  streamer LP claim `ixVM6DbMHQqJpXaUY8WGosAQsQ3FufGea1yC9XWgEQ7w8zxAAXpfXvdkmxeX3N6cPkyHjUABh7rUp3sbdEjjG3h`
+  (`scripts/devnet-pass.mts` reruns the whole life).
+- **Tests on Meteora's real programs** (offline local chain with the real DBC and DAMM v2 programs):
+  the coin life, graduated trading, LP claims, the mainnet preset, and money-safety rules.
+- **Security:** three audits (Solana auditor skill checklists) plus money-flow audits; no open
+  critical, high or medium findings. Rate limits shared across servers (Upstash Redis) plus a firewall.
+
+_[Mainnet numbers: coins launched, trades, SOL volume, graduations, streamer earnings]_
 
 ## Run it locally
 
