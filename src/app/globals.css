@@ -285,6 +285,9 @@ button.pm-pool:disabled { cursor: wait; }
 .pm-window { display: flex; align-items: center; gap: 6px; font-size: 22px; margin: 6px 0; }
 .pm-chip { width: 52px; height: 52px; border: 0; font-size: 22px; color: #ccc; }
 .pm-chip.on { color: var(--xp); }
+.pm-window { flex-wrap: wrap; }
+.pm-crowd { height: 52px; padding: 0 12px; border: 0; font-size: 20px; color: #ccc; margin-left: auto; }
+.pm-crowd.on { color: var(--xp); }
 .pm-row { display: grid; grid-template-columns: 1fr 120px 210px; gap: 14px; align-items: center; font-size: 22px; padding: 14px 0; border-top: 4px solid rgba(255,255,255,.07); }
 .mbtn.pm-uv { height: 44px; font-size: 14px; background: #3E3E44; }
 .pm-qb { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

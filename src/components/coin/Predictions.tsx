@@ -89,7 +89,7 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
   );
 }
 
-export function Predictions({ mint }: { mint: string }) {
+export function Predictions({ mint, symbol }: { mint: string; symbol: string }) {
   const { address, signMessage } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,19 +131,23 @@ export function Predictions({ mint }: { mint: string }) {
     if (!session) return;
     const beat = () => {
       if (document.hidden) return;
-      fetchJson("/api/predictions/heartbeat", { method: "POST", headers: authHeaders() }).catch(() => undefined);
+      fetchJson("/api/predictions/heartbeat", {
+        method: "POST",
+        headers: { "content-type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ mint }),
+      }).catch(() => undefined);
     };
     beat();
     const timer = setInterval(beat, HEARTBEAT_MS);
     return () => clearInterval(timer);
-  }, [session, authHeaders]);
+  }, [session, authHeaders, mint]);
 
   const signIn = async () => {
     if (!address || !signMessage) return;
     setError(null);
     setBusy(true);
     try {
-      const message = sessionMessage({ wallet: address, nonce: newNonce(), expiresAt: Date.now() + MESSAGE_TTL_MS });
+      const message = sessionMessage({ domain: window.location.host, wallet: address, nonce: newNonce(), expiresAt: Date.now() + MESSAGE_TTL_MS });
       const signature = await signMessage(new TextEncoder().encode(message));
       const next = await postJson<Session>("/api/predictions/session", { message, signature: bs58.encode(signature) });
       setSession(next);
@@ -257,7 +261,8 @@ export function Predictions({ mint }: { mint: string }) {
                 <button
                   key={outcome}
                   type="button"
-                  className={`mbtn ${outcome === "yes" ? "buy" : outcome === "no" ? "pm-no" : "off"}`}
+                  // While betting is open all three look off; after the close: Yes green, No red, Cancel off.
+                  className={`mbtn ${!locked ? "off" : outcome === "yes" ? "buy" : outcome === "no" ? "pm-no" : "off"}`}
                   disabled={busy || !locked}
                   onClick={() => act({ kind: "resolve", outcome })}
                 >
@@ -286,7 +291,14 @@ export function Predictions({ mint }: { mint: string }) {
       )}
 
       <div className="pm-subh">
-        Up next <span className="mute pm-small">(the top question with 3 or more upvotes goes live next)</span>
+        Up next{" "}
+        <span className="mute pm-small">
+          {!view.crowdPicks
+            ? "(the streamer picks the next question)"
+            : view.streamerHere
+              ? "(the top question with 3 or more upvotes goes live next)"
+              : "(questions wait until the streamer is here)"}
+        </span>
       </div>
       {staff && (
         <div className="pm-window">
@@ -296,9 +308,19 @@ export function Predictions({ mint }: { mint: string }) {
               {m}m
             </button>
           ))}
+          <button
+            type="button"
+            className={`slot pm-crowd${view.crowdPicks ? " on" : ""}`}
+            onClick={() => act({ kind: "crowd", on: !view.crowdPicks })}
+            disabled={busy}
+            aria-pressed={view.crowdPicks}
+          >
+            Crowd picks questions: {view.crowdPicks ? "on" : "off"}
+          </button>
         </div>
       )}
       {view.queue.length === 0 && <p className="mute pm-small">No suggestions yet.</p>}
+      {view.queueSize > view.queue.length && <p className="mute pm-small num">{view.queueSize - view.queue.length} more waiting</p>}
       {view.queue.map((s) => (
         <div className="pm-row" key={s.id}>
           <span className="pm-q">{s.text}</span>
@@ -342,6 +364,7 @@ export function Predictions({ mint }: { mint: string }) {
           </button>
         </form>
       )}
+      {viewer && <p className="mute pm-small">Hold ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
       {view.resolved.slice(0, 5).map((r) => {
@@ -366,7 +389,7 @@ export function Predictions({ mint }: { mint: string }) {
             <OutcomeTag outcome={r.outcome} />
             {r.disputed ? <span className="pm-otag pm-oc pm-dsp">Disputed</span> : <span />}
             <span className={`r ${result?.cls ?? ""}`}>{staff ? "" : (result?.text ?? "")}</span>
-            {!staff && r.my && !r.my.flagged ? (
+            {!staff && r.my && !r.my.flagged && r.my.canFlag ? (
               <button type="button" className="pm-flag" disabled={busy} onClick={() => act({ kind: "flag", id: r.id })} title="Flag a wrong result">
                 Flag
               </button>
