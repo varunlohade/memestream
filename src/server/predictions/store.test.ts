@@ -5,12 +5,14 @@ import { type Commit, memoryStore, type PredictionStore, redisStore } from "./st
 
 /**
  * Every test runs on both stores: the in-memory one, and the Redis one with its real Lua scripts
- * run by a Lua VM (skipped unless LUA_TEST_DIR points at an install of fengari; see lua-harness.ts).
+ * run by the fengari Lua VM (a devDependency; see lua-harness.ts).
  */
 const fengari = loadFengari();
+/** A clock the tests can move (document expiry). */
+const clock = { t: 1_000_000 };
 const STORES: [string, () => PredictionStore, { skip?: string }][] = [
-  ["memory", () => memoryStore(), {}],
-  ["redis+lua", () => redisStore(luaRedis(fengari)), fengari ? {} : { skip: "set LUA_TEST_DIR to run the Lua scripts" }],
+  ["memory", () => memoryStore(() => clock.t), {}],
+  ["redis+lua", () => redisStore(luaRedis(fengari, () => clock.t)), {}],
 ];
 
 const commit = (over: Partial<Commit>): Commit => ({ docs: [], moves: [], won: [], ...over });
@@ -70,5 +72,21 @@ for (const [name, make, options] of STORES) {
     await store.commit(commit({ won: [{ wallet: "a", delta: 120 }, { wallet: "b", delta: -40 }, { wallet: "c", delta: 300 }] }));
     await store.commit(commit({ won: [{ wallet: "a", delta: 200 }] }));
     assert.deepEqual(await store.topWon(2), [{ wallet: "a", points: 320 }, { wallet: "c", points: 300 }]);
+  });
+
+  test(`${name}: a document with a time to live reads as new once it expires`, options, async () => {
+    const store = make();
+    const start = clock.t;
+    assert.equal(await store.commit(commit({ docs: [{ key: "ip:x", v: 0, json: "[1]", ttlMs: 1_000 }] })), "ok");
+    assert.deepEqual(await store.read(["ip:x"]), [{ v: 1, json: "[1]" }]);
+    clock.t = start + 1_000;
+    assert.deepEqual(await store.read(["ip:x"]), [{ v: 0, json: null }]);
+    assert.equal(await store.commit(commit({ docs: [{ key: "ip:x", v: 0, json: "[2]", ttlMs: 1_000 }] })), "ok", "starts over at version 0");
+  });
+
+  test(`${name}: leaderboard ties are ordered the same way in both stores (wallet, high to low)`, options, async () => {
+    const store = make();
+    await store.commit(commit({ won: [{ wallet: "aaa", delta: 50 }, { wallet: "ccc", delta: 50 }, { wallet: "bbb", delta: 50 }, { wallet: "zzz", delta: 10 }] }));
+    assert.deepEqual((await store.topWon(4)).map((l) => l.wallet), ["ccc", "bbb", "aaa", "zzz"]);
   });
 }

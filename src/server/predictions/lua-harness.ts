@@ -1,8 +1,7 @@
 /**
  * TEST ONLY: runs the store's real Lua scripts in a Lua VM (fengari) against a tiny in-memory
  * stand-in for the few Redis commands they use, so the Redis store runs the same tests as the
- * memory store. fengari is not a dependency: set LUA_TEST_DIR to a folder where it is installed
- * (`npm i fengari` there), or these tests are skipped.
+ * memory store in `npm test`. fengari is a devDependency.
  */
 import { createRequire } from "node:module";
 import { join } from "node:path";
@@ -11,11 +10,10 @@ import type { Redis } from "@upstash/redis";
 /* eslint-disable @typescript-eslint/no-explicit-any -- fengari ships no types */
 type Fengari = any;
 
+/** fengari (a devDependency); LUA_TEST_DIR may point at another install. Null only if it's missing. */
 export function loadFengari(): Fengari | null {
-  const dir = process.env.LUA_TEST_DIR;
-  if (!dir) return null;
   try {
-    return createRequire(join(dir, "index.js"))("fengari");
+    return createRequire(join(process.env.LUA_TEST_DIR ?? process.cwd(), "index.js"))("fengari");
   } catch {
     return null;
   }
@@ -28,7 +26,16 @@ function fakeDb(now: () => number) {
   const strings = new Map<string, { value: string; until: number }>();
   const hashes = new Map<string, Map<string, string>>();
   const zsets = new Map<string, Map<string, number>>();
-  const hash = (k: string) => hashes.get(k) ?? hashes.set(k, new Map()).get(k)!;
+  const expires = new Map<string, number>();
+  /** Drops a hash once its PEXPIRE time has passed, as Redis does. */
+  const alive = (k: string) => {
+    if ((expires.get(k) ?? Infinity) <= now()) {
+      hashes.delete(k);
+      expires.delete(k);
+    }
+    return hashes.get(k);
+  };
+  const hash = (k: string) => alive(k) ?? hashes.set(k, new Map()).get(k)!;
   const zset = (k: string) => zsets.get(k) ?? zsets.set(k, new Map()).get(k)!;
   const live = (k: string) => strings.has(k) && strings.get(k)!.until > now();
 
@@ -42,9 +49,13 @@ function fakeDb(now: () => number) {
         return { ok: "OK" };
       }
       case "HGET":
-        return hashes.get(a[0])?.get(a[1]) ?? null;
+        return alive(a[0])?.get(a[1]) ?? null;
       case "HMGET":
-        return a.slice(1).map((field) => hashes.get(a[0])?.get(field) ?? null);
+        return a.slice(1).map((field) => alive(a[0])?.get(field) ?? null);
+      case "PEXPIRE":
+        if (!alive(a[0])) return 0;
+        expires.set(a[0], now() + Number(a[1]));
+        return 1;
       case "HSET": {
         const h = hash(a[0]);
         for (let i = 1; i < a.length; i += 2) h.set(a[i], a[i + 1]);
@@ -76,7 +87,8 @@ function fakeDb(now: () => number) {
 }
 
 /** A stand-in for the Upstash client's `eval`, backed by fengari and the fake commands above. */
-export function luaRedis(fengari: Fengari, now: () => number = Date.now): Redis {
+export function luaRedis(fengari: Fengari | null, now: () => number = Date.now): Redis {
+  if (!fengari) throw new Error("fengari is missing: run npm install (it is a devDependency)");
   const { lua, lauxlib, lualib, to_luastring } = fengari;
   const call = fakeDb(now);
 

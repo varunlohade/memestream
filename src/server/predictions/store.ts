@@ -15,12 +15,13 @@
  * sell or send points between wallets.
  */
 import type { Redis } from "@upstash/redis";
+import { byPoints } from "@/lib/predictions/rules";
 
 export type Doc = { v: number; json: string | null };
 export type Move = { wallet: string; delta: number; floor: number };
 export type Commit = {
-  /** Documents to save, each with the version it was read at. */
-  docs: { key: string; v: number; json: string }[];
+  /** Documents to save, each with the version it was read at; `ttlMs` makes it expire (then it reads as new). */
+  docs: { key: string; v: number; json: string; ttlMs?: number }[];
   /** A one-time key (signed-message nonce): refused as "replay" if seen within ttlMs. */
   nonce?: { key: string; ttlMs: number };
   /** Balance changes; each needs the balance to be at least `floor` before, and never below 0 after. */
@@ -45,7 +46,13 @@ export interface PredictionStore {
 // ---------------------------------------------------------------------------------------------
 
 export function memoryStore(now: () => number = Date.now): PredictionStore {
-  const docs = new Map<string, { v: number; json: string }>();
+  const docs = new Map<string, { v: number; json: string; until: number }>();
+  /** A document, unless it has expired. */
+  const live = (key: string) => {
+    const doc = docs.get(key);
+    if (doc && doc.until <= now()) docs.delete(key);
+    return docs.get(key);
+  };
   const balances = new Map<string, number>();
   const won = new Map<string, number>();
   const nonces = new Map<string, number>(); // key -> expires at
@@ -54,13 +61,13 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
     kind: "memory",
     async read(keys) {
       return keys.map((key) => {
-        const doc = docs.get(key);
-        return doc ? { ...doc } : { v: 0, json: null };
+        const doc = live(key);
+        return doc ? { v: doc.v, json: doc.json } : { v: 0, json: null };
       });
     },
     // Synchronous body: nothing else runs between the checks and the writes.
     async commit(c) {
-      for (const d of c.docs) if ((docs.get(d.key)?.v ?? 0) !== d.v) return "conflict";
+      for (const d of c.docs) if ((live(d.key)?.v ?? 0) !== d.v) return "conflict";
       if (c.nonce) {
         const t = now();
         for (const [key, until] of nonces) if (until <= t) nonces.delete(key);
@@ -73,7 +80,7 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
       }
       for (const m of c.moves) balances.set(m.wallet, (balances.get(m.wallet) ?? 0) + m.delta);
       for (const w of c.won) won.set(w.wallet, (won.get(w.wallet) ?? 0) + w.delta);
-      for (const d of c.docs) docs.set(d.key, { v: d.v + 1, json: d.json });
+      for (const d of c.docs) docs.set(d.key, { v: d.v + 1, json: d.json, until: d.ttlMs ? now() + d.ttlMs : Infinity });
       return "ok";
     },
     async balances(wallets) {
@@ -82,7 +89,7 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
     async topWon(limit) {
       return [...won]
         .map(([wallet, points]) => ({ wallet, points }))
-        .sort((a, b) => b.points - a.points || (a.wallet < b.wallet ? 1 : -1))
+        .sort(byPoints)
         .slice(0, limit);
     },
   };
@@ -98,7 +105,7 @@ const WON = `${PREFIX}won`;
 
 /**
  * KEYS: balances, won, the documents..., then the nonce key if any.
- * ARGV: docCount, hasNonce, nonceTtlMs, (v, json) per document, moveCount, (wallet, delta, floor)
+ * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0) per document, moveCount, (wallet, delta, floor)
  * per move, then (wallet, delta) per winnings change.
  */
 export const COMMIT_LUA = `
@@ -107,7 +114,7 @@ local i = 4
 for d = 1, docCount do
   local current = redis.call('HGET', KEYS[2 + d], 'v') or '0'
   if current ~= ARGV[i] then return 'conflict' end
-  i = i + 2
+  i = i + 3
 end
 if ARGV[2] == '1' then
   if not redis.call('SET', KEYS[3 + docCount], '1', 'NX', 'PX', ARGV[3]) then return 'replay' end
@@ -133,7 +140,8 @@ end
 i = 4
 for d = 1, docCount do
   redis.call('HSET', KEYS[2 + d], 'v', tostring(tonumber(ARGV[i]) + 1), 'json', ARGV[i + 1])
-  i = i + 2
+  if tonumber(ARGV[i + 2]) > 0 then redis.call('PEXPIRE', KEYS[2 + d], ARGV[i + 2]) end
+  i = i + 3
 end
 return 'ok'
 `;
@@ -176,7 +184,7 @@ export function redisStore(redis: Redis): PredictionStore {
         c.docs.length,
         c.nonce ? 1 : 0,
         c.nonce?.ttlMs ?? 0,
-        ...c.docs.flatMap((d) => [d.v, d.json]),
+        ...c.docs.flatMap((d) => [d.v, d.json, d.ttlMs ?? 0]),
         c.moves.length,
         ...c.moves.flatMap((m) => [m.wallet, m.delta, m.floor]),
         ...c.won.flatMap((w) => [w.wallet, w.delta]),

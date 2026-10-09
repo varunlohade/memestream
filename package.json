@@ -41,6 +41,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.0",
+    "fengari": "^0.1.4",
     "puppeteer-core": "^24.43.1",
     "tailwindcss": "^4",
     "tsx": "^4.23.15",
