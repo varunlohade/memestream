@@ -54,6 +54,14 @@ test("watching earns at most 600 points a UTC day, and the cap resets the next d
   assert.equal(tomorrow.points, 2);
 });
 
+test("a non-earning beat (IP cap) counts the minute but earns nothing and keeps the starter grant locked", () => {
+  const nine = watch(9);
+  const capped = heartbeat(nine.profile, T0 + 9 * MIN, false);
+  assert.deepEqual([capped.accepted, capped.points, capped.profile.watchMs, capped.profile.starter], [true, 0, 10 * MIN, false]);
+  const later = heartbeat(capped.profile, T0 + 10 * MIN, true);
+  assert.equal(later.points, 2 + 200, "unlocks on the next earning beat");
+});
+
 test("eligibility: 15 minutes to upvote and bet as eligible, 30 for the leaderboard", () => {
   assert.equal(isEligible(watch(14).profile), false);
   assert.equal(isEligible(watch(15).profile), true);

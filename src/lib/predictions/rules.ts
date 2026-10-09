@@ -48,6 +48,28 @@ export const DISPUTE_PERCENT = 30;
 /** The streamer may add a few mod wallets. */
 export const MAX_MODS = 5;
 
+/** A crowd-launched prediction cancels sooner if nobody resolves it (the streamer may have left). */
+export const AUTO_CANCEL_CROWD_MS = 15 * MINUTE;
+/** The crowd launches questions only while the streamer's own heartbeat on the coin is this recent. */
+export const STREAMER_PRESENT_MS = 5 * MINUTE;
+/** After a result, bettors can flag it for this long; then it counts (leaderboard, asker reward) unless disputed. */
+export const FLAG_WINDOW_MS = 10 * MINUTE;
+/** Waiting suggestions per coin. */
+export const MAX_QUEUE = 50;
+/** Bettors per prediction. */
+export const MAX_BETTORS = 1_000;
+/** Upvoters kept in full per suggestion; beyond that, short fingerprints (for dedupe) up to MAX_UPVOTES. */
+export const MAX_UPVOTERS_STORED = 200;
+export const MAX_UPVOTES = 1_000;
+/** Per-stream leaderboard entries kept. */
+export const MAX_WON_ENTRIES = 100;
+/** Distinct wallets that may earn watch points from one IP per UTC day. */
+export const MAX_EARNING_WALLETS_PER_IP = 5;
+
+/** Leaderboard order: points high to low; ties by wallet, high to low (the same as Redis ZREVRANGE). */
+export const byPoints = (a: { wallet: string; points: number }, b: { wallet: string; points: number }) =>
+  b.points - a.points || (a.wallet < b.wallet ? 1 : a.wallet > b.wallet ? -1 : 0);
+
 export const isSide = (value: unknown): value is Side => value === "yes" || value === "no";
 export const isOutcome = (value: unknown): value is Outcome => isSide(value) || value === "cancel";
 

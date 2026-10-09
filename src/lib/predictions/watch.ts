@@ -11,12 +11,17 @@ export type Profile = { watchMs: number; starter: boolean; day: string; dayEarne
 
 export const newProfile = (): Profile => ({ watchMs: 0, starter: false, day: "", dayEarned: 0, lastBeatAt: null });
 
-const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+export const utcDay = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
-export function heartbeat(profile: Profile, now: number): { profile: Profile; points: number; accepted: boolean } {
+/**
+ * One heartbeat at `now`. With `earning` false (too many wallets from one IP today) the minute
+ * still counts as watched, but earns no points and doesn't unlock the starter grant.
+ */
+export function heartbeat(profile: Profile, now: number, earning = true): { profile: Profile; points: number; accepted: boolean } {
   if (profile.lastBeatAt !== null && now - profile.lastBeatAt < MIN_HEARTBEAT_GAP_MS) return { profile, points: 0, accepted: false };
   const day = utcDay(now);
   const next: Profile = { ...profile, lastBeatAt: now, watchMs: profile.watchMs + HEARTBEAT_MS, day, dayEarned: day === profile.day ? profile.dayEarned : 0 };
+  if (!earning) return { profile: next, points: 0, accepted: true };
   let points = Math.max(0, Math.min(POINTS_PER_MINUTE, DAILY_WATCH_CAP - next.dayEarned));
   next.dayEarned += points;
   if (!next.starter && next.watchMs >= STARTER_AFTER_MS) {
