@@ -9,6 +9,10 @@ export type PredictionsView = {
   now: number;
   launched: number;
   maxPerStream: number;
+  /** The streamer's "Crowd picks questions" switch. */
+  crowdPicks: boolean;
+  /** The streamer's own heartbeat on this coin is recent: only then does the crowd launch questions. */
+  streamerHere: boolean;
   me: {
     wallet: string;
     balance: number;
@@ -30,6 +34,8 @@ export type PredictionsView = {
     bettors: number;
     myBet: { side: Side; amount: number } | null;
   } | null;
+  /** All waiting suggestions; `queue` lists the top ones only. */
+  queueSize: number;
   queue: { id: string; text: string; upvotes: number; expiresAt: number; mine: boolean; upvoted: boolean }[];
   resolved: {
     id: string;
@@ -38,8 +44,11 @@ export type PredictionsView = {
     resolvedAt: number;
     resolvedBy: { role: "streamer" | "mod" | "auto"; wallet: string | null };
     disputed: boolean;
-    my: { side: Side; bet: number; payout: number; flagged: boolean } | null;
+    /** Flags are taken until then (ms); null once the result counts. */
+    flagUntil: number | null;
+    my: { side: Side; bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
   }[];
+  /** The coin's mods (sent to the streamer and mods only). */
   mods: string[];
   leaderboard: { stream: LeaderRow[]; allTime: LeaderRow[]; me: { stream: Standing | null; allTime: Standing | null } };
 };

@@ -4,20 +4,37 @@
  * one atomic step; if another request committed first ("conflict"), it re-reads and tries again.
  * Dependencies are passed in, so tests run it against the in-memory store with a fake clock.
  */
+import { createHmac } from "node:crypto";
+import { type Action, apply, type Env, type Game, GameError, newGame, type Prediction } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
-import { type Action, apply, type Game, GameError, newGame, type Prediction } from "@/lib/predictions/engine";
-import { AUTO_CANCEL_MS, MAX_PREDICTIONS_PER_STREAM, STARTER_AFTER_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
-import type { PredictionsView, Standing } from "@/lib/predictions/view";
-import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile } from "@/lib/predictions/watch";
+import {
+  AUTO_CANCEL_CROWD_MS,
+  AUTO_CANCEL_MS,
+  byPoints,
+  FLAG_WINDOW_MS,
+  MAX_EARNING_WALLETS_PER_IP,
+  MAX_PREDICTIONS_PER_STREAM,
+  STARTER_AFTER_MS,
+  STREAMER_PRESENT_MS,
+  SUGGEST_TTL_MS,
+} from "@/lib/predictions/rules";
+import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
+import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
-import type { Leader, PredictionStore } from "./store";
+import type { Commit, PredictionStore } from "./store";
+
+export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated" };
 
 export type ServiceDeps = {
   store: PredictionStore;
   now: () => number;
   secret: string;
-  /** The coin's streamer (creator wallet), or null if it isn't a memestream coin. */
-  creatorOf: (mint: string) => Promise<string | null>;
+  /** The site's host (e.g. "memestream.lol"); sign-in messages must name it. */
+  domain: string;
+  /** The coin's streamer and status, or null if it isn't a memestream coin (cached, budgeted read). */
+  coin: (mint: string) => Promise<CoinFacts | null>;
+  /** Whether `wallet` holds more than 0 of the coin (cached, budgeted read). */
+  holds: (mint: string, wallet: string) => Promise<boolean>;
   /** Commit attempts before answering "busy", and the pause between them. */
   attempts?: number;
   backoffMs?: () => number;
@@ -30,17 +47,28 @@ export class UnknownCoinError extends Error {}
 
 const coinKey = (mint: string) => `coin:${mint}`;
 const watchKey = (wallet: string) => `watch:${wallet}`;
+const presenceKey = (mint: string) => `presence:${mint}`;
 const LEADER_CANDIDATES = 50;
+const LEADERBOARD_CACHE_MS = 15_000;
+/** The GET response lists at most this many waiting suggestions and recent results. */
+const QUEUE_SHOWN = 20;
+const RESOLVED_SHOWN = 5;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const movesOf = (result: ReturnType<typeof apply>) => ({
+  moves: [...result.moves].map(([w, m]) => ({ wallet: w, delta: m.delta, floor: m.floor })),
+  won: [...result.won].map(([w, delta]) => ({ wallet: w, delta })),
+});
 
 export function predictionsService(deps: ServiceDeps) {
   const { store, now } = deps;
   const attempts = deps.attempts ?? 12;
   const pause = () => new Promise((resolve) => setTimeout(resolve, deps.backoffMs?.() ?? 5 + Math.random() * 40));
 
-  async function creator(mint: string) {
-    const wallet = await deps.creatorOf(mint);
-    if (!wallet) throw new UnknownCoinError("Coin not found");
-    return wallet;
+  async function facts(mint: string) {
+    const coin = await deps.coin(mint);
+    if (!coin) throw new UnknownCoinError("Coin not found");
+    return coin;
   }
 
   const parseGame = (json: string | null, streamer: string): Game => {
@@ -49,11 +77,12 @@ export function predictionsService(deps: ServiceDeps) {
     return game;
   };
   const parseProfile = (json: string | null): Profile => (json ? JSON.parse(json) : newProfile());
+  const parseEnv = (json: string | null): Env => ({ streamerSeenAt: json ? (JSON.parse(json) as { at: number }).at : null });
 
-  /** Signs a wallet in: checks its signed message, uses the nonce once, returns a session token. */
+  /** Signs a wallet in: checks its signed message (domain, expiry, signature), uses the nonce once, returns a session token. */
   async function session(message: string, signature: string) {
     const t = now();
-    const verified = verifySessionMessage(message, signature, t);
+    const verified = verifySessionMessage(message, signature, t, deps.domain);
     if (!verified.ok) throw new GameError(verified.error);
     const { wallet, nonce } = verified.request;
     const used = await store.commit({ docs: [], moves: [], won: [], nonce: { key: `nonce:${wallet}:${nonce}`, ttlMs: MESSAGE_TTL_MS * 2 } });
@@ -61,14 +90,29 @@ export function predictionsService(deps: ServiceDeps) {
     return { wallet, ...issueToken(wallet, t, deps.secret) };
   }
 
-  /** One minute watched (if not too soon after the last), with its points. */
-  async function beat(wallet: string) {
+  /**
+   * One minute watched on `mint` (if not too soon after the last). Counts only on a memestream
+   * coin that is trading or graduated. Only the first 5 wallets from one IP each UTC day earn
+   * points; later ones earn 0, silently. The streamer's own beat also marks them present.
+   */
+  async function beat(wallet: string, mint: string, ip: string) {
+    const coin = await facts(mint);
+    if (coin.status === "graduating") return { accepted: false, points: 0 };
+    const t = now();
+    // The IP is never stored, only a keyed hash of it.
+    const ipKey = `ip:${createHmac("sha256", deps.secret).update(ip).digest("base64url").slice(0, 22)}:${utcDay(t)}`;
+    const streamer = wallet === coin.creator;
     for (let i = 0; i < attempts; i++) {
-      const [doc] = await store.read([watchKey(wallet)]);
-      const result = heartbeat(parseProfile(doc.json), now());
+      const [watchDoc, ipDoc, presenceDoc] = await store.read([watchKey(wallet), ipKey, presenceKey(mint)]);
+      const wallets: string[] = ipDoc.json ? JSON.parse(ipDoc.json) : [];
+      const earning = wallets.includes(wallet) || wallets.length < MAX_EARNING_WALLETS_PER_IP;
+      const result = heartbeat(parseProfile(watchDoc.json), t, earning);
       if (!result.accepted) return { accepted: false, points: 0 };
+      const docs: Commit["docs"] = [{ key: watchKey(wallet), v: watchDoc.v, json: JSON.stringify(result.profile) }];
+      if (earning && !wallets.includes(wallet)) docs.push({ key: ipKey, v: ipDoc.v, json: JSON.stringify([...wallets, wallet]), ttlMs: DAY_MS });
+      if (streamer) docs.push({ key: presenceKey(mint), v: presenceDoc.v, json: JSON.stringify({ at: t }), ttlMs: 2 * STREAMER_PRESENT_MS });
       const moves = result.points > 0 ? [{ wallet, delta: result.points, floor: 0 }] : [];
-      const status = await store.commit({ docs: [{ key: watchKey(wallet), v: doc.v, json: JSON.stringify(result.profile) }], moves, won: [] });
+      const status = await store.commit({ docs, moves, won: [] });
       if (status === "ok") return { accepted: true, points: result.points };
       await pause();
     }
@@ -77,18 +121,16 @@ export function predictionsService(deps: ServiceDeps) {
 
   /** A signed-in wallet's action on a coin's game. */
   async function act(mint: string, wallet: string, action: Action): Promise<PredictionsView> {
-    const streamer = await creator(mint);
+    const { creator } = await facts(mint);
+    // Holding the coin is checked only where it matters (one cached read), not on every bet.
+    const holder = action.kind === "suggest" || action.kind === "upvote" ? await deps.holds(mint, wallet) : false;
     for (let i = 0; i < attempts; i++) {
-      const [coinDoc, watchDoc] = await store.read([coinKey(mint), watchKey(wallet)]);
+      const [coinDoc, watchDoc, presenceDoc] = await store.read([coinKey(mint), watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
-      const game = parseGame(coinDoc.json, streamer);
+      const game = parseGame(coinDoc.json, creator);
       const eligible = isEligible(parseProfile(watchDoc.json));
-      const result = apply(game, action, { wallet, eligible, balance }, now());
-      const status = await store.commit({
-        docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }],
-        moves: [...result.moves].map(([w, m]) => ({ wallet: w, delta: m.delta, floor: m.floor })),
-        won: [...result.won].map(([w, delta]) => ({ wallet: w, delta })),
-      });
+      const result = apply(game, action, { wallet, eligible, holder, balance }, now(), parseEnv(presenceDoc.json));
+      const status = await store.commit({ docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }], ...movesOf(result) });
       if (status === "ok") return view(mint, wallet);
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
       await pause();
@@ -96,48 +138,63 @@ export function predictionsService(deps: ServiceDeps) {
     throw new ContentionError("Busy, try again");
   }
 
-  /** Runs the clock (expiry, auto-cancel, auto-launch), saving it if anything was due. */
-  async function ticked(mint: string, streamer: string): Promise<Game> {
+  /** Runs the clock (expiry, auto-cancel, results counting, auto-launch), saving it if anything was due. */
+  async function ticked(mint: string, creator: string): Promise<{ game: Game; env: Env }> {
     for (let i = 0; i < 3; i++) {
-      const [doc] = await store.read([coinKey(mint)]);
-      const game = parseGame(doc.json, streamer);
-      const result = apply(game, { kind: "tick" }, null, now());
-      if (!result.changed) return game;
-      const status = await store.commit({
-        docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }],
-        moves: [...result.moves].map(([w, m]) => ({ wallet: w, delta: m.delta, floor: m.floor })),
-        won: [...result.won].map(([w, delta]) => ({ wallet: w, delta })),
-      });
-      if (status === "ok") return result.game;
+      const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+      const env = parseEnv(presenceDoc.json);
+      const game = parseGame(doc.json, creator);
+      const result = apply(game, { kind: "tick" }, null, now(), env);
+      if (!result.changed) return { game, env };
+      const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...movesOf(result) });
+      if (status === "ok") return { game: result.game, env };
     }
     // Others are saving the same tick; show what's stored.
-    const [doc] = await store.read([coinKey(mint)]);
-    return parseGame(doc.json, streamer);
+    const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+    return { game: parseGame(doc.json, creator), env: parseEnv(presenceDoc.json) };
   }
 
   /** Only wallets with 30+ minutes watched appear on leaderboards. */
-  async function eligibleLeaders(candidates: Leader[]): Promise<Leader[]> {
+  async function eligibleLeaders(candidates: LeaderRow[]): Promise<LeaderRow[]> {
     if (candidates.length === 0) return [];
     const docs = await store.read(candidates.map((c) => watchKey(c.wallet)));
     return candidates.filter((_, i) => onLeaderboard(docs[i].json ? (JSON.parse(docs[i].json!) as Profile) : null));
   }
 
-  const standing = (board: Leader[], wallet: string, fallback: number | undefined): Standing | null => {
+  /** Leaderboards change only when results count, so each is cached briefly (fewer reads per poll). */
+  const boards = new Map<string, { at: number; key: string; rows: LeaderRow[] }>();
+  async function cachedBoard(id: string, key: string, load: () => Promise<LeaderRow[]>) {
+    const hit = boards.get(id);
+    if (hit && hit.key === key && now() - hit.at < LEADERBOARD_CACHE_MS) return hit.rows;
+    const rows = await load();
+    boards.set(id, { at: now(), key, rows });
+    if (boards.size > 1_000) boards.delete(boards.keys().next().value!);
+    return rows;
+  }
+
+  const standing = (board: LeaderRow[], wallet: string, fallback: number | undefined): Standing | null => {
     const at = board.findIndex((l) => l.wallet === wallet);
     if (at >= 0) return { points: board[at].points, rank: at + 1 };
     return fallback === undefined ? null : { points: fallback, rank: null };
   };
 
   async function view(mint: string, wallet: string | null): Promise<PredictionsView> {
-    const streamer = await creator(mint);
-    const game = await ticked(mint, streamer);
+    const { creator } = await facts(mint);
+    const { game, env } = await ticked(mint, creator);
     const t = now();
 
-    const streamCandidates = Object.entries(game.won)
-      .map(([w, points]) => ({ wallet: w, points }))
-      .sort((a, b) => b.points - a.points || (a.wallet < b.wallet ? -1 : 1))
-      .slice(0, LEADER_CANDIDATES);
-    const [streamBoard, allTimeBoard] = await Promise.all([eligibleLeaders(streamCandidates), store.topWon(LEADER_CANDIDATES).then(eligibleLeaders)]);
+    const wonKey = JSON.stringify(game.won);
+    const [streamBoard, allTimeBoard] = await Promise.all([
+      cachedBoard(`stream:${mint}`, wonKey, () =>
+        eligibleLeaders(
+          Object.entries(game.won)
+            .map(([w, points]) => ({ wallet: w, points }))
+            .sort(byPoints)
+            .slice(0, LEADER_CANDIDATES),
+        ),
+      ),
+      cachedBoard("all", "", () => store.topWon(LEADER_CANDIDATES).then(eligibleLeaders)),
+    ]);
 
     let me: PredictionsView["me"] = null;
     if (wallet) {
@@ -153,51 +210,58 @@ export function predictionsService(deps: ServiceDeps) {
         hasSuggestion: game.suggestions.some((s) => s.asker === wallet),
       };
     }
+    const staff = me?.role != null;
 
     const roleOf = (by: string | null): PredictionsView["resolved"][number]["resolvedBy"] =>
       by === "auto" || by === null ? { role: "auto", wallet: null } : { role: by === game.creator ? "streamer" : "mod", wallet: by };
     const myResult = (p: Prediction) => {
       const bet = wallet ? p.bets[wallet] : undefined;
       if (!wallet || !bet || !p.payouts) return null;
-      return { side: bet.side, bet: bet.amount, payout: p.payouts[wallet] ?? 0, flagged: p.flags.includes(wallet) };
+      return { side: bet.side, bet: bet.amount, payout: p.payouts[wallet] ?? 0, flagged: p.flags.includes(wallet), canFlag: !p.finalized };
     };
+    const live = game.live;
 
     return {
       now: t,
       launched: game.launched,
       maxPerStream: MAX_PREDICTIONS_PER_STREAM,
+      crowdPicks: game.crowdPicks,
+      streamerHere: env.streamerSeenAt !== null && t - env.streamerSeenAt < STREAMER_PRESENT_MS,
       me,
-      live: game.live && {
-        id: game.live.id,
-        text: game.live.text,
-        launchedAt: game.live.launchedAt,
-        lockAt: game.live.lockAt,
-        autoCancelAt: game.live.lockAt + AUTO_CANCEL_MS,
-        yes: game.live.yes,
-        no: game.live.no,
-        bettors: game.live.bettors,
-        myBet: wallet && game.live.bets[wallet] ? { side: game.live.bets[wallet].side, amount: game.live.bets[wallet].amount } : null,
+      live: live && {
+        id: live.id,
+        text: live.text,
+        launchedAt: live.launchedAt,
+        lockAt: live.lockAt,
+        autoCancelAt: live.lockAt + (live.launchedBy === "crowd" ? AUTO_CANCEL_CROWD_MS : AUTO_CANCEL_MS),
+        yes: live.yes,
+        no: live.no,
+        bettors: live.bettors,
+        myBet: wallet && live.bets[wallet] ? { side: live.bets[wallet].side, amount: live.bets[wallet].amount } : null,
       },
+      queueSize: game.suggestions.length,
       queue: [...game.suggestions]
-        .sort((a, b) => b.upvoters.length - a.upvoters.length || a.at - b.at)
+        .sort((a, b) => b.upvotes - a.upvotes || a.at - b.at)
+        .slice(0, QUEUE_SHOWN)
         .map((s) => ({
           id: s.id,
           text: s.text,
-          upvotes: s.upvoters.length,
+          upvotes: s.upvotes,
           expiresAt: s.at + SUGGEST_TTL_MS,
           mine: s.asker === wallet,
-          upvoted: wallet !== null && s.upvoters.includes(wallet),
+          upvoted: wallet !== null && (s.upvoters.includes(wallet) || s.extra.includes(wallet.slice(0, 10))),
         })),
-      resolved: game.resolved.map((p) => ({
+      resolved: game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
         id: p.id,
         text: p.text,
         outcome: p.outcome!,
         resolvedAt: p.resolvedAt!,
         resolvedBy: roleOf(p.resolvedBy),
         disputed: p.disputed,
+        flagUntil: p.finalized ? null : p.resolvedAt! + FLAG_WINDOW_MS,
         my: myResult(p),
       })),
-      mods: game.mods,
+      mods: staff ? game.mods : [],
       leaderboard: {
         // The top line shows winners only; a wallet's own standing can be below zero.
         stream: streamBoard.filter((l) => l.points > 0).slice(0, 3),

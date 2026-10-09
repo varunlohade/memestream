@@ -12,6 +12,8 @@ test("well-formed actions pass through", () => {
   assert.deepEqual(parseAction({ kind: "launch", text: "My own question?" }), { kind: "launch", text: "My own question?", windowMin: undefined });
   assert.deepEqual(parseAction({ kind: "resolve", outcome: "cancel" }), { kind: "resolve", outcome: "cancel" });
   assert.deepEqual(parseAction({ kind: "mod", wallet: WALLET, add: true }), { kind: "mod", wallet: WALLET, add: true });
+  assert.deepEqual(parseAction({ kind: "crowd", on: false }), { kind: "crowd", on: false });
+  assert.equal(parseAction({ kind: "crowd", on: "no" }), null);
 });
 
 test("malformed actions, and any way to move points between wallets, are refused", () => {

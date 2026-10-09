@@ -26,6 +26,8 @@ export function parseAction(body: Record<string, unknown>): Action | null {
       return typeof body.wallet === "string" && isBase58Of(body.wallet, 32) && typeof body.add === "boolean"
         ? { kind: "mod", wallet: body.wallet, add: body.add }
         : null;
+    case "crowd":
+      return typeof body.on === "boolean" ? { kind: "crowd", on: body.on } : null;
     default:
       return null;
   }
