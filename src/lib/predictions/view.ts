@@ -22,6 +22,8 @@ export type PredictionsView = {
     starterInMinutes: number | null;
     role: "streamer" | "mod" | null;
     hasSuggestion: boolean;
+    /** Holds more than 0 of the coin (needed to suggest and upvote); null if unknown or staff. */
+    holder: boolean | null;
   } | null;
   live: {
     id: string;

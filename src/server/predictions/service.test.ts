@@ -115,6 +115,11 @@ for (const [name, make] of STORES) {
     nonHolders.add("outsider");
 
     await assert.rejects(service.act(COIN, "outsider", { kind: "suggest", text: "Will the streamer eat a banana?" }), /Hold this coin/);
+    assert.deepEqual(
+      [(await service.view(COIN, "outsider")).me?.holder, (await service.view(COIN, "v1")).me?.holder, (await service.view(COIN, STREAMER)).me?.holder],
+      [false, true, null],
+      "the panel knows when to turn suggest and upvote off",
+    );
     await service.act(COIN, "asker", { kind: "suggest", text: "Will the streamer eat a banana?" });
     assert.equal(await balance("asker"), 90);
     await assert.rejects(service.act(COIN, "outsider", { kind: "upvote", id: "1" }), /Hold this coin/);

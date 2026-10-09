@@ -198,6 +198,8 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   const live = view.live;
   const locked = live !== null && now !== null && now >= live.lockAt;
   const bet = Number(amount);
+  /** A signed-in viewer who doesn't hold the coin: suggest and upvote stay off. */
+  const notHolder = viewer && me?.holder === false;
 
   const headline = staff
     ? staff === "streamer"
@@ -247,7 +249,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
       {live ? (
         <div className="pm-live">
           <div className="pm-livehead">
-            <span className="pm-livetag">Live</span>
+            {locked ? <span className="pm-otag pm-oc pm-closedtag">Closed</span> : <span className="pm-livetag">Live</span>}
             <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
           </div>
           <div className="pm-q pm-big">{live.text}</div>
@@ -339,8 +341,8 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           ) : (
             <button
               type="button"
-              className="mbtn pm-uv"
-              disabled={busy || !viewer || s.mine || s.upvoted}
+              className={`mbtn ${notHolder ? "off" : "pm-uv"}`}
+              disabled={busy || !viewer || notHolder || s.mine || s.upvoted}
               onClick={() => act({ kind: "upvote", id: s.id })}
               title={me && !me.eligible ? "Watch 15 minutes to upvote" : undefined}
             >
@@ -359,12 +361,16 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
             onChange={(e) => setQuestion(e.target.value)}
             aria-label={staff ? "Your question" : "Suggest a question"}
           />
-          <button type="submit" className="mbtn buy" disabled={busy || question.trim().length === 0 || (staff !== null && Boolean(live))}>
+          <button
+            type="submit"
+            className={`mbtn ${!staff && notHolder ? "off" : "buy"}`}
+            disabled={busy || question.trim().length === 0 || (staff !== null && Boolean(live)) || (!staff && notHolder)}
+          >
             {staff ? "Launch" : `Suggest, ${SUGGEST_COST} points`}
           </button>
         </form>
       )}
-      {viewer && <p className="mute pm-small">Hold ${symbol} to suggest and upvote.</p>}
+      {viewer && notHolder && <p className="mute pm-small">Hold ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
       {view.resolved.slice(0, 5).map((r) => {

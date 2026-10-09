@@ -200,6 +200,9 @@ export function predictionsService(deps: ServiceDeps) {
     if (wallet) {
       const [[balance], [watchDoc]] = await Promise.all([store.balances([wallet]), store.read([watchKey(wallet)])]);
       const profile = parseProfile(watchDoc.json);
+      const isStaffWallet = wallet === game.creator || game.mods.includes(wallet);
+      // The cached (60 s), budgeted holder check; if the budget says no, it's just unknown.
+      const holder = isStaffWallet ? null : await deps.holds(mint, wallet).catch(() => null);
       me = {
         wallet,
         balance,
@@ -208,6 +211,7 @@ export function predictionsService(deps: ServiceDeps) {
         starterInMinutes: profile.starter ? null : Math.max(0, Math.ceil((STARTER_AFTER_MS - profile.watchMs) / 60_000)),
         role: wallet === game.creator ? "streamer" : game.mods.includes(wallet) ? "mod" : null,
         hasSuggestion: game.suggestions.some((s) => s.asker === wallet),
+        holder,
       };
     }
     const staff = me?.role != null;
