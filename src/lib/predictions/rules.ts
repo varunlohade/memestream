@@ -43,8 +43,8 @@ export const AUTO_CANCEL_MS = 60 * MINUTE;
 /** The asker earns this when their question resolves YES or NO with enough eligible bettors. */
 export const ASKER_REWARD = 50;
 export const ASKER_REWARD_MIN_BETTORS = 5;
-/** A result is marked "disputed" once flags reach this share of its bettors. */
-export const DISPUTE_SHARE = 0.3;
+/** A result is marked "disputed" once flags reach this percent of its bettors. */
+export const DISPUTE_PERCENT = 30;
 /** The streamer may add a few mod wallets. */
 export const MAX_MODS = 5;
 
