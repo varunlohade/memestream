@@ -8,7 +8,7 @@ import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { type Action, apply, type Game, GameError, newGame, type Prediction } from "@/lib/predictions/engine";
 import { AUTO_CANCEL_MS, MAX_PREDICTIONS_PER_STREAM, type Outcome, type Side, STARTER_AFTER_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile } from "@/lib/predictions/watch";
-import { issueToken, verifySessionMessage } from "./identity";
+import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Leader, PredictionStore } from "./store";
 
 export type ServiceDeps = {
@@ -249,7 +249,10 @@ export function predictionsService(deps: ServiceDeps) {
     };
   }
 
-  return { session, beat, act, view };
+  /** The signed-in wallet behind a session token, or null. */
+  const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
+
+  return { session, beat, act, view, walletOf };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;
