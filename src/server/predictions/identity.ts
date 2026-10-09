@@ -23,9 +23,9 @@ export function isSignedBy(message: Uint8Array, signature: Uint8Array, publicKey
   }
 }
 
-/** Parses the session message, checks its expiry at `now`, and checks the signature is the named wallet's. */
-export function verifySessionMessage(message: string, signatureBase58: string, now: number): { ok: true; request: SessionRequest } | { ok: false; error: string } {
-  const parsed = parseSessionMessage(message, now);
+/** Parses the session message, checks its domain and expiry, and checks the signature is the named wallet's. */
+export function verifySessionMessage(message: string, signatureBase58: string, now: number, domain: string): { ok: true; request: SessionRequest } | { ok: false; error: string } {
+  const parsed = parseSessionMessage(message, now, domain);
   if (!parsed.ok) return parsed;
   let signature: Uint8Array;
   try {

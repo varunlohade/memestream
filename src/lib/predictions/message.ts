@@ -1,22 +1,30 @@
 /**
- * The one message a wallet signs to start a predictions session (Wallet Standard signMessage).
- * The browser builds it, the wallet signs it, and the server parses and checks the very same text.
- * A one-time nonce and a short expiry stop a signed message from being replayed. After that, the
- * server's session token identifies the wallet, so heartbeats and bets need no more popups.
+ * The one message a wallet signs to start a predictions session (Wallet Standard signMessage),
+ * in Sign-In-With-Solana style: it names the site's domain, which the server checks against its
+ * own, so a signature made for another site can't sign in here. A one-time nonce and a short
+ * expiry stop replays. After that, the server's session token identifies the wallet, so
+ * heartbeats and bets need no more popups.
  */
 import { isBase58Of } from "@/lib/base58";
 
-export const MESSAGE_HEADER = "memestream predictions: free points, no money, no prizes";
-const PURPOSE = "Sign in to play predictions. This costs nothing and sends nothing.";
+export const STATEMENT = "memestream predictions: free points, no money, no prizes. Signing in costs nothing and sends nothing.";
 /** A signed message is good for this long (and the server refuses expiries further out). */
 export const MESSAGE_TTL_MS = 5 * 60 * 1000;
 /** Allowance for a browser clock running ahead of the server's. */
 const CLOCK_SKEW_MS = 60 * 1000;
 
-export type SessionRequest = { wallet: string; nonce: string; expiresAt: number };
+export type SessionRequest = { domain: string; wallet: string; nonce: string; expiresAt: number };
 
 export function sessionMessage(r: SessionRequest): string {
-  return [MESSAGE_HEADER, PURPOSE, `Wallet: ${r.wallet}`, `Nonce: ${r.nonce}`, `Expires: ${new Date(r.expiresAt).toISOString()}`].join("\n");
+  return [
+    `${r.domain} wants you to sign in with your Solana account:`,
+    r.wallet,
+    "",
+    STATEMENT,
+    "",
+    `Nonce: ${r.nonce}`,
+    `Expiration Time: ${new Date(r.expiresAt).toISOString()}`,
+  ].join("\n");
 }
 
 /** A fresh random nonce (32 hex characters). */
@@ -28,16 +36,19 @@ export function newNonce(): string {
 export type Parsed = { ok: true; request: SessionRequest } | { ok: false; error: string };
 const bad = (error: string): Parsed => ({ ok: false, error });
 
-/** Parses a signed session message and checks it is well formed and not expired at `now` (ms). */
-export function parseSessionMessage(text: string, now: number): Parsed {
-  const match = /^(.*)\n(.*)\nWallet: (\S+)\nNonce: (\S+)\nExpires: (\S+)$/.exec(text);
-  if (!match || match[1] !== MESSAGE_HEADER || match[2] !== PURPOSE) return bad("Not a memestream predictions message");
-  const [, , , wallet, nonce, expires] = match;
+const SHAPE = /^(\S+) wants you to sign in with your Solana account:\n(\S+)\n\n(.*)\n\nNonce: (\S+)\nExpiration Time: (\S+)$/;
+
+/** Parses a signed session message; checks it is for `domain`, well formed, and not expired at `now` (ms). */
+export function parseSessionMessage(text: string, now: number, domain: string): Parsed {
+  const match = SHAPE.exec(text);
+  if (!match || match[3] !== STATEMENT) return bad("Not a memestream predictions message");
+  const [, signedDomain, wallet, , nonce, expires] = match;
+  if (signedDomain !== domain) return bad("This sign-in was made for another site");
   if (!isBase58Of(wallet, 32)) return bad("Not a valid wallet address");
   if (!/^[0-9a-f]{32}$/.test(nonce)) return bad("Bad nonce");
   const expiresAt = Date.parse(expires);
   if (!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(expires) || Number.isNaN(expiresAt)) return bad("Bad expiry");
   if (expiresAt <= now) return bad("This signature expired. Try again.");
   if (expiresAt - now > MESSAGE_TTL_MS + CLOCK_SKEW_MS) return bad("Expiry too far ahead. Check your clock.");
-  return { ok: true, request: { wallet, nonce, expiresAt } };
+  return { ok: true, request: { domain, wallet, nonce, expiresAt } };
 }

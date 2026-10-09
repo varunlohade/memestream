@@ -6,6 +6,7 @@ import { MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
 import { bearer, issueToken, SESSION_TTL_MS, verifySessionMessage, walletFromToken } from "./identity";
 
 const NOW = Date.parse("2026-10-09T12:00:00.000Z");
+const DOMAIN = "memestream.lol";
 const SECRET = "test-secret-test-secret-test-secret";
 
 function keypair() {
@@ -14,12 +15,12 @@ function keypair() {
   return { address: bs58.encode(raw), sign: (text: string) => bs58.encode(sign(null, Buffer.from(text), privateKey)) };
 }
 
-const message = (wallet: string) => sessionMessage({ wallet, nonce: "0123456789abcdef0123456789abcdef", expiresAt: NOW + MESSAGE_TTL_MS });
+const message = (wallet: string) => sessionMessage({ domain: DOMAIN, wallet, nonce: "0123456789abcdef0123456789abcdef", expiresAt: NOW + MESSAGE_TTL_MS });
 
 test("a wallet's own signature verifies", () => {
   const me = keypair();
   const text = message(me.address);
-  const result = verifySessionMessage(text, me.sign(text), NOW);
+  const result = verifySessionMessage(text, me.sign(text), NOW, DOMAIN);
   assert.ok(result.ok);
   assert.equal(result.request.wallet, me.address);
 });
@@ -28,16 +29,16 @@ test("a signature by another wallet is refused (can't claim someone else's addre
   const me = keypair();
   const other = keypair();
   const text = message(other.address);
-  assert.deepEqual(verifySessionMessage(text, me.sign(text), NOW), { ok: false, error: "Bad signature" });
+  assert.deepEqual(verifySessionMessage(text, me.sign(text), NOW, DOMAIN), { ok: false, error: "Bad signature" });
 });
 
 test("an expired or changed message is refused even with a good signature; junk signatures are refused", () => {
   const me = keypair();
   const text = message(me.address);
-  assert.equal(verifySessionMessage(text, me.sign(text), NOW + MESSAGE_TTL_MS).ok, false);
-  assert.equal(verifySessionMessage(text.replace("0123", "4567"), me.sign(text), NOW).ok, false);
-  assert.equal(verifySessionMessage(text, "0OIl", NOW).ok, false);
-  assert.equal(verifySessionMessage(text, bs58.encode(new Uint8Array(64)), NOW).ok, false);
+  assert.equal(verifySessionMessage(text, me.sign(text), NOW + MESSAGE_TTL_MS, DOMAIN).ok, false);
+  assert.equal(verifySessionMessage(text.replace("0123", "4567"), me.sign(text), NOW, DOMAIN).ok, false);
+  assert.equal(verifySessionMessage(text, "0OIl", NOW, DOMAIN).ok, false);
+  assert.equal(verifySessionMessage(text, bs58.encode(new Uint8Array(64)), NOW, DOMAIN).ok, false);
 });
 
 test("session token: issued, verified, and refused once expired", () => {
