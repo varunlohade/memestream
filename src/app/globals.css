@@ -155,7 +155,7 @@ button.unv { cursor: help; }
 .trade-list { list-style: none; margin: 0; padding: 0; }
 .tr { display: grid; grid-template-columns: 70px 1fr 1fr 1fr 120px; gap: 8px; font-size: 26px; padding: 8px 0; border-top: 4px solid rgba(255,255,255,.07); }
 .tr .r { text-align: right; }
-.tr a.r { color: inherit; text-decoration: none; white-space: nowrap; }
+.tr a.r { color: var(--mute); text-decoration: none; white-space: nowrap; }
 .tr a.r:hover { text-decoration: underline; }
 .tag { margin-left: 8px; font-weight: 400; font-size: 18px; color: #000; background: var(--xp); padding: 0 6px; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -164,6 +164,7 @@ button.unv { cursor: help; }
   .coin { padding: 20px 16px 32px; gap: 20px; }
   .tr { grid-template-columns: 50px 1fr 1fr 84px; font-size: 22px; }
   .tr > :nth-child(4) { display: none; }
+  .tr .ago { display: none; }
   .cap { font-size: 36px; }
 }
 

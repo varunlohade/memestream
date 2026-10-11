@@ -73,7 +73,8 @@ function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) 
             {t.byStreamer && <b className="tag">streamer</b>}
           </span>
           <a className="r mute" href={solscanTx(t.signature, chain)} target="_blank" rel="noopener noreferrer" title="View on Solscan">
-            {ago(t.time)} ago ↗
+            {ago(t.time)}
+            <span className="ago"> ago</span> ↗
           </a>
         </li>
       ))}
