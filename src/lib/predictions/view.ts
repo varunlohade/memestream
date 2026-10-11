@@ -48,7 +48,7 @@ export type PredictionsView = {
     disputed: boolean;
     /** Flags are taken until then (ms); null once the result counts. */
     flagUntil: number | null;
-    my: { side: Side; bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
+    my: { bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
   }[];
   /** The coin's mods (sent to the streamer and mods only). */
   mods: string[];

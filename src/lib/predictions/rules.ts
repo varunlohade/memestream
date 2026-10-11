@@ -54,13 +54,19 @@ export const AUTO_CANCEL_CROWD_MS = 15 * MINUTE;
 export const STREAMER_PRESENT_MS = 5 * MINUTE;
 /** After a result, bettors can flag it for this long; then it counts (leaderboard, asker reward) unless disputed. */
 export const FLAG_WINDOW_MS = 10 * MINUTE;
-/** Waiting suggestions per coin. */
-export const MAX_QUEUE = 50;
+/**
+ * Caps that keep a coin's whole game document under about 256 KB, since every action and GET
+ * reads it and every action rewrites it (doc-size.test.ts builds one at full caps).
+ * Waiting suggestions per coin.
+ */
+export const MAX_QUEUE = 25;
 /** Bettors per prediction. */
-export const MAX_BETTORS = 1_000;
+export const MAX_BETTORS = 200;
 /** Upvoters kept in full per suggestion; beyond that, short fingerprints (for dedupe) up to MAX_UPVOTES. */
-export const MAX_UPVOTERS_STORED = 200;
-export const MAX_UPVOTES = 1_000;
+export const MAX_UPVOTERS_STORED = 20;
+export const MAX_UPVOTES = 100;
+/** Past results kept per coin, as summaries (results still in their flag window are kept too). */
+export const MAX_HISTORY = 20;
 /** Per-stream leaderboard entries kept. */
 export const MAX_WON_ENTRIES = 100;
 /** Distinct wallets that may earn watch points from one IP per UTC day. */

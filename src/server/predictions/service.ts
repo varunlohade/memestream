@@ -5,7 +5,7 @@
  * Dependencies are passed in, so tests run it against the in-memory store with a fake clock.
  */
 import { createHmac } from "node:crypto";
-import { type Action, apply, type Env, type Game, GameError, newGame, type Prediction } from "@/lib/predictions/engine";
+import { type Action, apply, type Env, type Game, GameError, newGame, type Summary } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import {
   AUTO_CANCEL_CROWD_MS,
@@ -50,6 +50,7 @@ const watchKey = (wallet: string) => `watch:${wallet}`;
 const presenceKey = (mint: string) => `presence:${mint}`;
 const LEADER_CANDIDATES = 50;
 const LEADERBOARD_CACHE_MS = 15_000;
+const PUBLIC_VIEW_CACHE_MS = 1_500;
 /** The GET response lists at most this many waiting suggestions and recent results. */
 const QUEUE_SHOWN = 20;
 const RESOLVED_SHOWN = 5;
@@ -178,7 +179,22 @@ export function predictionsService(deps: ServiceDeps) {
     return fallback === undefined ? null : { points: fallback, rank: null };
   };
 
+  /**
+   * The signed-out view is the same for everyone, so it is reused for a moment per coin (fewer
+   * reads per poll). Signed-in views carry the wallet's own fields and are never cached.
+   */
+  const publicViews = new Map<string, { at: number; view: PredictionsView }>();
   async function view(mint: string, wallet: string | null): Promise<PredictionsView> {
+    if (wallet) return build(mint, wallet);
+    const hit = publicViews.get(mint);
+    if (hit && now() - hit.at < PUBLIC_VIEW_CACHE_MS) return { ...hit.view, now: now() };
+    const fresh = await build(mint, null);
+    publicViews.set(mint, { at: now(), view: fresh });
+    if (publicViews.size > 1_000) publicViews.delete(publicViews.keys().next().value!);
+    return fresh;
+  }
+
+  async function build(mint: string, wallet: string | null): Promise<PredictionsView> {
     const { creator } = await facts(mint);
     const { game, env } = await ticked(mint, creator);
     const t = now();
@@ -218,10 +234,10 @@ export function predictionsService(deps: ServiceDeps) {
 
     const roleOf = (by: string | null): PredictionsView["resolved"][number]["resolvedBy"] =>
       by === "auto" || by === null ? { role: "auto", wallet: null } : { role: by === game.creator ? "streamer" : "mod", wallet: by };
-    const myResult = (p: Prediction) => {
-      const bet = wallet ? p.bets[wallet] : undefined;
-      if (!wallet || !bet || !p.payouts) return null;
-      return { side: bet.side, bet: bet.amount, payout: p.payouts[wallet] ?? 0, flagged: p.flags.includes(wallet), canFlag: !p.finalized };
+    const myResult = (p: Summary) => {
+      if (!wallet || !p.open || !Object.hasOwn(p.open.results, wallet)) return null;
+      const [bet, payout, flagged] = p.open.results[wallet];
+      return { bet, payout, flagged: flagged === 1, canFlag: true };
     };
     const live = game.live;
 
@@ -258,11 +274,11 @@ export function predictionsService(deps: ServiceDeps) {
       resolved: game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
         id: p.id,
         text: p.text,
-        outcome: p.outcome!,
-        resolvedAt: p.resolvedAt!,
+        outcome: p.outcome,
+        resolvedAt: p.resolvedAt,
         resolvedBy: roleOf(p.resolvedBy),
         disputed: p.disputed,
-        flagUntil: p.finalized ? null : p.resolvedAt! + FLAG_WINDOW_MS,
+        flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,
         my: myResult(p),
       })),
       mods: staff ? game.mods : [],

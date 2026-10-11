@@ -128,6 +128,7 @@ for (const [name, make] of STORES) {
     assert.deepEqual([view.live, view.streamerHere, view.queue[0].upvotes], [null, false, 3], "streamer away: it waits");
 
     await streamerHere();
+    clock.t += 2_000; // past the signed-out view's 1.5 s cache
     view = await service.view(COIN, null);
     assert.equal(view.live?.text, "Will the streamer eat a banana?");
     assert.equal(await balance("asker"), 100, "suggestion cost refunded on going live");
@@ -205,6 +206,19 @@ for (const [name, make] of STORES) {
     assert.deepEqual(view.leaderboard.allTime, [{ wallet: "watcher", points: 50 }]);
     assert.deepEqual(view.leaderboard.me.stream, { points: -150, rank: 2 });
     await assert.rejects(service.view("not-a-coin", null), /Coin not found/);
+  });
+
+  test(`${name}: the signed-out view is cached per coin for 1.5 s; signed-in views never are`, async () => {
+    const { service, clock, fund } = setup(make);
+    await fund("a", 500);
+    const before = await service.view(COIN, null);
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    clock.t += 1_000;
+    const cached = await service.view(COIN, null);
+    assert.deepEqual([cached.live, cached.now], [null, before.now + 1_000], "same data, current server time");
+    assert.equal((await service.view(COIN, "a")).live?.text, "Will chat win this round?");
+    clock.t += 500;
+    assert.equal((await service.view(COIN, null)).live?.text, "Will chat win this round?");
   });
 
   test(`${name}: the GET view stays lean: top 20 suggestions, last 5 results, mods only for staff`, async () => {

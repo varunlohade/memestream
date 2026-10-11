@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Action, type Actor, apply, type Game, GameError, newGame } from "./engine";
-import { FLAG_WINDOW_MS, MAX_QUEUE, MAX_UPVOTERS_STORED } from "./rules";
+import { FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -63,7 +63,7 @@ test("suggest: holders only; costs 10 points, one open suggestion per wallet per
   refused(() => w.run({ kind: "suggest", text: "Hi?" }, "c", T0), /5 to 80/);
 });
 
-test("suggest: the queue holds at most 50; the oldest expire first and free room", () => {
+test("suggest: the queue holds at most MAX_QUEUE; the oldest expire first and free room", () => {
   const askers = Array.from({ length: MAX_QUEUE + 1 }, (_, i) => `a${i}`);
   const w = world(Object.fromEntries(askers.map((a) => [a, 100])));
   w.away(); // nothing auto-launches
@@ -182,14 +182,14 @@ test("bets: 10 to 1,000 points, at most half the balance, add to your side but n
   refused(() => w.run({ kind: "bet", side: "no", amount: 10 }, "b", T0 + 5 * MIN), /closed/);
 });
 
-test("bets: at most 1,000 bettors per prediction; those in can still add", () => {
+test("bets: at most MAX_BETTORS bettors per prediction; those in can still add", () => {
   const w = world({ late: 100, first: 100 });
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
   w.run({ kind: "bet", side: "yes", amount: 10 }, "first", T0);
-  // Fill the rest straight into the state (1,000 real wallets would only slow the test down).
+  // Fill the rest straight into the state (that many real wallets would only slow the test down).
   const full = structuredClone(w.game);
-  for (let i = 1; i < 1_000; i++) full.live!.bets[`w${i}`] = { side: "no", amount: 10, eligible: false };
-  full.live!.bettors = 1_000;
+  for (let i = 1; i < MAX_BETTORS; i++) full.live!.bets[`w${i}`] = { side: "no", amount: 10, eligible: false };
+  full.live!.bettors = MAX_BETTORS;
   const actor = (wallet: string): Actor => ({ wallet, eligible: false, holder: true, balance: 100 });
   refused(() => apply(full, { kind: "bet", side: "yes", amount: 10 }, actor("late"), T0), /is full/);
   assert.equal(apply(full, { kind: "bet", side: "yes", amount: 10 }, actor("first"), T0).game.live!.bets.first.amount, 20);
@@ -327,15 +327,38 @@ test("flags: bettors only, once each, within the flag window; disputed at 30% of
   refused(() => w.run({ kind: "flag", id: "1" }, "b8", T0 + MIN + FLAG_WINDOW_MS), /Too late/);
 });
 
+test("results fold into summaries once their flag window closes; only the last 20 are kept", () => {
+  const bettors = ["a", "b"];
+  const w = world(Object.fromEntries(bettors.map((b) => [b, 1_000])));
+  w.away();
+  let t = T0;
+  for (let i = 0; i < MAX_PREDICTIONS_PER_STREAM; i++) {
+    w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
+    w.run({ kind: "bet", side: "yes", amount: 10 }, "a", t);
+    w.run({ kind: "bet", side: "no", amount: 10 }, "b", t);
+    t += MIN;
+    w.run({ kind: "resolve", outcome: "yes" }, STREAMER, t);
+  }
+  const newest = w.game.resolved[0];
+  assert.deepEqual(newest.open, { results: { a: [10, 20, 0], b: [10, 0, 0] }, eligible: 0 }, "the flag window needs who bet and what they got");
+  w.run({ kind: "flag", id: newest.id }, "b", t);
+  w.run({ kind: "tick" }, null, t + FLAG_WINDOW_MS);
+  assert.equal(w.game.resolved.length, MAX_HISTORY);
+  assert.ok(w.game.resolved.every((p) => p.open === null));
+  assert.deepEqual(
+    { ...w.game.resolved[0] },
+    { id: newest.id, text: "Question number 19?", asker: null, outcome: "yes", yes: 10, no: 10, bettors: 2, resolvedAt: t, resolvedBy: STREAMER, askerReward: 0, flags: 1, disputed: true, open: null },
+  );
+});
+
 test("the stream leaderboard keeps the top 100 only", () => {
   const w = world();
   const game = w.game;
   for (let i = 0; i < 150; i++) game.won[`w${String(i).padStart(3, "0")}`] = i;
   // One more result to finalize trims the map.
-  const bettors = { x: { side: "yes" as const, amount: 10, eligible: false }, y: { side: "no" as const, amount: 10, eligible: false } };
   game.resolved.unshift({
-    id: "1", text: "Q?", asker: null, launchedAt: T0, lockAt: T0, launchedBy: STREAMER, bets: bettors, yes: 10, no: 10,
-    outcome: "yes", resolvedAt: T0, resolvedBy: STREAMER, payouts: { x: 20, y: 0 }, askerReward: 0, flags: [], disputed: false, bettors: 2, finalized: false,
+    id: "1", text: "Q?", asker: null, outcome: "yes", yes: 10, no: 10, bettors: 2, resolvedAt: T0, resolvedBy: STREAMER,
+    askerReward: 0, flags: 0, disputed: false, open: { results: { x: [10, 20, 0], y: [10, 0, 0] }, eligible: 0 },
   });
   const result = apply(game, { kind: "tick" }, null, T0 + FLAG_WINDOW_MS);
   assert.equal(Object.keys(result.game.won).length, 100);

@@ -25,6 +25,7 @@ import {
   FLAG_WINDOW_MS,
   MAX_BET,
   MAX_BETTORS,
+  MAX_HISTORY,
   MAX_MODS,
   MAX_PREDICTIONS_PER_STREAM,
   MAX_QUEUE,
@@ -52,6 +53,7 @@ export type Suggestion = {
   upvotes: number;
 };
 export type BetRecord = { side: Side; amount: number; eligible: boolean };
+/** The prediction that is live now: open for bets until `lockAt`, then waiting for a result. */
 export type Prediction = {
   id: string;
   text: string;
@@ -64,17 +66,33 @@ export type Prediction = {
   bets: Record<string, BetRecord>;
   yes: number;
   no: number;
-  outcome: Outcome | null;
-  resolvedAt: number | null;
-  /** "auto" (nobody resolved in time) or the streamer/mod wallet that resolved it. */
-  resolvedBy: string | null;
-  payouts: Record<string, number> | null;
-  askerReward: number;
-  flags: string[];
-  disputed: boolean;
   bettors: number;
-  /** The flag window is over: winnings counted (unless disputed), asker reward settled. */
-  finalized: boolean;
+};
+/**
+ * A result, kept short: no per-wallet lists. Only while its flag window is open does it keep
+ * `open`, what flagging and counting the result need; then it folds into the summary alone.
+ */
+export type Summary = {
+  id: string;
+  text: string;
+  asker: string | null;
+  outcome: Outcome;
+  yes: number;
+  no: number;
+  bettors: number;
+  resolvedAt: number;
+  /** "auto" (nobody resolved in time) or the streamer/mod wallet that resolved it. */
+  resolvedBy: string;
+  askerReward: number;
+  flags: number;
+  disputed: boolean;
+  open: FlagWindow | null;
+};
+export type FlagWindow = {
+  /** Each bettor's [stake, payout, flagged (1) or not (0)]. */
+  results: Record<string, [number, number, 0 | 1]>;
+  /** Bettors with 15+ minutes watched (the asker reward needs enough of them). */
+  eligible: number;
 };
 export type Game = {
   creator: string;
@@ -85,8 +103,8 @@ export type Game = {
   launched: number;
   suggestions: Suggestion[];
   live: Prediction | null;
-  /** Resolved predictions, newest first. The newest few keep their bets (for payouts and flags). */
-  resolved: Prediction[];
+  /** Results, newest first: the last MAX_HISTORY, plus any still in their flag window. */
+  resolved: Summary[];
   /** Net points won from bets on this stream, per wallet (top 100 only). */
   won: Record<string, number>;
 };
@@ -118,8 +136,6 @@ export type Result = { game: Game; moves: Map<string, Movement>; won: Map<string
 /** A rule said no; the message is safe to show the user. */
 export class GameError extends Error {}
 
-/** Resolved predictions that keep their bets and payouts once finalized. */
-const KEEP_DETAILED = 5;
 /** Characters of a wallet kept as an upvote fingerprint. */
 const FINGERPRINT = 10;
 
@@ -182,8 +198,8 @@ function tick(ctx: Ctx) {
     if (now >= game.live.lockAt + limit) settle(ctx, "cancel", "auto");
   }
   // Results past their flag window count now (unless disputed).
-  for (const p of game.resolved) if (!p.finalized && now >= p.resolvedAt! + FLAG_WINDOW_MS) finalize(ctx, p);
-  for (const p of game.resolved.slice(KEEP_DETAILED)) if (p.finalized) Object.assign(p, { bets: {}, payouts: null });
+  for (const p of game.resolved) if (p.open && now >= p.resolvedAt + FLAG_WINDOW_MS) finalize(ctx, p);
+  game.resolved = game.resolved.filter((p, i) => p.open || i < MAX_HISTORY);
   // The crowd picks: only while the streamer is here and has crowd picks on.
   if (!game.live && game.crowdPicks && streamerPresent(ctx.env, now) && game.launched < MAX_PREDICTIONS_PER_STREAM) {
     const top = [...game.suggestions]
@@ -216,15 +232,7 @@ function launch(ctx: Ctx, from: Suggestion | { text: string }, by: string, windo
     bets: {},
     yes: 0,
     no: 0,
-    outcome: null,
-    resolvedAt: null,
-    resolvedBy: null,
-    payouts: null,
-    askerReward: 0,
-    flags: [],
-    disputed: false,
     bettors: 0,
-    finalized: false,
   };
 }
 
@@ -234,18 +242,25 @@ function settle(ctx: Ctx, outcome: Outcome, by: string) {
   const p = game.live!;
   const bets = Object.entries(p.bets).map(([wallet, b]) => ({ wallet, side: b.side, amount: b.amount }));
   const paid = payouts(bets, outcome);
-  for (const b of bets) ctx.credit(b.wallet, paid.get(b.wallet) ?? 0);
-  Object.assign(p, { outcome, resolvedAt: now, resolvedBy: by, payouts: Object.fromEntries(paid) });
+  const results: FlagWindow["results"] = {};
+  for (const b of bets) {
+    ctx.credit(b.wallet, paid.get(b.wallet) ?? 0);
+    results[b.wallet] = [b.amount, paid.get(b.wallet) ?? 0, 0];
+  }
+  const eligible = Object.values(p.bets).filter((b) => b.eligible).length;
+  const { id, text, asker, yes, no, bettors } = p;
   game.live = null;
-  game.resolved.unshift(p);
+  game.resolved.unshift({ id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } });
 }
 
-function finalize(ctx: Ctx, p: Prediction) {
+/** The flag window is over: the winnings count (unless disputed), the asker reward is settled, the lists go. */
+function finalize(ctx: Ctx, p: Summary) {
   const { game } = ctx;
-  p.finalized = true;
-  if (p.disputed || p.outcome === "cancel" || !p.payouts) return;
-  for (const [wallet, bet] of Object.entries(p.bets)) {
-    const net = (p.payouts[wallet] ?? 0) - bet.amount;
+  const open = p.open!;
+  p.open = null;
+  if (p.disputed || p.outcome === "cancel") return;
+  for (const [wallet, [stake, payout]] of Object.entries(open.results)) {
+    const net = payout - stake;
     if (net === 0) continue;
     game.won[wallet] = (game.won[wallet] ?? 0) + net;
     ctx.won.set(wallet, (ctx.won.get(wallet) ?? 0) + net);
@@ -255,8 +270,7 @@ function finalize(ctx: Ctx, p: Prediction) {
     .sort(byPoints)
     .slice(0, MAX_WON_ENTRIES);
   game.won = Object.fromEntries(top.map((l) => [l.wallet, l.points]));
-  const eligibleBettors = Object.values(p.bets).filter((b) => b.eligible).length;
-  if (p.asker && eligibleBettors >= ASKER_REWARD_MIN_BETTORS) {
+  if (p.asker && open.eligible >= ASKER_REWARD_MIN_BETTORS) {
     p.askerReward = ASKER_REWARD;
     ctx.credit(p.asker, ASKER_REWARD);
   }
@@ -347,11 +361,13 @@ function act(ctx: Ctx, action: Exclude<Action, { kind: "tick" }>, actor: Actor) 
     }
     case "flag": {
       const p = game.resolved.find((x) => x.id === action.id);
-      if (!p || !p.payouts || p.finalized) throw new GameError("Too late to flag");
-      if (!Object.hasOwn(p.payouts, actor.wallet)) throw new GameError("Only its bettors can flag a result");
-      if (p.flags.includes(actor.wallet)) throw new GameError("You already flagged this");
-      p.flags.push(actor.wallet);
-      p.disputed = p.flags.length * 100 >= DISPUTE_PERCENT * Object.keys(p.payouts).length;
+      if (!p || !p.open) throw new GameError("Too late to flag");
+      if (!Object.hasOwn(p.open.results, actor.wallet)) throw new GameError("Only its bettors can flag a result");
+      const mine = p.open.results[actor.wallet];
+      if (mine[2]) throw new GameError("You already flagged this");
+      mine[2] = 1;
+      p.flags += 1;
+      p.disputed = p.flags * 100 >= DISPUTE_PERCENT * p.bettors;
       return;
     }
     case "mod": {
