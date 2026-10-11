@@ -86,6 +86,15 @@ test("questions: trimmed, whitespace collapsed, 5 to 80 characters, plain text, 
   }
 });
 
+test("questions: NFKC first, then no invisible format characters, before the link checks", () => {
+  assert.deepEqual(cleanQuestion("Is pump\uFF0Efun down?"), { ok: false, error: "No links in questions" }, "fullwidth full stop");
+  assert.deepEqual(cleanQuestion("Visit \uFF57\uFF57\uFF57.free.io?"), { ok: false, error: "No links in questions" }, "fullwidth www");
+  for (const bad of ["Will I win \u202Etoday?", "Is pump\u200B.fun down?", "Will I\u200D win?", "Will \u2066I\u2069 win?", "\uFEFFWill I win?", "Will I win\u00AD?"]) {
+    assert.deepEqual(cleanQuestion(bad), { ok: false, error: "Plain text only" }, JSON.stringify(bad));
+  }
+  assert.deepEqual(cleanQuestion("Will \uFF29 win \uFF11\uFF10 rounds?"), { ok: true, question: "Will I win 10 rounds?" }, "stored normalized");
+});
+
 test("holding: at least 1 whole coin, not 1 base unit", () => {
   for (const coins of ["0", "0.000001", "0.999999", null, undefined, "junk"]) assert.equal(holdsEnough(coins), false, String(coins));
   for (const coins of ["1", "1.000000", "1.5", "250000"]) assert.equal(holdsEnough(coins), true, coins);

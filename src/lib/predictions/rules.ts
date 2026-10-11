@@ -126,11 +126,17 @@ export function multiplier(side: Side, pools: { yes: number; no: number }): numb
 
 const URL_LIKE = /(https?:|www\.|:\/\/|\b[a-z0-9-]+\.(com|net|org|io|gg|tv|xyz|lol|app|me|co|fun|link|ly)\b)/i;
 
-/** Cleans a question: trims, collapses whitespace; 5 to 80 characters, plain text, no links. */
+/**
+ * Cleans a question: NFKC-normalizes (so fullwidth or styled letters can't dodge the link check),
+ * refuses invisible format characters (bidi overrides, zero-width), trims, collapses whitespace;
+ * 5 to 80 characters, plain text, no links.
+ */
 export function cleanQuestion(text: unknown): { ok: true; question: string } | { ok: false; error: string } {
   if (typeof text !== "string") return { ok: false, error: "Type a question" };
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(text)) return { ok: false, error: "Plain text only" };
-  const question = text.replace(/\s+/g, " ").trim();
+  const normalized = text.normalize("NFKC");
+  if (/\p{Cf}/u.test(normalized)) return { ok: false, error: "Plain text only" };
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(normalized)) return { ok: false, error: "Plain text only" };
+  const question = normalized.replace(/\s+/g, " ").trim();
   if (question.length < QUESTION_MIN || question.length > QUESTION_MAX) {
     return { ok: false, error: `Questions are ${QUESTION_MIN} to ${QUESTION_MAX} characters` };
   }
