@@ -191,6 +191,22 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
   assert.equal(apply(game, { kind: "tick" }, null, t + 3 * 60 * MIN + 1, stream2).game.launched, 1, "one reset per stream");
 });
 
+test("a wallet with a stake can't resolve it, and can't be made a mod while its bet is live", () => {
+  const w = world({ a: 1_000, b: 1_000 });
+  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "bet", side: "yes", amount: 100 }, "a", T0);
+  w.run({ kind: "bet", side: "no", amount: 100 }, "b", T0);
+  refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on the live prediction/);
+  // A bettor who became a mod before the bet (staff can't bet, so only through stored state).
+  w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
+  const staked = structuredClone(w.game);
+  staked.live!.bets[MOD] = { side: "yes", amount: 100, eligible: false };
+  refused(() => apply(staked, { kind: "resolve", outcome: "yes" }, w.actor(MOD), T0 + MIN), /can't resolve/);
+  w.run({ kind: "resolve", outcome: "yes" }, MOD, T0 + MIN);
+  w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0 + MIN);
+  assert.deepEqual(w.game.mods, [MOD, "a"], "once settled, the bettor can be a mod");
+});
+
 test("bets: 10 to 1,000 points, at most half the balance, add to your side but never switch", () => {
   const w = world({ a: 3_000, b: 50 });
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);

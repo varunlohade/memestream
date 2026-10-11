@@ -367,6 +367,7 @@ function act(ctx: Ctx, action: Exclude<Action, { kind: "tick" }>, actor: Actor) 
       staffOnly();
       if (!game.live) throw new GameError("Nothing to resolve");
       if (now < game.live.lockAt) throw new GameError("Betting is still open");
+      if (Object.hasOwn(game.live.bets, actor.wallet)) throw new GameError("You have a bet on this one, so you can't resolve it");
       return settle(ctx, action.outcome, actor.wallet);
     }
     case "flag": {
@@ -388,6 +389,7 @@ function act(ctx: Ctx, action: Exclude<Action, { kind: "tick" }>, actor: Actor) 
       }
       if (action.wallet === game.creator || game.mods.includes(action.wallet)) return;
       if (game.mods.length >= MAX_MODS) throw new GameError(`At most ${MAX_MODS} mods`);
+      if (game.live && Object.hasOwn(game.live.bets, action.wallet)) throw new GameError("That wallet has a bet on the live prediction");
       game.mods.push(action.wallet);
       return;
     }
