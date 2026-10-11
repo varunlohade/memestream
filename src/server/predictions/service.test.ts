@@ -159,7 +159,7 @@ for (const [name, make] of STORES) {
     await Promise.all(viewers.map((v, i) => service.act(COIN, v, { kind: "bet", side: i < 2 ? "yes" : "no", amount: 100 })));
     await assert.rejects(service.act(COIN, STREAMER, { kind: "resolve", outcome: "yes" }), /still open/);
     clock.t += 2 * MIN;
-    const done = await service.act(COIN, STREAMER, { kind: "resolve", outcome: "yes" });
+    const done = (await service.act(COIN, STREAMER, { kind: "resolve", outcome: "yes" }))!;
     const after = (await Promise.all(viewers.map(balance))).reduce((a, b) => a + b, 0);
     assert.equal(after, 6 * 1_000, "the pool goes back out in full");
     assert.deepEqual([await balance("v1"), await balance("v3")], [1_000 + 200, 1_000 - 100]);
@@ -171,6 +171,47 @@ for (const [name, make] of STORES) {
     assert.equal(await balance("asker"), 100 + 50, "asker reward: YES, 6 eligible bettors, not disputed");
     assert.deepEqual(counted.leaderboard.stream, [{ wallet: "v2", points: 200 }, { wallet: "v1", points: 200 }]);
     assert.deepEqual(counted.leaderboard.me.stream, { points: 200, rank: 2 });
+  });
+
+  test(`${name}: a commit whose reply is lost and is re-sent (Upstash SDK retry) counts the bet once`, async () => {
+    const { store, service, fund, balance } = setup(make);
+    await fund("V", 1_000);
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will it rain today?", windowMin: 2 });
+    // The first commit lands, its reply is lost, and the client re-sends the same eval.
+    const commit = store.commit.bind(store);
+    let loseNext = true;
+    store.commit = async (c) => {
+      const result = await commit(c);
+      if (loseNext && result === "ok") {
+        loseNext = false;
+        return commit(c);
+      }
+      return result;
+    };
+    const view = await service.act(COIN, "V", { kind: "bet", side: "yes", amount: 100 });
+    assert.equal(loseNext, false, "the re-send happened");
+    assert.deepEqual(view?.live?.myBet, { side: "yes", amount: 100 });
+    assert.equal(await balance("V"), 900);
+  });
+
+  test(`${name}: an action saved before its view fails to load still succeeds (null view)`, async () => {
+    const { store, service, fund, balance } = setup(make);
+    await fund("V", 1_000);
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will it rain today?", windowMin: 2 });
+    const commit = store.commit.bind(store);
+    const read = store.read.bind(store);
+    let committed = false;
+    store.commit = async (c) => {
+      const result = await commit(c);
+      committed ||= result === "ok";
+      return result;
+    };
+    store.read = async (keys) => {
+      if (committed) throw new Error("network down");
+      return read(keys);
+    };
+    assert.equal(await service.act(COIN, "V", { kind: "bet", side: "yes", amount: 100 }), null);
+    assert.equal(await balance("V"), 900, "the bet was saved once");
   });
 
   test(`${name}: many viewers betting at once: every accepted bet is debited once and counted in the pool`, async () => {
@@ -259,7 +300,7 @@ for (const [name, make] of STORES) {
     await assert.rejects(service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }), /20 predictions/, "away under 2 hours: same stream");
     clock.t += 121 * MIN;
     await streamerHere();
-    const fresh = await service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" });
+    const fresh = (await service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }))!;
     assert.deepEqual([fresh.launched, fresh.resolved.length], [1, 5]);
   });
 

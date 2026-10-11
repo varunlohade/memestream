@@ -26,7 +26,8 @@ export const GET = withRpcGuard({ name: "predictions-coin", burst: 30, perSecond
 });
 
 /**
- * POST /api/predictions/coin/<mint> { kind, ... } (session token) -> the updated view.
+ * POST /api/predictions/coin/<mint> { kind, ... } (session token) -> the updated view, or
+ * { saved: true } if the action was saved but the view could not be read just then.
  * kind: suggest | upvote | bet | launch | remove | resolve | flag | mod | crowd. Free points only; there
  * is no action that buys, sells or sends points.
  */
@@ -41,7 +42,7 @@ export const POST = withRpcGuard({ name: "predictions-act", burst: 20, perSecond
     if (!isBase58Of(mint, 32)) return jsonError("Not a valid coin address", 400);
     const action = parseAction(await jsonBody(request));
     if (!action) return jsonError("Unknown action", 400);
-    return ok(await service.act(mint, wallet, action));
+    return ok((await service.act(mint, wallet, action)) ?? { saved: true });
   } catch (error) {
     return predictionsError(error);
   }

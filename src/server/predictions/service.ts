@@ -4,7 +4,7 @@
  * one atomic step; if another request committed first ("conflict"), it re-reads and tries again.
  * Dependencies are passed in, so tests run it against the in-memory store with a fake clock.
  */
-import { createHmac } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, newGame, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
@@ -42,6 +42,8 @@ const presenceKey = (mint: string) => `presence:${mint}`;
 /** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
 type Presence = { at: number; since?: number };
 const DEFAULT_COMMIT_ATTEMPTS = 12;
+/** How long an action's idempotency id is remembered: far longer than one request and its re-sends. */
+const ACT_ONCE_TTL_MS = 10 * 60 * 1000;
 /** A tick that keeps losing the race just shows what others saved. */
 const TICK_COMMIT_ATTEMPTS = 3;
 const BACKOFF_MIN_MS = 5;
@@ -241,22 +243,30 @@ export function predictionsService(deps: ServiceDeps) {
     });
   }
 
-  /** A signed-in wallet's action on a coin's game. */
-  async function act(mint: string, wallet: string, action: Action): Promise<PredictionsView> {
+  /**
+   * A signed-in wallet's action on a coin's game. Returns the updated view, or null if the action
+   * was saved but the view could not be read just then (the next poll shows it).
+   */
+  async function act(mint: string, wallet: string, action: Action): Promise<PredictionsView | null> {
     const { creator } = await facts(mint);
     // Holding the coin is checked only where it matters (one cached read), not on every bet.
     const holder = action.kind === "suggest" || action.kind === "upvote" ? await deps.holds(mint, wallet) : false;
-    return retryOnConflict(async () => {
+    // One id per request: if a commit lands but its reply is lost and the store client re-sends it,
+    // the re-send answers "replay" and the action counts once.
+    const once = { key: `act:${randomUUID()}`, ttlMs: ACT_ONCE_TTL_MS };
+    await retryOnConflict(async () => {
       const [coinDoc, watchDoc, presenceDoc] = await store.read([coinKey(mint), watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
       const game = parseGame(coinDoc.json, creator);
       const eligible = isEligible(parseProfile(watchDoc.json));
       const result = apply(game, action, { wallet, eligible, holder, balance }, now(), parseEnv(presenceDoc.json));
-      const status = await store.commit({ docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
-      if (status === "ok") return view(mint, wallet);
+      const status = await store.commit({ docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result), nonce: once });
+      if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
       return RETRY;
     });
+    // The action is saved; a failed read now must not turn it into an error the user retries.
+    return view(mint, wallet).catch(() => null);
   }
 
   /** Runs the clock (expiry, auto-cancel, results counting, auto-launch), saving it if anything was due. */

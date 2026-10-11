@@ -55,6 +55,10 @@ export function predictions(): { service: PredictionsService } | { error: string
   }
   let store;
   if (url && token) {
+    // The SDK's default retries stay on: it re-sends a request whose fetch threw. Reads and ticks
+    // are safe to repeat, an action's commit carries a one-time id (a re-send answers "replay"),
+    // and a re-sent heartbeat is refused as too soon. Turning retries off would only turn brief
+    // network blips into errors for actions that did save.
     store = redisStore(new Redis({ url, token, automaticDeserialization: false }));
   } else if (production) {
     return (cached = { error: "Predictions are not set up (no Redis)" });

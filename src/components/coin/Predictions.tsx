@@ -181,7 +181,8 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
     setError(null);
     setBusy(true);
     try {
-      setView(await postWithAuth<PredictionsView>(`/api/predictions/coin/${encodeURIComponent(mint)}`, body, authHeaders()));
+      const next = await postWithAuth<PredictionsView | { saved: true }>(`/api/predictions/coin/${encodeURIComponent(mint)}`, body, authHeaders());
+      if ("now" in next) setView(next); // else saved; the next poll shows it
       return true;
     } catch (e) {
       const message = (e as Error).message;
