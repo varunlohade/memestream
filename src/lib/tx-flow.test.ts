@@ -74,13 +74,14 @@ test("row 5: wallet error (or reload) -> tracking without a signature, still loc
 test("row 6: confirmed removes the entry with a 'went through' result", () => {
   const l = applyEvent(signed(), "a", status("confirmed"), T0);
   assert.equal(l.entries.length, 0);
-  assert.deepEqual(view(l, T0), { kind: "free", last: { id: "a", kind: "confirmed", text: MESSAGES.confirmed } });
+  assert.deepEqual(view(l, T0), { kind: "free", last: { id: "a", kind: "confirmed", text: MESSAGES.confirmed, signature: "sig" } });
 });
 
 test("row 7: failed removes the entry with the reason", () => {
   const l = applyEvent(signed(), "a", status("failed", "slippage"), T0);
   assert.equal(l.entries.length, 0);
   assert.equal(l.last?.text, MESSAGES.failed("slippage"));
+  assert.equal(l.last?.signature, "sig", "the banner can link the failed transaction");
 });
 
 test("row 8: pending keeps tracking and resets error counts", () => {

@@ -7,6 +7,7 @@
  */
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useWallet } from "@/components/wallet/WalletProvider";
+import { solscanTx } from "@/lib/explorer";
 import type { PreparedTx, TxAction, TxStatus } from "@/lib/api-types";
 import { fetchJson, postJson } from "@/lib/http";
 import {
@@ -228,7 +229,9 @@ export function TxProvider({ children }: { children: ReactNode }) {
 /** Under the top bar, derived only from the ledger: paused / check your wallet (with unlock) / last result. */
 export function TxBanner() {
   const { view, unlock, dismiss } = useTx();
+  const { chain } = useWallet();
   let text: string | null = null;
+  let signature: string | null = null;
   let error = false;
   let action: ReactNode = null;
   if (view.kind === "confirming") text = `Confirming "${view.label}". Trading is paused until we know, so you can't pay twice.`;
@@ -236,6 +239,7 @@ export function TxBanner() {
   if (view.kind === "check-wallet") {
     text = view.message;
     error = true;
+    signature = view.signature;
     action = (
       <button type="button" className="mbtn" style={{ height: 44, fontSize: 14 }} onClick={() => unlock(view.id)}>
         I checked, unlock
@@ -245,6 +249,7 @@ export function TxBanner() {
   if (view.kind === "free" && view.last && view.last.kind !== "rejected") {
     text = view.last.text;
     error = view.last.kind === "failed";
+    signature = view.last.signature ?? null;
     action = (
       <button type="button" className="mbtn" style={{ height: 44, fontSize: 14 }} onClick={dismiss} aria-label="Dismiss">
         OK
@@ -256,6 +261,11 @@ export function TxBanner() {
     <div className="tx-banner" role={error ? "alert" : "status"}>
       <div className={`notice${error ? " err" : ""}`} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ flex: 1 }}>{text}</span>
+        {signature && (
+          <a href={solscanTx(signature, chain)} target="_blank" rel="noopener noreferrer">
+            View on Solscan
+          </a>
+        )}
         {action}
       </div>
     </div>

@@ -69,7 +69,8 @@ export type Entry = {
   expiredAt: number | null;
 };
 
-export type LastResult = { id: string; kind: "confirmed" | "failed" | "rejected"; text: string };
+/** `signature` is the landed or failed transaction, for an explorer link (null if never signed). */
+export type LastResult = { id: string; kind: "confirmed" | "failed" | "rejected"; text: string; signature?: string | null };
 export type Ledger = { entries: Entry[]; last: LastResult | null };
 export const EMPTY_LEDGER: Ledger = { entries: [], last: null };
 
@@ -139,8 +140,8 @@ export function step(entry: Entry, event: FlowEvent, now: number): { next: Entry
     case "status": {
       if (!active) return { next: entry };
       const { answer } = event;
-      if (answer.status === "confirmed") return { next: null, result: { kind: "confirmed", text: MESSAGES.confirmed } }; // row 6
-      if (answer.status === "failed") return { next: null, result: { kind: "failed", text: MESSAGES.failed(answer.error) } }; // row 7
+      if (answer.status === "confirmed") return { next: null, result: { kind: "confirmed", text: MESSAGES.confirmed, signature: entry.signature } }; // row 6
+      if (answer.status === "failed") return { next: null, result: { kind: "failed", text: MESSAGES.failed(answer.error), signature: entry.signature } }; // row 7
       const ok = { ...entry, errors: 0, busySince: null };
       if (answer.status === "pending") return { next: ok }; // row 8
       const expiredAt = entry.expiredAt ?? now; // rows 9, 10
@@ -196,7 +197,7 @@ export type View =
   | { kind: "free"; last: LastResult | null }
   | { kind: "confirming"; label: string }
   | { kind: "other-tab" }
-  | { kind: "check-wallet"; id: string; label: string; message: string };
+  | { kind: "check-wallet"; id: string; label: string; message: string; signature: string | null };
 
 export function viewOf(ledger: Ledger, tab: string, now: number): View {
   const owner = lockOwner(ledger, tab, now);
@@ -207,5 +208,5 @@ export function viewOf(ledger: Ledger, tab: string, now: number): View {
   const tracking = mine.find((e) => e.phase !== "check-wallet");
   if (tracking) return { kind: "confirming", label: tracking.label };
   const waiting = mine[0];
-  return { kind: "check-wallet", id: waiting.id, label: waiting.label, message: waiting.message ?? MESSAGES.expired };
+  return { kind: "check-wallet", id: waiting.id, label: waiting.label, message: waiting.message ?? MESSAGES.expired, signature: waiting.signature };
 }

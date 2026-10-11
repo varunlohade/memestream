@@ -9,6 +9,7 @@ import { LiveBadge } from "@/components/ui/LiveBadge";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, formatSol, shortAddress, SIDE_LABEL, signedPercent } from "@/lib/format";
+import { solscanAccount, solscanTx } from "@/lib/explorer";
 import { parseStreamLink } from "@/lib/stream-link";
 import { Predictions } from "./Predictions";
 import { TradeBox } from "./TradeBox";
@@ -37,11 +38,10 @@ function StreamEmbed({ coin }: { coin: CoinView }) {
 function MeteoraNote({ coin }: { coin: CoinView }) {
   const { chain } = useWallet();
   if (!coin.meteoraPool) return null;
-  const cluster = chain === "solana:mainnet" ? "" : `?cluster=${chain.replace("solana:", "")}`;
   return (
     <p className="mute meteora-note">
       Graduated: trades in its Meteora pool.{" "}
-      <a href={`https://explorer.solana.com/address/${coin.meteoraPool}${cluster}`} target="_blank" rel="noopener noreferrer">
+      <a href={solscanAccount(coin.meteoraPool, chain)} target="_blank" rel="noopener noreferrer">
         View pool
       </a>
       {chain === "solana:mainnet" && (
@@ -57,6 +57,7 @@ function MeteoraNote({ coin }: { coin: CoinView }) {
 }
 
 function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) {
+  const { chain } = useWallet();
   if (trades.length === 0) return <p className="mute" style={{ fontSize: 24 }}>No trades yet.</p>;
   return (
     <ul className="trade-list">
@@ -71,7 +72,9 @@ function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) 
             {shortAddress(t.wallet)}
             {t.byStreamer && <b className="tag">streamer</b>}
           </span>
-          <span className="r mute">{ago(t.time)} ago</span>
+          <a className="r mute" href={solscanTx(t.signature, chain)} target="_blank" rel="noopener noreferrer" title="View on Solscan">
+            {ago(t.time)} ago ↗
+          </a>
         </li>
       ))}
     </ul>
