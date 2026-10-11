@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import bs58 from "bs58";
 import { MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
 import { FLAG_WINDOW_MS } from "@/lib/predictions/rules";
-import { newProfile } from "@/lib/predictions/watch";
+import { newProfile, utcDay } from "@/lib/predictions/watch";
 import { walletFromToken } from "./identity";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { type CoinFacts, ContentionError, ipBucket, predictionsService } from "./service";
@@ -119,11 +119,14 @@ for (const [name, make] of STORES) {
   });
 
   test(`${name}: IPv6: the 5-wallet cap counts a whole /64 as one IP`, async () => {
-    const { service, balance } = setup(make);
+    const { service, balance, store } = setup(make);
     const wallets = ["w1", "w2", "w3", "w4", "w5", "w6"];
     for (const [i, w] of wallets.entries()) assert.equal((await service.beat(w, COIN, `2001:db8:1:2::${i + 1}`)).accepted, true);
     assert.deepEqual(await Promise.all(wallets.map(balance)), [2, 2, 2, 2, 2, 0]);
     assert.equal((await service.beat("w7", COIN, "2001:db8:1:3::1")).points, 2, "another /64 is another IP");
+    const hash = createHmac("sha256", SECRET).update("ip:2001:db8:1:2::/64").digest("base64url").slice(0, 22);
+    const [doc] = await store.read([`ip:${hash}:${utcDay(T0)}`]);
+    assert.deepEqual(JSON.parse(doc.json!), wallets.slice(0, 5), "stored under the labelled (\"ip:\") keyed hash of the /64");
   });
 
   test(`${name}: the whole flow: holders suggest and upvote; the crowd launches only while the streamer is here`, async () => {

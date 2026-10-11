@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync, sign } from "node:crypto";
+import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import bs58 from "bs58";
 import { MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
@@ -56,6 +56,16 @@ test("session token: forged, edited or wrong-secret tokens are refused", () => {
   assert.equal(walletFromToken(`WalletA.${Number(expires) + 1}.${mac}`, NOW, SECRET), null, "longer expiry");
   assert.equal(walletFromToken(token, NOW, "another-secret-another-secret-xx"), null);
   for (const junk of ["", "a.b", "a.b.c.d", `${token}x`, null, undefined]) assert.equal(walletFromToken(junk, NOW, SECRET), null);
+});
+
+test("session token: the MAC is labelled, so another HMAC of the same text with the same secret is no token", () => {
+  const { token } = issueToken("WalletA", NOW, SECRET);
+  const payload = token.split(".").slice(0, 2).join(".");
+  for (const text of [payload, `ip:${payload}`]) {
+    const unlabelled = `${payload}.${createHmac("sha256", SECRET).update(text).digest("base64url")}`;
+    assert.equal(walletFromToken(unlabelled, NOW, SECRET), null, text);
+  }
+  assert.equal(token, `${payload}.${createHmac("sha256", SECRET).update(`session:${payload}`).digest("base64url")}`);
 });
 
 test("bearer: reads the token from the Authorization header only", () => {

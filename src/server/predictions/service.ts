@@ -126,7 +126,7 @@ export function predictionsService(deps: ServiceDeps) {
     if (coin.status === "graduating") return { accepted: false, points: 0 };
     const t = now();
     // The IP is never stored, only a keyed hash of it.
-    const ipKey = `ip:${createHmac("sha256", deps.secret).update(ipBucket(ip)).digest("base64url").slice(0, 22)}:${utcDay(t)}`;
+    const ipKey = `ip:${createHmac("sha256", deps.secret).update(`ip:${ipBucket(ip)}`).digest("base64url").slice(0, 22)}:${utcDay(t)}`;
     const streamer = wallet === coin.creator;
     for (let i = 0; i < attempts; i++) {
       const [watchDoc, ipDoc, presenceDoc] = await store.read([watchKey(wallet), ipKey, presenceKey(mint)]);

@@ -37,7 +37,8 @@ export function verifySessionMessage(message: string, signatureBase58: string, n
   return signed ? parsed : { ok: false, error: "Bad signature" };
 }
 
-const mac = (payload: string, secret: string) => createHmac("sha256", secret).update(payload).digest("base64url");
+/** The "session:" label keeps token MACs apart from the IP hashes made with the same secret ("ip:"). */
+const mac = (payload: string, secret: string) => createHmac("sha256", secret).update(`session:${payload}`).digest("base64url");
 
 /** "<wallet>.<expires ms>.<hmac>". */
 export function issueToken(wallet: string, now: number, secret: string): { token: string; expiresAt: number } {
