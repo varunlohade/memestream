@@ -429,7 +429,8 @@ function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
 
 function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void }) {
   const result = betOutcome(r.my, r.outcome);
-  const by = r.resolvedBy.role === "auto" ? "auto-cancelled" : `${r.resolvedBy.role} ${shortAddress(r.resolvedBy.wallet ?? "")}`;
+  const { role, wallet } = r.resolvedBy;
+  const by = role === "auto" ? "auto-cancelled" : wallet ? `${role} ${shortAddress(wallet)}` : role;
   const at = new Date(r.resolvedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
     <div className="pm-rr num">

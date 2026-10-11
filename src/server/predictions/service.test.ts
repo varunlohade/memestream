@@ -177,7 +177,7 @@ for (const [name, make] of STORES) {
     const after = (await Promise.all(viewers.map(balance))).reduce((a, b) => a + b, 0);
     assert.equal(after, 6 * 1_000, "the pool goes back out in full");
     assert.deepEqual([await balance("v1"), await balance("v3")], [1_000 + 200, 1_000 - 100]);
-    assert.deepEqual(done.resolved[0].resolvedBy, { role: "streamer", wallet: STREAMER });
+    assert.deepEqual(done.resolved[0].resolvedBy, { role: "streamer", wallet: STREAMER }, "staff see the wallet");
     assert.deepEqual([done.leaderboard.stream, await balance("asker")], [[], 100], "nothing counts during the flag window");
 
     clock.t += FLAG_WINDOW_MS;
@@ -316,6 +316,20 @@ for (const [name, make] of STORES) {
     await streamerHere();
     const fresh = (await service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }))!;
     assert.deepEqual([fresh.launched, fresh.resolved.length], [1, 5]);
+  });
+
+  test(`${name}: viewers see who resolved a prediction by role only; staff see the wallet`, async () => {
+    const { service, clock } = setup(make);
+    await service.act(COIN, STREAMER, { kind: "mod", wallet: "modwallet", add: true });
+    await service.act(COIN, "modwallet", { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    clock.t += MIN;
+    await service.act(COIN, "modwallet", { kind: "resolve", outcome: "cancel" });
+    for (const who of [null, "viewer"]) {
+      assert.deepEqual((await service.view(COIN, who)).resolved[0].resolvedBy, { role: "mod", wallet: null }, String(who));
+    }
+    for (const who of [STREAMER, "modwallet"]) {
+      assert.deepEqual((await service.view(COIN, who)).resolved[0].resolvedBy, { role: "mod", wallet: "modwallet" }, who);
+    }
   });
 
   test(`${name}: the GET view stays lean: top 20 suggestions, last 5 results, mods only for staff`, async () => {

@@ -44,6 +44,7 @@ export type PredictionsView = {
     text: string;
     outcome: Outcome;
     resolvedAt: number;
+    /** `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto"). */
     resolvedBy: { role: "streamer" | "mod" | "auto"; wallet: string | null };
     disputed: boolean;
     /** Flags are taken until then (ms); null once the result counts. */

@@ -157,8 +157,9 @@ function queueView(game: Game, wallet: string | null): PredictionsView["queue"] 
 
 type ResolvedView = PredictionsView["resolved"][number];
 
-const resolverOf = (game: Game, by: string | null): ResolvedView["resolvedBy"] =>
-  by === AUTO || by === null ? { role: "auto", wallet: null } : { role: by === game.creator ? "streamer" : "mod", wallet: by };
+/** Who resolved it. Only the streamer and mods see the wallet; everyone else sees the role. */
+const resolverOf = (game: Game, by: string | null, staff: boolean): ResolvedView["resolvedBy"] =>
+  by === AUTO || by === null ? { role: "auto", wallet: null } : { role: by === game.creator ? "streamer" : "mod", wallet: staff ? by : null };
 
 function myResult(p: Summary, wallet: string | null): ResolvedView["my"] {
   if (!wallet || !p.open || !Object.hasOwn(p.open.results, wallet)) return null;
@@ -166,13 +167,13 @@ function myResult(p: Summary, wallet: string | null): ResolvedView["my"] {
   return { bet, payout, flagged: flagged === 1, canFlag: true };
 }
 
-function resolvedView(game: Game, wallet: string | null): PredictionsView["resolved"] {
+function resolvedView(game: Game, wallet: string | null, staff: boolean): PredictionsView["resolved"] {
   return game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
     id: p.id,
     text: p.text,
     outcome: p.outcome,
     resolvedAt: p.resolvedAt,
-    resolvedBy: resolverOf(game, p.resolvedBy),
+    resolvedBy: resolverOf(game, p.resolvedBy, staff),
     disputed: p.disputed,
     flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,
     my: myResult(p, wallet),
@@ -360,7 +361,7 @@ export function predictionsService(deps: ServiceDeps) {
       live: liveView(game, wallet),
       queueSize: game.suggestions.length,
       queue: queueView(game, wallet),
-      resolved: resolvedView(game, wallet),
+      resolved: resolvedView(game, wallet, staff),
       mods: staff ? game.mods : [],
       leaderboard: {
         stream: topWinners(streamBoard),
