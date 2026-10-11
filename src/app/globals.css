@@ -252,3 +252,70 @@ button.unv { cursor: help; }
 /* The anti-sniper fee notice in the trade box during a coin's first minute. */
 .launch-fee { font-size: 22px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
 .chart-empty { font-size: 22px; margin: 0; display: flex; align-items: center; height: 100%; }
+
+/* Predictions (free points; only rendered when MEMESTREAM_PREDICTIONS=1). Spec: design/SPEC.md "## Predictions". */
+.pm { margin-top: 24px; }
+.pm-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.pm-head h2 { font-size: 22px; }
+.pm-head span { font-size: 22px; }
+.pm-small { font-size: 20px; }
+.pm-signin { display: grid; gap: 8px; margin-bottom: 14px; }
+.pm-signin .mbtn { height: 52px; font-size: 16px; }
+.pm-live { border: 4px solid #000; background: #1C1C1F; box-shadow: inset 4px 4px 0 #2A2A2D; padding: 16px 18px; margin-bottom: 6px; }
+.pm-livehead { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+.pm-livetag { background: #C62828; color: #fff; font-family: var(--hf); font-size: 14px; padding: 4px 8px; border: 3px solid #000; }
+.pm-clock { font-size: 28px; color: #fff; }
+.pm-q { font-size: 24px; color: #fff; line-height: 1.1; overflow-wrap: anywhere; }
+.pm-q.pm-big { font-size: 30px; margin-bottom: 12px; }
+.pm-pools { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.pm-pool { position: relative; height: 60px; display: flex; align-items: center; justify-content: space-between; padding: 0 14px; font-size: 24px; color: #fff; overflow: hidden; border: 0; text-align: left; }
+button.pm-pool:disabled { cursor: wait; }
+.pm-pool b { position: absolute; left: 4px; top: 4px; bottom: 4px; opacity: .35; }
+.pm-pool .pm-fy { background: #5CFF6A; }
+.pm-pool .pm-fn { background: #FF5A4E; }
+.pm-pool span { position: relative; }
+.pm-bet { display: grid; grid-template-columns: 72px 1fr auto; gap: 14px; align-items: center; margin-top: 10px; font-size: 22px; }
+.pm-amt { height: 52px; width: 72px; border: 0; text-align: center; font-size: 24px; color: #fff; }
+.pm-bet .r { text-align: right; }
+.pm-res3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 10px; }
+.pm-res3 .mbtn { height: 48px; font-size: 16px; }
+.mbtn.pm-no { background: #B3261E; }
+.mbtn.pm-no:disabled { background: #3A3A3A; }
+.pm-subh { font-size: 24px; margin: 18px 0 4px; }
+.pm-window { display: flex; align-items: center; gap: 6px; font-size: 22px; margin: 6px 0; }
+.pm-chip { width: 52px; height: 52px; border: 0; font-size: 22px; color: #ccc; }
+.pm-chip.on { color: var(--xp); }
+.pm-window { flex-wrap: wrap; }
+.pm-crowd { height: 52px; padding: 0 12px; border: 0; font-size: 20px; color: #ccc; margin-left: auto; }
+.pm-crowd.on { color: var(--xp); }
+.pm-row { display: grid; grid-template-columns: 1fr 120px 210px; gap: 14px; align-items: center; font-size: 22px; padding: 14px 0; border-top: 4px solid rgba(255,255,255,.07); }
+.mbtn.pm-uv { height: 44px; font-size: 14px; background: #3E3E44; }
+.pm-qb { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.pm-qb .mbtn { height: 44px; font-size: 13px; padding: 0 8px; }
+.pm-ask { display: grid; grid-template-columns: 1fr 200px; gap: 10px; margin: 6px 0; }
+.pm-in { height: 52px; padding: 0 14px; border: 0; font-size: 24px; color: #fff; outline: none; min-width: 0; }
+.pm-in::placeholder { color: #8E8E93; }
+.pm-ask .mbtn { height: 52px; font-size: 14px; padding: 0 8px; }
+.pm-rr { display: grid; grid-template-columns: 1fr auto 100px 140px 60px; gap: 10px; align-items: center; font-size: 23px; padding: 6px 0; }
+.pm-by { font-size: 18px; }
+.pm-otag { font-size: 20px; padding: 2px 8px; border: 3px solid #000; line-height: 1; }
+.pm-oy { background: #80FF20; color: #000; }
+.pm-ono { background: #B3261E; color: #fff; }
+.pm-oc { background: #3E3E44; color: #D8D8DC; }
+.pm-dsp { font-size: 18px; color: #FF5A4E; }
+.pm-closedtag { font-size: 16px; padding: 4px 8px; }
+.pm-flag { font-size: 20px; color: var(--mute); text-decoration: underline; text-align: right; background: none; border: 0; padding: 0; }
+span.pm-flag { text-decoration: none; }
+.pm-free { font-size: 22px; color: var(--mute); text-align: center; margin-top: 14px; }
+.pm-lb { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 22px; margin-top: 16px; padding-top: 12px; border-top: 4px solid rgba(255,255,255,.07); }
+.pm-lb > span { display: inline-flex; align-items: center; gap: 12px; }
+.pm-lbtoggle { background: none; border: 0; padding: 0; font-size: 22px; }
+.pm-sep { display: inline-block; width: 6px; height: 6px; background: #5A5A62; flex: none; }
+@media (max-width: 640px) {
+  .pm-row { grid-template-columns: 1fr auto; }
+  .pm-row > :last-child { grid-column: 1 / -1; }
+  .pm-rr { grid-template-columns: 1fr auto; }
+  .pm-ask { grid-template-columns: 1fr; }
+  .pm-bet { grid-template-columns: 72px 1fr; }
+  .pm-bet .r { grid-column: 1 / -1; text-align: left; }
+}

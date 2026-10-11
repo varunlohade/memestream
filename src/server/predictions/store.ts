@@ -1,0 +1,210 @@
+/**
+ * Storage for free-points predictions: Upstash Redis in production (shared by every server
+ * instance), or in-memory maps for local development only.
+ *
+ * Two kinds of data:
+ * - Documents (a coin's game, a wallet's watch record): JSON with a version number.
+ * - The ledger: every wallet's points balance, plus all-time net winnings for the leaderboard.
+ *
+ * All writes go through one atomic commit: refuse a nonce already used ("replay"), check every
+ * document's version (someone else changed it: "conflict", the caller re-reads and retries), check
+ * every balance floor, then use up the nonce, move the points and save the documents. The nonce is
+ * checked first, so a commit re-sent after it already landed answers "replay", not "conflict"; it
+ * is used up last, so a refused commit can try again with the same nonce. In Redis that is one Lua script; in memory it is
+ * synchronous code with no await between the checks and the writes. store.test.ts runs both.
+ *
+ * Points only ever move by commits the game engine computes. There is deliberately no way to buy,
+ * sell or send points between wallets.
+ */
+import type { Redis } from "@upstash/redis";
+import { byPoints } from "@/lib/predictions/rules";
+
+export type Doc = { v: number; json: string | null };
+export type Move = { wallet: string; delta: number; floor: number };
+export type Commit = {
+  /** Documents to save, each with the version it was read at; `ttlMs` makes it expire (then it reads as new). */
+  docs: { key: string; v: number; json: string; ttlMs?: number }[];
+  /** A one-time key (signed-message nonce, or a request's idempotency id): refused as "replay" if a commit with it succeeded within ttlMs. */
+  nonce?: { key: string; ttlMs: number };
+  /** Balance changes; each needs the balance to be at least `floor` before, and never below 0 after. */
+  moves: Move[];
+  /** All-time net winnings changes (leaderboard). */
+  won: { wallet: string; delta: number }[];
+};
+export type CommitResult = "ok" | "conflict" | "replay" | "insufficient";
+export type Leader = { wallet: string; points: number };
+
+export interface PredictionStore {
+  readonly kind: "redis" | "memory";
+  read(keys: string[]): Promise<Doc[]>;
+  commit(commit: Commit): Promise<CommitResult>;
+  balances(wallets: string[]): Promise<number[]>;
+  /** Wallets by all-time net winnings, highest first. */
+  topWon(limit: number): Promise<Leader[]>;
+}
+
+// ---------------------------------------------------------------------------------------------
+// In-memory store: DEV ONLY. One process, lost on restart, not shared between server instances.
+// ---------------------------------------------------------------------------------------------
+
+export function memoryStore(now: () => number = Date.now): PredictionStore {
+  const docs = new Map<string, { v: number; json: string; until: number }>();
+  /** A document, unless it has expired. */
+  const live = (key: string) => {
+    const doc = docs.get(key);
+    if (doc && doc.until <= now()) docs.delete(key);
+    return docs.get(key);
+  };
+  const balances = new Map<string, number>();
+  const won = new Map<string, number>();
+  const nonces = new Map<string, number>(); // key -> expires at
+
+  return {
+    kind: "memory",
+    async read(keys) {
+      return keys.map((key) => {
+        const doc = live(key);
+        return doc ? { v: doc.v, json: doc.json } : { v: 0, json: null };
+      });
+    },
+    // Synchronous body: nothing else runs between the checks and the writes.
+    async commit(c) {
+      if (c.nonce) {
+        const t = now();
+        for (const [key, until] of nonces) if (until <= t) nonces.delete(key);
+        if (nonces.has(c.nonce.key)) return "replay";
+      }
+      for (const d of c.docs) if ((live(d.key)?.v ?? 0) !== d.v) return "conflict";
+      for (const m of c.moves) {
+        const balance = balances.get(m.wallet) ?? 0;
+        if (balance < m.floor || balance + m.delta < 0) return "insufficient";
+      }
+      if (c.nonce) nonces.set(c.nonce.key, now() + c.nonce.ttlMs);
+      for (const m of c.moves) balances.set(m.wallet, (balances.get(m.wallet) ?? 0) + m.delta);
+      for (const w of c.won) won.set(w.wallet, (won.get(w.wallet) ?? 0) + w.delta);
+      for (const d of c.docs) docs.set(d.key, { v: d.v + 1, json: d.json, until: d.ttlMs ? now() + d.ttlMs : Infinity });
+      return "ok";
+    },
+    async balances(wallets) {
+      return wallets.map((w) => balances.get(w) ?? 0);
+    },
+    async topWon(limit) {
+      return [...won]
+        .map(([wallet, points]) => ({ wallet, points }))
+        .sort(byPoints)
+        .slice(0, limit);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Redis store: the same steps as Lua scripts, which Redis runs atomically.
+// ---------------------------------------------------------------------------------------------
+
+const PREFIX = "memestream:pm:";
+const BALANCES = `${PREFIX}balance`;
+const WON = `${PREFIX}won`;
+
+/**
+ * KEYS: balances, won, the documents..., then the nonce key if any.
+ * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0) per document, moveCount, (wallet, delta, floor)
+ * per move, then (wallet, delta) per winnings change.
+ */
+export const COMMIT_LUA = `
+local docCount = tonumber(ARGV[1])
+local nonceKey = KEYS[3 + docCount]
+if ARGV[2] == '1' and redis.call('EXISTS', nonceKey) == 1 then return 'replay' end
+local i = 4
+for d = 1, docCount do
+  local current = redis.call('HGET', KEYS[2 + d], 'v') or '0'
+  if current ~= ARGV[i] then return 'conflict' end
+  i = i + 3
+end
+local moveCount = tonumber(ARGV[i])
+i = i + 1
+local firstMove = i
+for m = 1, moveCount do
+  local balance = tonumber(redis.call('HGET', KEYS[1], ARGV[i]) or '0')
+  local delta, floor = tonumber(ARGV[i + 1]), tonumber(ARGV[i + 2])
+  if balance < floor or balance + delta < 0 then return 'insufficient' end
+  i = i + 3
+end
+if ARGV[2] == '1' then redis.call('SET', nonceKey, '1', 'PX', ARGV[3]) end
+i = firstMove
+for m = 1, moveCount do
+  redis.call('HINCRBY', KEYS[1], ARGV[i], ARGV[i + 1])
+  i = i + 3
+end
+while i <= #ARGV do
+  redis.call('ZINCRBY', KEYS[2], ARGV[i + 1], ARGV[i])
+  i = i + 2
+end
+i = 4
+for d = 1, docCount do
+  redis.call('HSET', KEYS[2 + d], 'v', tostring(tonumber(ARGV[i]) + 1), 'json', ARGV[i + 1])
+  if tonumber(ARGV[i + 2]) > 0 then redis.call('PEXPIRE', KEYS[2 + d], ARGV[i + 2]) end
+  i = i + 3
+end
+return 'ok'
+`;
+
+/** KEYS: documents. Returns { {v, json}... } (false where missing). */
+export const READ_LUA = `
+local out = {}
+for k = 1, #KEYS do out[k] = redis.call('HMGET', KEYS[k], 'v', 'json') end
+return out
+`;
+
+/** KEYS: balances. ARGV: wallets. */
+export const BALANCES_LUA = `
+local out = {}
+for k = 1, #ARGV do out[k] = redis.call('HGET', KEYS[1], ARGV[k]) or '0' end
+return out
+`;
+
+/** KEYS: won. ARGV: limit. */
+export const TOP_LUA = `return redis.call('ZREVRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES')`;
+
+const present = (value: unknown) => value !== null && value !== undefined && value !== false;
+
+/** `redis` should be created with automaticDeserialization: false, so JSON stays text until parsed here. */
+export function redisStore(redis: Redis): PredictionStore {
+  const run = <T>(script: string, keys: string[], args: (string | number)[]) => redis.eval<string[], T>(script, keys, args.map(String));
+  return {
+    kind: "redis",
+    async read(keys) {
+      if (keys.length === 0) return [];
+      const rows = await run<[unknown, unknown][]>(READ_LUA, keys.map((k) => PREFIX + k), []);
+      return keys.map((_, i) => {
+        const [v, json] = rows?.[i] ?? [];
+        return present(json) ? { v: Number(v), json: String(json) } : { v: 0, json: null };
+      });
+    },
+    async commit(c) {
+      const keys = [BALANCES, WON, ...c.docs.map((d) => PREFIX + d.key), ...(c.nonce ? [PREFIX + c.nonce.key] : [])];
+      const args = [
+        c.docs.length,
+        c.nonce ? 1 : 0,
+        c.nonce?.ttlMs ?? 0,
+        ...c.docs.flatMap((d) => [d.v, d.json, d.ttlMs ?? 0]),
+        c.moves.length,
+        ...c.moves.flatMap((m) => [m.wallet, m.delta, m.floor]),
+        ...c.won.flatMap((w) => [w.wallet, w.delta]),
+      ];
+      const result = await run<string>(COMMIT_LUA, keys, args);
+      if (result === "ok" || result === "conflict" || result === "replay" || result === "insufficient") return result;
+      throw new Error(`unexpected commit result: ${String(result)}`);
+    },
+    async balances(wallets) {
+      if (wallets.length === 0) return [];
+      const values = await run<unknown[]>(BALANCES_LUA, [BALANCES], wallets);
+      return wallets.map((_, i) => Number(values?.[i] ?? 0));
+    },
+    async topWon(limit) {
+      const flat = (await run<unknown[]>(TOP_LUA, [WON], [limit])) ?? [];
+      const leaders: Leader[] = [];
+      for (let i = 0; i + 1 < flat.length; i += 2) leaders.push({ wallet: String(flat[i]), points: Number(flat[i + 1]) });
+      return leaders;
+    },
+  };
+}

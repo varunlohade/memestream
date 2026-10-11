@@ -10,6 +10,7 @@ import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, formatSol, shortAddress, SIDE_LABEL, signedPercent } from "@/lib/format";
 import { parseStreamLink } from "@/lib/stream-link";
+import { Predictions } from "./Predictions";
 import { TradeBox } from "./TradeBox";
 
 function StreamEmbed({ coin }: { coin: CoinView }) {
@@ -148,8 +149,11 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
   );
 }
 
-/** `initial` is rendered by the server; polling keeps it fresh and adds the wallet's holdings. */
-export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDetail }) {
+/**
+ * `initial` is rendered by the server; polling keeps it fresh and adds the wallet's holdings.
+ * `predictions`: the server's MEMESTREAM_PREDICTIONS flag (free-points panel); off by default.
+ */
+export function CoinPageView({ mint, initial, predictions = false }: { mint: string; initial: CoinDetail; predictions?: boolean }) {
   const { address } = useWallet();
   const { data, refresh } = useCoin(mint, address, initial);
   const detail = data ?? initial;
@@ -182,6 +186,7 @@ export function CoinPageView({ mint, initial }: { mint: string; initial: CoinDet
             <TradeList trades={trades} symbol={coin.symbol} />
           </div>
         </div>
+        {predictions && <Predictions mint={coin.mint} symbol={coin.symbol} />}
       </div>
       <div className="side">
         <section className="p" aria-label="Price and graduation">
