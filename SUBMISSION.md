@@ -53,7 +53,7 @@ continues on memestream and the streamer's locked LP position earns the pool's f
   then DAMM v2 swaps and LP position-fee claims after graduation.
 - OBS overlay and short links so the graduation happens live on stream.
 
-**Traction:** _[streams run, coins, trades, SOL volume, graduations, streamer earnings]_
+**Traction:** devnet, as of 11 Oct 2026, 13:27 IST: 7 coins launched on our config, 28 trades, 1.04 SOL volume, 5 graduations to DAMM v2, at least 0.0039 SOL in creator fees claimed. All from our own team testing so far.
 
 **Links:** app https://memestream-iota.vercel.app · video _[link]_ · repo _[link]_
 

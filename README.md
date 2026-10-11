@@ -64,6 +64,8 @@ the streamer) is proven on Meteora's real programs in `test/integration/mainnet-
 - **Security:** three audits (Solana auditor skill checklists) plus money-flow audits; no open
   critical, high or medium findings. Rate limits shared across servers (Upstash Redis) plus a firewall.
 
+**Numbers** (devnet, as of 11 Oct 2026, 13:27 IST): 7 coins launched on our config, 28 trades, 1.04 SOL volume, 5 graduations to DAMM v2, at least 0.0039 SOL in creator fees claimed. All from our own team testing so far.
+
 _[Mainnet numbers: coins launched, trades, SOL volume, graduations, streamer earnings]_
 
 ## Run it locally
