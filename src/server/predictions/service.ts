@@ -34,7 +34,7 @@ export type ServiceDeps = {
   domain: string;
   /** The coin's streamer and status, or null if it isn't a memestream coin (cached, budgeted read). */
   coin: (mint: string) => Promise<CoinFacts | null>;
-  /** Whether `wallet` holds more than 0 of the coin (cached, budgeted read). */
+  /** Whether `wallet` holds at least 1 whole coin (cached, budgeted read). */
   holds: (mint: string, wallet: string) => Promise<boolean>;
   /** Commit attempts before answering "busy", and the pause between them. */
   attempts?: number;

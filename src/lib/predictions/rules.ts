@@ -71,6 +71,10 @@ export const MAX_UPVOTES = 100;
 export const MAX_HISTORY = 20;
 /** Per-stream leaderboard entries kept. */
 export const MAX_WON_ENTRIES = 100;
+/** A wallet holds the coin, for suggesting and upvoting, with at least this many whole coins (UI units, after the mint's decimals). */
+export const MIN_HOLDING_COINS = 1;
+/** `coins` is a balance in UI units, e.g. "0.000001" or "1.5". */
+export const holdsEnough = (coins: string | null | undefined) => Number(coins ?? 0) >= MIN_HOLDING_COINS;
 /** Distinct wallets that may earn watch points from one IP per UTC day. */
 export const MAX_EARNING_WALLETS_PER_IP = 5;
 

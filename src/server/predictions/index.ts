@@ -6,6 +6,7 @@
 import "server-only";
 import { randomBytes } from "node:crypto";
 import { Redis } from "@upstash/redis";
+import { holdsEnough } from "@/lib/predictions/rules";
 import { getCoinDetail } from "@/server/coins";
 import { predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
@@ -16,13 +17,13 @@ export { predictionsEnabled } from "./flag";
 const HOLDS_CACHE_MS = 60_000;
 const holdsCache = new Map<string, { at: number; holds: boolean }>();
 
-/** Whether `wallet` holds more than 0 of the coin: the budgeted holdings read, cached for a minute. */
+/** Whether `wallet` holds at least 1 whole coin: the budgeted holdings read, cached for a minute. */
 async function holds(mint: string, wallet: string): Promise<boolean> {
   const key = `${mint}|${wallet}`;
   const hit = holdsCache.get(key);
   if (hit && Date.now() - hit.at < HOLDS_CACHE_MS) return hit.holds;
   const detail = await getCoinDetail(mint, wallet); // throws BusyError when the RPC budget says no
-  const answer = Number(detail?.holdings?.coins ?? 0) > 0;
+  const answer = holdsEnough(detail?.holdings?.coins);
   holdsCache.set(key, { at: Date.now(), holds: answer });
   if (holdsCache.size > 5_000) for (const [k, v] of holdsCache) if (Date.now() - v.at >= HOLDS_CACHE_MS) holdsCache.delete(k);
   return answer;

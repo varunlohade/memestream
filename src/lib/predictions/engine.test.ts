@@ -56,7 +56,7 @@ function withSuggestion(up: number, extra: Record<string, number> = {}) {
 
 test("suggest: holders only; costs 10 points, one open suggestion per wallet per coin", () => {
   const w = world({ a: 100, c: 100, poor: 9, outsider: 100 }, [], ["outsider"]);
-  refused(() => w.run({ kind: "suggest", text: "Will I eat a banana?" }, "outsider", T0), /Hold this coin/);
+  refused(() => w.run({ kind: "suggest", text: "Will I eat a banana?" }, "outsider", T0), /Hold at least 1 of this coin/);
   w.run({ kind: "suggest", text: "Will I eat a banana?" }, "a", T0);
   assert.equal(w.bal.get("a"), 90);
   refused(() => w.run({ kind: "suggest", text: "Will I eat two bananas?" }, "a", T0 + 1), /already have a suggestion/);
@@ -93,7 +93,7 @@ test("suggest: the 10 points come back when it goes live; expiry after 20 minute
 test("upvote: free; holders with 15 minutes watched only; once each, never your own", () => {
   const w = world({ a: 100 }, ["a", "b", "outsider"], ["outsider"]);
   w.run({ kind: "suggest", text: "Will I eat a banana?" }, "a", T0);
-  refused(() => w.run({ kind: "upvote", id: "1" }, "outsider", T0), /Hold this coin/);
+  refused(() => w.run({ kind: "upvote", id: "1" }, "outsider", T0), /Hold at least 1 of this coin/);
   refused(() => w.run({ kind: "upvote", id: "1" }, "newcomer", T0), /Watch 15 minutes/);
   refused(() => w.run({ kind: "upvote", id: "1" }, "a", T0), /your own/);
   w.run({ kind: "upvote", id: "1" }, "b", T0);

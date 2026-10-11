@@ -114,7 +114,7 @@ for (const [name, make] of STORES) {
     await fund("outsider", 100, 40);
     nonHolders.add("outsider");
 
-    await assert.rejects(service.act(COIN, "outsider", { kind: "suggest", text: "Will the streamer eat a banana?" }), /Hold this coin/);
+    await assert.rejects(service.act(COIN, "outsider", { kind: "suggest", text: "Will the streamer eat a banana?" }), /Hold at least 1 of this coin/);
     assert.deepEqual(
       [(await service.view(COIN, "outsider")).me?.holder, (await service.view(COIN, "v1")).me?.holder, (await service.view(COIN, STREAMER)).me?.holder],
       [false, true, null],
@@ -122,7 +122,7 @@ for (const [name, make] of STORES) {
     );
     await service.act(COIN, "asker", { kind: "suggest", text: "Will the streamer eat a banana?" });
     assert.equal(await balance("asker"), 90);
-    await assert.rejects(service.act(COIN, "outsider", { kind: "upvote", id: "1" }), /Hold this coin/);
+    await assert.rejects(service.act(COIN, "outsider", { kind: "upvote", id: "1" }), /Hold at least 1 of this coin/);
     for (const v of viewers.slice(0, 3)) await service.act(COIN, v, { kind: "upvote", id: "1" });
     let view = await service.view(COIN, null);
     assert.deepEqual([view.live, view.streamerHere, view.queue[0].upvotes], [null, false, 3], "streamer away: it waits");

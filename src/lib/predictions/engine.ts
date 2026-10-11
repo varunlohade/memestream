@@ -33,6 +33,7 @@ import {
   MAX_UPVOTES,
   MAX_WON_ENTRIES,
   MIN_BET,
+  MIN_HOLDING_COINS,
   type Outcome,
   payouts,
   type Side,
@@ -303,7 +304,7 @@ function act(ctx: Ctx, action: Exclude<Action, { kind: "tick" }>, actor: Actor) 
   switch (action.kind) {
     case "suggest": {
       viewerOnly("suggest");
-      if (!actor.holder) throw new GameError("Hold this coin to suggest");
+      if (!actor.holder) throw new GameError(`Hold at least ${MIN_HOLDING_COINS} of this coin to suggest`);
       if (game.launched >= MAX_PREDICTIONS_PER_STREAM) throw new GameError("This stream has had its 20 predictions");
       if (game.suggestions.some((s) => s.asker === actor.wallet)) throw new GameError("You already have a suggestion waiting");
       if (game.suggestions.length >= MAX_QUEUE) throw new GameError("The queue is full. Try again soon.");
@@ -316,7 +317,7 @@ function act(ctx: Ctx, action: Exclude<Action, { kind: "tick" }>, actor: Actor) 
     }
     case "upvote": {
       viewerOnly("upvote");
-      if (!actor.holder) throw new GameError("Hold this coin to upvote");
+      if (!actor.holder) throw new GameError(`Hold at least ${MIN_HOLDING_COINS} of this coin to upvote`);
       if (!actor.eligible) throw new GameError("Watch 15 minutes to upvote");
       const s = suggestion(action.id);
       if (s.asker === actor.wallet) throw new GameError("You can't upvote your own suggestion");

@@ -370,7 +370,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           </button>
         </form>
       )}
-      {viewer && notHolder && <p className="mute pm-small">Hold ${symbol} to suggest and upvote.</p>}
+      {viewer && notHolder && <p className="mute pm-small">Hold at least 1 ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
       {view.resolved.slice(0, 5).map((r) => {

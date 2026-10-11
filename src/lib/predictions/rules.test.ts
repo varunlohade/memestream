@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Bet, cleanQuestion, multiplier, type Outcome, payouts } from "./rules";
+import { type Bet, cleanQuestion, holdsEnough, multiplier, type Outcome, payouts } from "./rules";
 
 const total = (m: Map<string, number>) => [...m.values()].reduce((a, b) => a + b, 0);
 const staked = (bets: Bet[]) => bets.reduce((a, b) => a + b.amount, 0);
@@ -84,4 +84,9 @@ test("questions: trimmed, whitespace collapsed, 5 to 80 characters, plain text, 
   for (const bad of ["Go to https://scam.example now?", "Visit www.free.io today", "Is pump.fun down?", "Will <b>this</b> work?", "nul\u0000byte here"]) {
     assert.equal(cleanQuestion(bad).ok, false, bad);
   }
+});
+
+test("holding: at least 1 whole coin, not 1 base unit", () => {
+  for (const coins of ["0", "0.000001", "0.999999", null, undefined, "junk"]) assert.equal(holdsEnough(coins), false, String(coins));
+  for (const coins of ["1", "1.000000", "1.5", "250000"]) assert.equal(holdsEnough(coins), true, coins);
 });
