@@ -1,6 +1,8 @@
 /**
- * The one message a wallet signs to start a predictions session (Wallet Standard signMessage),
- * in Sign-In-With-Solana style: it names the site's domain, which the server checks against its
+ * The one message a wallet signs to start a predictions session, in Sign-In-With-Solana form.
+ * Wallets with the Wallet Standard signIn feature build it themselves from `signInInput` (and
+ * check the domain against the page they run on); others sign this same text with signMessage.
+ * It names the site's domain, which the server checks against its
  * own, so a signature made for another site can't sign in here. A one-time nonce and a short
  * expiry stop replays. After that, the server's session token identifies the wallet, so
  * heartbeats and bets need no more popups.
@@ -25,6 +27,14 @@ export function sessionMessage(r: SessionRequest): string {
     `Nonce: ${r.nonce}`,
     `Expiration Time: ${new Date(r.expiresAt).toISOString()}`,
   ].join("\n");
+}
+
+/**
+ * The Wallet Standard `solana:signIn` input whose message is exactly `sessionMessage(r)`: the
+ * standard text has only the fields given, in this order, so the server parses it as before.
+ */
+export function signInInput(r: SessionRequest) {
+  return { domain: r.domain, address: r.wallet, statement: STATEMENT, nonce: r.nonce, expirationTime: new Date(r.expiresAt).toISOString() };
 }
 
 /** A fresh random nonce (32 hex characters). */

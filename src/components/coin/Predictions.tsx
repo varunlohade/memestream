@@ -11,7 +11,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { shortAddress } from "@/lib/format";
 import { fetchJson, postJson } from "@/lib/http";
-import { newNonce, MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
+import { newNonce, MESSAGE_TTL_MS, sessionMessage, signInInput } from "@/lib/predictions/message";
 import {
   AUTO_LAUNCH_UPVOTES,
   BET_WINDOWS_MIN,
@@ -113,7 +113,7 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
 }
 
 export function Predictions({ mint, symbol }: { mint: string; symbol: string }) {
-  const { address, signMessage } = useWallet();
+  const { address, signIn: walletSignIn } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -162,12 +162,14 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   }, [session, authHeaders, mint]);
 
   const signIn = async () => {
-    if (!address || !signMessage) return;
+    if (!address || !walletSignIn) return;
     setError(null);
     setBusy(true);
     try {
-      const message = sessionMessage({ domain: window.location.host, wallet: address, nonce: newNonce(), expiresAt: Date.now() + MESSAGE_TTL_MS });
-      const signature = await signMessage(new TextEncoder().encode(message));
+      const request = { domain: window.location.host, wallet: address, nonce: newNonce(), expiresAt: Date.now() + MESSAGE_TTL_MS };
+      const { signedMessage, signature } = await walletSignIn(signInInput(request), new TextEncoder().encode(sessionMessage(request)));
+      // The server checks the exact text the wallet signed (domain, nonce, expiry, signature).
+      const message = new TextDecoder().decode(signedMessage);
       const next = await postJson<Session>("/api/predictions/session", { message, signature: bs58.encode(signature) });
       setSession(next);
     } catch (e) {
@@ -238,7 +240,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
 
       {address && !session && (
         <div className="pm-signin">
-          {signMessage ? (
+          {walletSignIn ? (
             <button type="button" className="mbtn buy" onClick={signIn} disabled={busy}>
               {busy ? "Check your wallet" : "Sign in to play"}
             </button>

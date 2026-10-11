@@ -7,6 +7,9 @@
 import {
   SolanaSignAndSendTransaction,
   type SolanaSignAndSendTransactionFeature,
+  SolanaSignIn,
+  type SolanaSignInFeature,
+  type SolanaSignInInput,
   SolanaSignMessage,
   type SolanaSignMessageFeature,
 } from "@solana/wallet-standard-features";
@@ -38,10 +41,13 @@ type WalletState = {
   /** The app's cluster as a Wallet Standard id, e.g. "solana:devnet" (read-only; for links). */
   chain: IdentifierString;
   /**
-   * Signs a plain text message, never a transaction (used only to sign in to free-points
-   * predictions). Resolves to the 64-byte signature. Null if the connected wallet can't sign messages.
+   * Signs a Sign-In-With-Solana message, never a transaction (used only to sign in to free-points
+   * predictions). Uses the wallet's own sign-in (`solana:signIn`) when it has one, so the wallet
+   * builds the text and checks the domain against this page; otherwise signs `message` (the same
+   * text) with `solana:signMessage`. Resolves to the exact bytes signed and the 64-byte signature.
+   * Null if the connected wallet can do neither.
    */
-  signMessage: ((message: Uint8Array) => Promise<Uint8Array>) | null;
+  signIn: ((input: SolanaSignInInput, message: Uint8Array) => Promise<{ signedMessage: Uint8Array; signature: Uint8Array }>) | null;
 };
 
 const DEV_WALLET_NAME = "Test wallet (localhost)";
@@ -198,20 +204,30 @@ export function WalletProvider({ chain, children }: { chain: IdentifierString; c
     [active, chain],
   );
 
-  const signMessage = useMemo(() => {
+  const signIn = useMemo(() => {
     if (active?.kind !== "standard") return null;
-    const feature = (active.wallet.features as Partial<SolanaSignMessageFeature>)[SolanaSignMessage];
-    if (!feature) return null;
-    return async (message: Uint8Array) => {
-      const [output] = await feature.signMessage({ account: active.account, message });
-      return output.signature;
+    const features = active.wallet.features as Partial<SolanaSignInFeature & SolanaSignMessageFeature>;
+    const signInFeature = features[SolanaSignIn];
+    const signMessageFeature = features[SolanaSignMessage];
+    if (signInFeature) {
+      return async (input: SolanaSignInInput) => {
+        const [output] = await signInFeature.signIn(input);
+        if (output.account.address !== active.account.address) throw new Error("Sign in with the connected account");
+        if (output.signedMessageFormat) throw new Error("This wallet signed in a format we can't check");
+        return { signedMessage: output.signedMessage, signature: output.signature };
+      };
+    }
+    if (!signMessageFeature) return null;
+    return async (_input: SolanaSignInInput, message: Uint8Array) => {
+      const [output] = await signMessageFeature.signMessage({ account: active.account, message });
+      return { signedMessage: message, signature: output.signature };
     };
   }, [active]);
 
   const address = active ? (active.kind === "dev" ? active.address : active.account.address) : null;
   const value = useMemo(
-    () => ({ address, options, disconnect, signAndSend, chain, signMessage }),
-    [address, options, disconnect, signAndSend, chain, signMessage],
+    () => ({ address, options, disconnect, signAndSend, chain, signIn }),
+    [address, options, disconnect, signAndSend, chain, signIn],
   );
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
 }

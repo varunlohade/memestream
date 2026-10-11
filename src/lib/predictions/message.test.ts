@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { MESSAGE_TTL_MS, newNonce, parseSessionMessage, type SessionRequest, sessionMessage } from "./message";
+import { MESSAGE_TTL_MS, newNonce, parseSessionMessage, type SessionRequest, sessionMessage, signInInput } from "./message";
 
 const NOW = Date.parse("2026-10-09T12:00:00.000Z");
 const DOMAIN = "memestream.lol";
@@ -67,4 +67,30 @@ test("nonces are 32 hex characters and differ", () => {
   const a = newNonce();
   assert.match(a, /^[0-9a-f]{32}$/);
   assert.notEqual(a, newNonce());
+});
+
+/**
+ * The message text a Wallet Standard `solana:signIn` wallet builds from its input: the reference
+ * algorithm (createSignInMessageText in @solana/wallet-standard-util), for the fields we send.
+ */
+function standardSignInText(input: { domain: string; address: string; statement?: string; nonce?: string; issuedAt?: string; expirationTime?: string }) {
+  let message = `${input.domain} wants you to sign in with your Solana account:\n${input.address}`;
+  if (input.statement) message += `\n\n${input.statement}`;
+  const fields: string[] = [];
+  if (input.nonce) fields.push(`Nonce: ${input.nonce}`);
+  if (input.issuedAt) fields.push(`Issued At: ${input.issuedAt}`);
+  if (input.expirationTime) fields.push(`Expiration Time: ${input.expirationTime}`);
+  if (fields.length) message += `\n\n${fields.join("\n")}`;
+  return message;
+}
+
+test("a signIn wallet given signInInput signs exactly the message the server parses", () => {
+  const text = standardSignInText(signInInput(request));
+  assert.equal(text, sessionMessage(request));
+  assert.deepEqual(parseSessionMessage(text, NOW, DOMAIN), { ok: true, request });
+});
+
+test("a signIn message with fields we didn't ask for is refused, not half-parsed", () => {
+  const text = standardSignInText({ ...signInInput(request), issuedAt: new Date(NOW).toISOString() });
+  assert.equal(parseSessionMessage(text, NOW, DOMAIN).ok, false);
 });
