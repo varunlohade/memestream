@@ -25,9 +25,9 @@ test("all graduated liquidity is locked forever", () => {
   assert.equal(unlocked, 0);
 });
 
-test("mainnet preset validates and graduates at 10 SOL (Boss man's number)", () => {
+test("mainnet preset validates and graduates at 3 SOL (Boss man's number)", () => {
   const params = buildCreateConfigParams(COIN_PRESETS["mainnet-beta"], accounts);
-  assert.equal(params.migrationQuoteThreshold.toString(), "10000000000"); // 10 SOL
+  assert.equal(params.migrationQuoteThreshold.toString(), "3000000000"); // 3 SOL
   assert.equal(params.poolCreationFee.toString(), "50000000"); // 0.05 SOL launch fee
   // All graduated liquidity to the streamer, locked forever.
   assert.equal(params.creatorPermanentLockedLiquidityPercentage, 100);

@@ -1,5 +1,5 @@
 // The MAINNET preset on the real DBC program (offline local chain): the config is accepted with a
-// 10 SOL threshold and a 0.05 SOL launch fee, launching a coin actually charges that fee, and
+// 3 SOL threshold and a 0.05 SOL launch fee, launching a coin actually charges that fee, and
 // graduation gives all locked liquidity to the streamer.
 // Mainnet config params are fixed forever once created, so they're proven here first.
 import assert from "node:assert/strict";
@@ -31,7 +31,7 @@ before(async () => {
 });
 after(() => surfnet?.stop());
 
-test("the mainnet preset creates a config with a 10 SOL threshold and a 0.05 SOL launch fee", async () => {
+test("the mainnet preset creates a config with a 3 SOL threshold and a 0.05 SOL launch fee", async () => {
   const built = await buildCreateConfigTx(client, preset, { payer: partner.publicKey, feeClaimer: partner.publicKey, leftoverReceiver: partner.publicKey });
   await sendAndConfirm(client.connection, built, [partner]);
   const onChain = await client.state.getPoolConfig(built.config);
@@ -61,9 +61,9 @@ test("on mainnet settings, graduation gives 100% of the locked liquidity to the 
   await sendAndConfirm(client.connection, launch, [streamer]);
   const pool = (await client.state.getPoolByBaseMint(launch.mint))?.publicKey;
   assert.ok(pool);
-  // Fill the 10 SOL curve, then graduate. Right after launch the anti-sniper fee is 50%, so buy
+  // Fill the 3 SOL curve, then graduate. Right after launch the anti-sniper fee is 50%, so buy
   // well over 2x the threshold; an oversized buy fills only up to it and the rest stays in the wallet.
-  const fill = await prepareTrade(client, await loadPoolSnapshot(client, pool), whale.publicKey, { side: "buy", lamports: solToLamports("25") }, 100);
+  const fill = await prepareTrade(client, await loadPoolSnapshot(client, pool), whale.publicKey, { side: "buy", lamports: solToLamports("10") }, 100);
   await sendAndConfirm(client.connection, fill, [whale]);
   const snapshot = await loadPoolSnapshot(client, pool);
   assert.equal(snapshot.status, "graduating");

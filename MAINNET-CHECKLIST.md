@@ -21,7 +21,7 @@ none of its parameters can change later, so all of them must be right first.
 - [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). On mainnet the partner
       gets no LP position, so there are no partner LP fees to claim (on devnet, claim through the
       app, or for a multisig through Squads: audit #3, INFO-3).
-- [x] **Graduation threshold: 10 SOL** (Boss man, 2026-10-08, via steve). Set in
+- [x] **Graduation threshold: 3 SOL** (Boss man, 2026-10-11, via steve; was 10 SOL). Set in
       `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
       programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).
 - [ ] **Partner wallet.** `feeClaimer` (receives memestream's 20% fee share) and

@@ -48,7 +48,7 @@ export const COIN_PRESETS: Record<Network, CoinPreset> = {
   // The launch fee makes squatting a famous streamer's ticker cost something (audit M2).
   // All graduated liquidity to the streamer: after graduation, 100% of pool fees go to them
   // (Boss man, 2026-10-09). The platform earns the launch fee and its curve fee share.
-  "mainnet-beta": { graduationThresholdSol: "10", launchFeeSol: 0.05, lockedLpPercent: { partner: 0, creator: 100 } },
+  "mainnet-beta": { graduationThresholdSol: "3", launchFeeSol: 0.05, lockedLpPercent: { partner: 0, creator: 100 } },
 };
 
 const TOTAL_SUPPLY = 1_000_000_000;

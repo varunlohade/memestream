@@ -30,7 +30,7 @@ and the streamer's locked LP position earns pool fees forever.
 | Liquidity | locked in the curve | 100% permanently locked in DAMM v2 |
 
 Devnet's existing config uses a 0.1 SOL threshold (so testers graduate with faucet SOL), a free
-launch and a 50/50 LP split; the mainnet preset (10 SOL threshold, 0.05 SOL launch fee, 100% LP to
+launch and a 50/50 LP split; the mainnet preset (3 SOL threshold, 0.05 SOL launch fee, 100% LP to
 the streamer) is proven on Meteora's real programs in `test/integration/mainnet-config.surfpool.ts`.
 
 ### Addresses
