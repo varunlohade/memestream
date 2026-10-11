@@ -53,9 +53,15 @@ continues on memestream and the streamer's locked LP position earns the pool's f
   then DAMM v2 swaps and LP position-fee claims after graduation.
 - OBS overlay and short links so the graduation happens live on stream.
 
+**Why not just pump.fun live?** pump.fun live proves people want a coin for a stream. memestream
+brings that to streamers where they already are (Twitch, YouTube, Kick) through an OBS overlay, with
+better terms: 80% of every trade fee to the streamer, the whole graduated LP locked to the streamer on
+mainnet (pool fees forever), a launch fee that falls from 50% to 1% in a minute so snipers don't win,
+a graduation anyone can trigger live on stream, and free-points viewer predictions. All on Meteora.
+
 **Traction:** devnet, as of 11 Oct 2026, 13:27 IST: 7 coins launched on our config, 28 trades, 1.04 SOL volume, 5 graduations to DAMM v2, at least 0.0039 SOL in creator fees claimed. All from our own team testing so far.
 
 **Links:** app https://memestream-iota.vercel.app · video _[link]_ · repo _[link]_
 
-**Built with care:** money-safety (no double pays, never fills worse than the quote), three security
+**Built with care:** money-safety (no double pays, never fills worse than the quote), five security
 audits, tests on Meteora's real programs.
