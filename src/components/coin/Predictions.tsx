@@ -12,12 +12,30 @@ import { useWallet } from "@/components/wallet/WalletProvider";
 import { shortAddress } from "@/lib/format";
 import { fetchJson, postJson } from "@/lib/http";
 import { newNonce, MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
-import { BET_WINDOWS_MIN, DEFAULT_WINDOW_MIN, HEARTBEAT_MS, multiplier, type Outcome, QUESTION_MAX, type Side, SUGGEST_COST } from "@/lib/predictions/rules";
-import type { PredictionsView, Session } from "@/lib/predictions/view";
+import {
+  AUTO_LAUNCH_UPVOTES,
+  BET_WINDOWS_MIN,
+  DEFAULT_WINDOW_MIN,
+  HEARTBEAT_MS,
+  MIN_HOLDING_COINS,
+  multiplier,
+  type Outcome,
+  QUESTION_MAX,
+  type Side,
+  STARTER_POINTS,
+  SUGGEST_COST,
+} from "@/lib/predictions/rules";
+import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
 
 const POLL_MS = 5_000;
+const CLOCK_TICK_MS = 1_000;
 const SESSION_KEY = "memestream.predictions.session";
+/** A saved session this close to expiry is dropped, so a request never carries a token about to lapse. */
+const SESSION_EXPIRY_MARGIN_MS = 60_000;
+/** Bets top out at 1,000 points, so the amount box takes at most 4 digits. */
+const MAX_BET_DIGITS = 4;
+const RESOLVED_SHOWN = 5;
 
 /** The session lives in localStorage (a per-viewer convenience; the server checks every token). */
 const savedSession = {
@@ -25,7 +43,7 @@ const savedSession = {
     if (!wallet) return null;
     try {
       const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as Session | null;
-      return s && s.wallet === wallet && s.expiresAt > Date.now() + 60_000 ? s : null;
+      return s && s.wallet === wallet && s.expiresAt > Date.now() + SESSION_EXPIRY_MARGIN_MS ? s : null;
     } catch {
       return null;
     }
@@ -40,7 +58,12 @@ const savedSession = {
   },
 };
 
+/** POSTs JSON with the session's auth headers. */
+const postWithAuth = <T,>(url: string, body: unknown, auth: HeadersInit) =>
+  fetchJson<T>(url, { method: "POST", headers: { "content-type": "application/json", ...auth }, body: JSON.stringify(body) });
+
 const fmt = (n: number) => n.toLocaleString("en-US");
+const sideLabel = (side: Side) => (side === "yes" ? "Yes" : "No");
 
 function countdown(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -57,7 +80,7 @@ function useServerNow(view: PredictionsView | null) {
   useEffect(() => {
     const tick = () => setNow(Date.now() + offset.current);
     tick();
-    const timer = setInterval(tick, 1_000);
+    const timer = setInterval(tick, CLOCK_TICK_MS);
     return () => clearInterval(timer);
   }, []);
   return now;
@@ -73,7 +96,7 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
   const total = pools.yes + pools.no;
   const share = total > 0 ? Math.round((pools[side] / total) * 100) : 0;
   const pays = multiplier(side, pools);
-  const label = `${side === "yes" ? "Yes" : "No"} ${share}%`;
+  const label = `${sideLabel(side)} ${share}%`;
   const content = (
     <>
       <b className={side === "yes" ? "pm-fy" : "pm-fn"} style={{ width: `${share}%` }} />
@@ -83,7 +106,7 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
   );
   if (!onClick) return <div className="slot pm-pool num">{content}</div>;
   return (
-    <button type="button" className="slot pm-pool num" onClick={onClick} disabled={disabled} aria-label={`Bet on ${side === "yes" ? "Yes" : "No"}`}>
+    <button type="button" className="slot pm-pool num" onClick={onClick} disabled={disabled} aria-label={`Bet on ${sideLabel(side)}`}>
       {content}
     </button>
   );
@@ -97,7 +120,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   const [amount, setAmount] = useState("50");
   const [question, setQuestion] = useState("");
   const [windowMin, setWindowMin] = useState<number>(DEFAULT_WINDOW_MIN);
-  const [board, setBoard] = useState<"stream" | "allTime">("stream");
+  const [board, setBoard] = useState<Board>("stream");
   const now = useServerNow(view);
 
   // The saved session for the connected wallet (re-read after signing in or out).
@@ -131,11 +154,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
     if (!session) return;
     const beat = () => {
       if (document.hidden) return;
-      fetchJson("/api/predictions/heartbeat", {
-        method: "POST",
-        headers: { "content-type": "application/json", ...authHeaders() },
-        body: JSON.stringify({ mint }),
-      }).catch(() => undefined);
+      postWithAuth("/api/predictions/heartbeat", { mint }, authHeaders()).catch(() => undefined);
     };
     beat();
     const timer = setInterval(beat, HEARTBEAT_MS);
@@ -162,18 +181,11 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
     setError(null);
     setBusy(true);
     try {
-      const next = await fetchJson<PredictionsView>(`/api/predictions/coin/${encodeURIComponent(mint)}`, {
-        method: "POST",
-        headers: { "content-type": "application/json", ...authHeaders() },
-        body: JSON.stringify(body),
-      });
-      setView(next);
+      setView(await postWithAuth<PredictionsView>(`/api/predictions/coin/${encodeURIComponent(mint)}`, body, authHeaders()));
       return true;
     } catch (e) {
       const message = (e as Error).message;
-      if (/Sign in/.test(message)) {
-        setSession(null);
-      }
+      if (/Sign in/.test(message)) setSession(null);
       setError(message);
       return false;
     } finally {
@@ -201,13 +213,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   /** A signed-in viewer who doesn't hold the coin: suggest and upvote stay off. */
   const notHolder = viewer && me?.holder === false;
 
-  const headline = staff
-    ? staff === "streamer"
-      ? "You can't bet on your own coin"
-      : "Mods can't bet on this coin"
-    : me
-      ? `Your points ${fmt(me.balance)}. You earn points by watching.`
-      : "You earn points by watching.";
+  const headline = headlineFor(me);
 
   const suggest = async (e: FormEvent) => {
     e.preventDefault();
@@ -243,7 +249,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
       )}
       {!address && <p className="mute pm-small">Connect a wallet to play.</p>}
       {me && !staff && me.starterInMinutes !== null && (
-        <p className="mute pm-small num">Watch {me.starterInMinutes} more minutes for 200 starter points.</p>
+        <p className="mute pm-small num">Watch {me.starterInMinutes} more minutes for {STARTER_POINTS} starter points.</p>
       )}
 
       {live ? (
@@ -258,20 +264,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
             <SidePool side="no" pools={live} onClick={viewer && !locked ? () => act({ kind: "bet", side: "no", amount: bet }) : undefined} disabled={busy} />
           </div>
           {staff ? (
-            <div className="pm-res3">
-              {(["yes", "no", "cancel"] as const).map((outcome) => (
-                <button
-                  key={outcome}
-                  type="button"
-                  // While betting is open all three look off; after the close: Yes green, No red, Cancel off.
-                  className={`mbtn ${!locked ? "off" : outcome === "yes" ? "buy" : outcome === "no" ? "pm-no" : "off"}`}
-                  disabled={busy || !locked}
-                  onClick={() => act({ kind: "resolve", outcome })}
-                >
-                  {outcome === "yes" ? "Resolve Yes" : outcome === "no" ? "Resolve No" : "Cancel"}
-                </button>
-              ))}
-            </div>
+            <ResolveButtons locked={locked} busy={busy} onResolve={(outcome) => act({ kind: "resolve", outcome })} />
           ) : (
             <div className="pm-bet num">
               <input
@@ -279,11 +272,11 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
                 inputMode="numeric"
                 aria-label="Points to bet"
                 value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, "").slice(0, 4))}
+                onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, "").slice(0, MAX_BET_DIGITS))}
                 disabled={!viewer || locked}
               />
               <span className="mute">{locked ? "Waiting for the result" : viewer ? `Tap Yes or No to bet ${amount || 0}` : "Sign in to bet"}</span>
-              <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${live.myBet.side === "yes" ? "Yes" : "No"}` : ""}</span>
+              <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${sideLabel(live.myBet.side)}` : ""}</span>
             </div>
           )}
           {staff && !locked && <p className="mute pm-small">Resolve once betting closes.</p>}
@@ -298,7 +291,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           {!view.crowdPicks
             ? "(the streamer picks the next question)"
             : view.streamerHere
-              ? "(the top question with 3 or more upvotes goes live next)"
+              ? `(the top question with ${AUTO_LAUNCH_UPVOTES} or more upvotes goes live next)`
               : "(questions wait until the streamer is here)"}
         </span>
       </div>
@@ -370,41 +363,12 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           </button>
         </form>
       )}
-      {viewer && notHolder && <p className="mute pm-small">Hold at least 1 ${symbol} to suggest and upvote.</p>}
+      {viewer && notHolder && <p className="mute pm-small">Hold at least {MIN_HOLDING_COINS} ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
-      {view.resolved.slice(0, 5).map((r) => {
-        const result = r.my
-          ? r.outcome === "cancel" || r.my.payout === r.my.bet
-            ? { text: "Refunded", cls: "mute" }
-            : r.my.payout > r.my.bet
-              ? { text: `You won ${fmt(r.my.payout - r.my.bet)}`, cls: "up" }
-              : { text: `You lost ${fmt(r.my.bet - r.my.payout)}`, cls: "mute" }
-          : null;
-        const by = r.resolvedBy.role === "auto" ? "auto-cancelled" : `${r.resolvedBy.role} ${shortAddress(r.resolvedBy.wallet ?? "")}`;
-        const at = new Date(r.resolvedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-        return (
-          <div className="pm-rr num" key={r.id}>
-            <span className="pm-q" title={`Resolved ${at} by ${by}`}>
-              {r.text}
-              <span className="mute pm-by">
-                {" "}
-                {at}, {by}
-              </span>
-            </span>
-            <OutcomeTag outcome={r.outcome} />
-            {r.disputed ? <span className="pm-otag pm-oc pm-dsp">Disputed</span> : <span />}
-            <span className={`r ${result?.cls ?? ""}`}>{staff ? "" : (result?.text ?? "")}</span>
-            {!staff && r.my && !r.my.flagged && r.my.canFlag ? (
-              <button type="button" className="pm-flag" disabled={busy} onClick={() => act({ kind: "flag", id: r.id })} title="Flag a wrong result">
-                Flag
-              </button>
-            ) : (
-              <span className="pm-flag mute">{r.my?.flagged ? "Flagged" : ""}</span>
-            )}
-          </div>
-        );
-      })}
+      {view.resolved.slice(0, RESOLVED_SHOWN).map((r) => (
+        <ResolvedRow key={r.id} result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} />
+      ))}
 
       {error && (
         <p className="notice err" role="alert">
@@ -412,25 +376,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
         </p>
       )}
       <p className="pm-free">Free points. No money, no prizes.</p>
-      <div className="pm-lb num">
-        <button type="button" className="pm-lbtoggle mute" onClick={() => setBoard(board === "stream" ? "allTime" : "stream")} title="Switch leaderboard">
-          {board === "stream" ? "Top points" : "All time"}
-        </button>
-        {top.length === 0 && <span className="mute">No winners yet</span>}
-        {top.map((l, i) => (
-          <span key={l.wallet}>
-            {i > 0 && <i className="pm-sep" />}
-            {i + 1} {shortAddress(l.wallet)} {fmt(l.points)}
-          </span>
-        ))}
-        {mine && (
-          <span className="up">
-            {top.length > 0 && <i className="pm-sep" />}
-            You {fmt(mine.points)}
-            {mine.rank ? `, ${mine.rank}${ordinal(mine.rank)}` : ""}
-          </span>
-        )}
-      </div>
+      <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>
   );
 }
@@ -439,4 +385,97 @@ function ordinal(n: number) {
   const tens = n % 100;
   if (tens >= 11 && tens <= 13) return "th";
   return ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+}
+
+function headlineFor(me: PredictionsView["me"]) {
+  if (me?.role === "streamer") return "You can't bet on your own coin";
+  if (me?.role === "mod") return "Mods can't bet on this coin";
+  return me ? `Your points ${fmt(me.balance)}. You earn points by watching.` : "You earn points by watching.";
+}
+
+const RESOLVE_LABELS: Record<Outcome, string> = { yes: "Resolve Yes", no: "Resolve No", cancel: "Cancel" };
+/** After betting closes: Yes green, No red, Cancel off. */
+const RESOLVE_CLASSES: Record<Outcome, string> = { yes: "buy", no: "pm-no", cancel: "off" };
+
+function ResolveButtons({ locked, busy, onResolve }: { locked: boolean; busy: boolean; onResolve: (outcome: Outcome) => void }) {
+  return (
+    <div className="pm-res3">
+      {(["yes", "no", "cancel"] as const).map((outcome) => (
+        <button
+          key={outcome}
+          type="button"
+          // While betting is open all three look off.
+          className={`mbtn ${locked ? RESOLVE_CLASSES[outcome] : "off"}`}
+          disabled={busy || !locked}
+          onClick={() => onResolve(outcome)}
+        >
+          {RESOLVE_LABELS[outcome]}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type ResolvedResult = PredictionsView["resolved"][number];
+
+/** The viewer's own result on a resolved prediction, or null if they didn't bet. */
+function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
+  if (!my) return null;
+  if (outcome === "cancel" || my.payout === my.bet) return { text: "Refunded", cls: "mute" };
+  if (my.payout > my.bet) return { text: `You won ${fmt(my.payout - my.bet)}`, cls: "up" };
+  return { text: `You lost ${fmt(my.bet - my.payout)}`, cls: "mute" };
+}
+
+function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void }) {
+  const result = betOutcome(r.my, r.outcome);
+  const by = r.resolvedBy.role === "auto" ? "auto-cancelled" : `${r.resolvedBy.role} ${shortAddress(r.resolvedBy.wallet ?? "")}`;
+  const at = new Date(r.resolvedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return (
+    <div className="pm-rr num">
+      <span className="pm-q" title={`Resolved ${at} by ${by}`}>
+        {r.text}
+        <span className="mute pm-by">
+          {" "}
+          {at}, {by}
+        </span>
+      </span>
+      <OutcomeTag outcome={r.outcome} />
+      {r.disputed ? <span className="pm-otag pm-oc pm-dsp">Disputed</span> : <span />}
+      <span className={`r ${result?.cls ?? ""}`}>{staff ? "" : (result?.text ?? "")}</span>
+      {!staff && r.my && !r.my.flagged && r.my.canFlag ? (
+        <button type="button" className="pm-flag" disabled={busy} onClick={onFlag} title="Flag a wrong result">
+          Flag
+        </button>
+      ) : (
+        <span className="pm-flag mute">{r.my?.flagged ? "Flagged" : ""}</span>
+      )}
+    </div>
+  );
+}
+
+type Board = keyof PredictionsView["leaderboard"]["me"];
+type LeaderboardProps = { board: Board; top: LeaderRow[]; mine: Standing | null; onToggle: () => void };
+
+function Leaderboard({ board, top, mine, onToggle }: LeaderboardProps) {
+  return (
+    <div className="pm-lb num">
+      <button type="button" className="pm-lbtoggle mute" onClick={onToggle} title="Switch leaderboard">
+        {board === "stream" ? "Top points" : "All time"}
+      </button>
+      {top.length === 0 && <span className="mute">No winners yet</span>}
+      {top.map((l, i) => (
+        <span key={l.wallet}>
+          {i > 0 && <i className="pm-sep" />}
+          {i + 1} {shortAddress(l.wallet)} {fmt(l.points)}
+        </span>
+      ))}
+      {mine && (
+        <span className="up">
+          {top.length > 0 && <i className="pm-sep" />}
+          You {fmt(mine.points)}
+          {mine.rank ? `, ${mine.rank}${ordinal(mine.rank)}` : ""}
+        </span>
+      )}
+    </div>
+  );
 }
