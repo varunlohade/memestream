@@ -8,24 +8,24 @@ export type Side = "yes" | "no";
 /** cancel: every bet is refunded. */
 export type Outcome = Side | "cancel";
 
-const MINUTE = 60_000;
+export const MINUTE_MS = 60_000;
 
 /** Watching: +2 points per minute, at most 600 a day; heartbeats closer than 50 s apart earn nothing. */
 export const POINTS_PER_MINUTE = 2;
 export const DAILY_WATCH_CAP = 600;
-export const HEARTBEAT_MS = MINUTE;
+export const HEARTBEAT_MS = MINUTE_MS;
 export const MIN_HEARTBEAT_GAP_MS = 50_000;
 /** A one-time starter grant, unlocked after 10 minutes of watching. */
 export const STARTER_POINTS = 200;
-export const STARTER_AFTER_MS = 10 * MINUTE;
+export const STARTER_AFTER_MS = 10 * MINUTE_MS;
 /** Watch time (any coin) a wallet needs before its upvotes and bets count as "eligible". */
-export const ELIGIBLE_AFTER_MS = 15 * MINUTE;
+export const ELIGIBLE_AFTER_MS = 15 * MINUTE_MS;
 /** Watch time a wallet needs to appear on a leaderboard. */
-export const LEADERBOARD_AFTER_MS = 30 * MINUTE;
+export const LEADERBOARD_AFTER_MS = 30 * MINUTE_MS;
 
 /** Suggestions: 5 to 80 characters, cost 10 points (back when it goes live), expire after 20 minutes. */
 export const SUGGEST_COST = 10;
-export const SUGGEST_TTL_MS = 20 * MINUTE;
+export const SUGGEST_TTL_MS = 20 * MINUTE_MS;
 export const QUESTION_MIN = 5;
 export const QUESTION_MAX = 80;
 /** A suggestion goes live by itself with this many eligible upvotes, when nothing is live. */
@@ -39,7 +39,7 @@ export const DEFAULT_WINDOW_MIN = 2;
 export const MIN_BET = 10;
 export const MAX_BET = 1_000;
 /** A locked prediction nobody resolves within this long cancels by itself (full refunds). */
-export const AUTO_CANCEL_MS = 60 * MINUTE;
+export const AUTO_CANCEL_MS = 60 * MINUTE_MS;
 /** The asker earns this when their question resolves YES or NO with enough eligible bettors. */
 export const ASKER_REWARD = 50;
 export const ASKER_REWARD_MIN_BETTORS = 5;
@@ -49,13 +49,13 @@ export const DISPUTE_PERCENT = 30;
 export const MAX_MODS = 5;
 
 /** A crowd-launched prediction cancels sooner if nobody resolves it (the streamer may have left). */
-export const AUTO_CANCEL_CROWD_MS = 15 * MINUTE;
+export const AUTO_CANCEL_CROWD_MS = 15 * MINUTE_MS;
 /** The crowd launches questions only while the streamer's own heartbeat on the coin is this recent. */
-export const STREAMER_PRESENT_MS = 5 * MINUTE;
+export const STREAMER_PRESENT_MS = 5 * MINUTE_MS;
 /** A new stream starts when the streamer comes back after this long away: the 20 and the stream leaderboard reset. */
-export const STREAM_GAP_MS = 120 * MINUTE;
+export const STREAM_GAP_MS = 120 * MINUTE_MS;
 /** After a result, bettors can flag it for this long; then it counts (leaderboard, asker reward) unless disputed. */
-export const FLAG_WINDOW_MS = 10 * MINUTE;
+export const FLAG_WINDOW_MS = 10 * MINUTE_MS;
 /**
  * Caps that keep a coin's whole game document under about 256 KB, since every action and GET
  * reads it and every action rewrites it (doc-size.test.ts builds one at full caps).
@@ -87,6 +87,9 @@ export const isOutcome = (value: unknown): value is Outcome => isSide(value) || 
 
 export type Bet = { wallet: string; side: Side; amount: number };
 
+const ZERO = BigInt(0);
+const sum = (bets: Bet[]) => bets.reduce((total, b) => total + BigInt(b.amount), ZERO);
+
 /**
  * Parimutuel payout, in whole points, no house fee. Winners get their stake back plus a pro-rata
  * share of the losing pool, rounded down; the points left over by rounding go to the largest
@@ -114,9 +117,6 @@ export function payouts(bets: Bet[], outcome: Outcome): Map<string, number> {
   return result;
 }
 
-const ZERO = BigInt(0);
-const sum = (bets: Bet[]) => bets.reduce((total, b) => total + BigInt(b.amount), ZERO);
-
 /** What a winning point on `side` pays now (stake included), e.g. 2.4; null while either side is empty. */
 export function multiplier(side: Side, pools: { yes: number; no: number }): number | null {
   const mine = pools[side];
@@ -125,6 +125,12 @@ export function multiplier(side: Side, pools: { yes: number; no: number }): numb
 }
 
 const URL_LIKE = /(https?:|www\.|:\/\/|\b[a-z0-9-]+\.(com|net|org|io|gg|tv|xyz|lol|app|me|co|fun|link|ly)\b)/i;
+/** Invisible format characters: bidi overrides, zero-width joiners and the like. */
+const FORMAT_CHARS = /\p{Cf}/u;
+/** ASCII control characters, except tab, newline and carriage return (whitespace collapses them). */
+const CONTROL_CHARS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+const HTML_BRACKETS = /[<>]/;
+const PLAIN_TEXT_ONLY = "Plain text only";
 
 /**
  * Cleans a question: NFKC-normalizes (so fullwidth or styled letters can't dodge the link check),
@@ -134,13 +140,12 @@ const URL_LIKE = /(https?:|www\.|:\/\/|\b[a-z0-9-]+\.(com|net|org|io|gg|tv|xyz|l
 export function cleanQuestion(text: unknown): { ok: true; question: string } | { ok: false; error: string } {
   if (typeof text !== "string") return { ok: false, error: "Type a question" };
   const normalized = text.normalize("NFKC");
-  if (/\p{Cf}/u.test(normalized)) return { ok: false, error: "Plain text only" };
-  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(normalized)) return { ok: false, error: "Plain text only" };
+  if (FORMAT_CHARS.test(normalized) || CONTROL_CHARS.test(normalized)) return { ok: false, error: PLAIN_TEXT_ONLY };
   const question = normalized.replace(/\s+/g, " ").trim();
   if (question.length < QUESTION_MIN || question.length > QUESTION_MAX) {
     return { ok: false, error: `Questions are ${QUESTION_MIN} to ${QUESTION_MAX} characters` };
   }
   if (URL_LIKE.test(question)) return { ok: false, error: "No links in questions" };
-  if (/[<>]/.test(question)) return { ok: false, error: "Plain text only" };
+  if (HTML_BRACKETS.test(question)) return { ok: false, error: PLAIN_TEXT_ONLY };
   return { ok: true, question };
 }
