@@ -5,6 +5,7 @@
  * Dependencies are passed in, so tests run it against the in-memory store with a fake clock.
  */
 import { createHmac } from "node:crypto";
+import { isIPv6 } from "node:net";
 import { type Action, apply, type Env, type Game, GameError, newGame, type Summary } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import {
@@ -59,6 +60,23 @@ const QUEUE_SHOWN = 20;
 const RESOLVED_SHOWN = 5;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+/**
+ * The part of an IP that names one client for the per-IP cap: an IPv4 address whole, an IPv6
+ * address by its /64 prefix (one home or phone usually gets a whole /64 to pick from).
+ */
+export function ipBucket(ip: string): string {
+  const addr = ip.trim().toLowerCase().replace(/^\[|\]$/g, "").split("%")[0];
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(addr);
+  if (mapped) return mapped[1];
+  if (!isIPv6(addr)) return addr;
+  const groups = (part: string) => (part ? part.split(":").flatMap((g) => (g.includes(".") ? ["0", "0"] : [g])) : []);
+  const [head, tail] = addr.split("::");
+  const left = groups(head);
+  const right = tail === undefined ? [] : groups(tail);
+  const full = [...left, ...Array<string>(8 - left.length - right.length).fill("0"), ...right];
+  return `${full.slice(0, 4).map((g) => parseInt(g, 16).toString(16)).join(":")}::/64`;
+}
+
 const movesOf = (result: ReturnType<typeof apply>) => ({
   moves: [...result.moves].map(([w, m]) => ({ wallet: w, delta: m.delta, floor: m.floor })),
   won: [...result.won].map(([w, delta]) => ({ wallet: w, delta })),
@@ -108,7 +126,7 @@ export function predictionsService(deps: ServiceDeps) {
     if (coin.status === "graduating") return { accepted: false, points: 0 };
     const t = now();
     // The IP is never stored, only a keyed hash of it.
-    const ipKey = `ip:${createHmac("sha256", deps.secret).update(ip).digest("base64url").slice(0, 22)}:${utcDay(t)}`;
+    const ipKey = `ip:${createHmac("sha256", deps.secret).update(ipBucket(ip)).digest("base64url").slice(0, 22)}:${utcDay(t)}`;
     const streamer = wallet === coin.creator;
     for (let i = 0; i < attempts; i++) {
       const [watchDoc, ipDoc, presenceDoc] = await store.read([watchKey(wallet), ipKey, presenceKey(mint)]);

@@ -7,7 +7,7 @@ import { FLAG_WINDOW_MS } from "@/lib/predictions/rules";
 import { newProfile } from "@/lib/predictions/watch";
 import { walletFromToken } from "./identity";
 import { loadFengari, luaRedis } from "./lua-harness";
-import { type CoinFacts, ContentionError, predictionsService } from "./service";
+import { type CoinFacts, ContentionError, ipBucket, predictionsService } from "./service";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
@@ -58,6 +58,18 @@ function keypair() {
   return { wallet, sign: (text: string) => bs58.encode(sign(null, Buffer.from(text), privateKey)) };
 }
 
+test("ipBucket: IPv4 whole; IPv6 by its /64 prefix, however it is written", () => {
+  assert.equal(ipBucket("9.9.9.9"), "9.9.9.9");
+  assert.equal(ipBucket("::ffff:9.9.9.9"), "9.9.9.9");
+  const home = "2001:db8:1:2::/64";
+  for (const ip of ["2001:db8:1:2::1", "2001:0DB8:0001:0002:aaaa:bbbb:cccc:dddd", "[2001:db8:1:2:ffff::]", "2001:db8:1:2::1%eth0", "2001:db8:1:2:0:0:1.2.3.4"]) {
+    assert.equal(ipBucket(ip), home, ip);
+  }
+  assert.equal(ipBucket("2001:db8::1"), "2001:db8:0:0::/64");
+  assert.equal(ipBucket("::1"), "0:0:0:0::/64");
+  assert.notEqual(ipBucket("2001:db8:1:3::1"), home);
+});
+
 for (const [name, make] of STORES) {
   test(`${name}: sign in once for this domain; the token names the wallet; a used signature can't sign in again`, async () => {
     const { service } = setup(make);
@@ -104,6 +116,14 @@ for (const [name, make] of STORES) {
     assert.equal((await service.beat("w1", COIN, "9.9.9.9")).points, 2, "the first five keep earning");
     clock.t = Date.parse("2026-10-10T00:01:00.000Z");
     assert.equal((await service.beat("w6", COIN, "9.9.9.9")).points, 2, "a new day");
+  });
+
+  test(`${name}: IPv6: the 5-wallet cap counts a whole /64 as one IP`, async () => {
+    const { service, balance } = setup(make);
+    const wallets = ["w1", "w2", "w3", "w4", "w5", "w6"];
+    for (const [i, w] of wallets.entries()) assert.equal((await service.beat(w, COIN, `2001:db8:1:2::${i + 1}`)).accepted, true);
+    assert.deepEqual(await Promise.all(wallets.map(balance)), [2, 2, 2, 2, 2, 0]);
+    assert.equal((await service.beat("w7", COIN, "2001:db8:1:3::1")).points, 2, "another /64 is another IP");
   });
 
   test(`${name}: the whole flow: holders suggest and upvote; the crowd launches only while the streamer is here`, async () => {
