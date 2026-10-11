@@ -31,6 +31,7 @@ function world(balances: Record<string, number> = {}, eligible: string[] = [], n
   };
   return {
     run,
+    actor,
     bal,
     get game() {
       return game;
@@ -162,6 +163,32 @@ test("caps: 20 predictions per stream; then no launches and no suggestions", () 
   refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0 + 300 * MIN), /20 predictions/);
   refused(() => w.run({ kind: "suggest", text: "One more question?" }, "a", T0 + 300 * MIN), /20 predictions/);
   refused(() => world().run({ kind: "launch", text: "Bad window here?", windowMin: 3 }, STREAMER, T0), /1, 2, 5 or 10/);
+});
+
+test("a new stream (the streamer back after 2+ hours away) resets the 20 and the stream leaderboard, not past results", () => {
+  const w = world({ a: 1_000, b: 1_000 });
+  w.game.stream = T0; // this stream started at T0
+  let t = T0;
+  for (let i = 0; i < MAX_PREDICTIONS_PER_STREAM; i++) {
+    w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
+    w.run({ kind: "bet", side: "yes", amount: 10 }, "a", t);
+    w.run({ kind: "bet", side: "no", amount: 10 }, "b", t);
+    t += MIN;
+    w.run({ kind: "resolve", outcome: "yes" }, STREAMER, t);
+  }
+  t += FLAG_WINDOW_MS;
+  w.run({ kind: "tick" }, null, t);
+  assert.deepEqual([w.game.launched, w.game.won], [20, { a: 200, b: -200 }]);
+  const stream1 = { streamerSeenAt: t, streamStartedAt: T0 };
+  let game = w.game;
+  assert.equal(apply(game, { kind: "tick" }, null, t, stream1).changed, false, "same stream: nothing resets");
+  refused(() => apply(game, { kind: "launch", text: "One more question?" }, w.actor(STREAMER), t, stream1), /20 predictions/);
+
+  const stream2 = { streamerSeenAt: t + 3 * 60 * MIN, streamStartedAt: t + 3 * 60 * MIN };
+  game = apply(game, { kind: "launch", text: "One more question?" }, w.actor(STREAMER), t + 3 * 60 * MIN, stream2).game;
+  assert.deepEqual([game.launched, game.won, game.stream], [1, {}, stream2.streamStartedAt]);
+  assert.equal(game.resolved.length, MAX_HISTORY, "past results stay");
+  assert.equal(apply(game, { kind: "tick" }, null, t + 3 * 60 * MIN + 1, stream2).game.launched, 1, "one reset per stream");
 });
 
 test("bets: 10 to 1,000 points, at most half the balance, add to your side but never switch", () => {

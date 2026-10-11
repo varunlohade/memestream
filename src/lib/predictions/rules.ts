@@ -52,6 +52,8 @@ export const MAX_MODS = 5;
 export const AUTO_CANCEL_CROWD_MS = 15 * MINUTE;
 /** The crowd launches questions only while the streamer's own heartbeat on the coin is this recent. */
 export const STREAMER_PRESENT_MS = 5 * MINUTE;
+/** A new stream starts when the streamer comes back after this long away: the 20 and the stream leaderboard reset. */
+export const STREAM_GAP_MS = 120 * MINUTE;
 /** After a result, bettors can flag it for this long; then it counts (leaderboard, asker reward) unless disputed. */
 export const FLAG_WINDOW_MS = 10 * MINUTE;
 /**

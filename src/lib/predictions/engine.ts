@@ -100,6 +100,8 @@ export type Game = {
   /** "Crowd picks questions": the streamer's switch for auto-launch. */
   crowdPicks: boolean;
   nextId: number;
+  /** When the stream that `launched` and `won` belong to started (the streamer's presence `since`). */
+  stream: number | null;
   launched: number;
   suggestions: Suggestion[];
   live: Prediction | null;
@@ -126,8 +128,11 @@ export type Action =
  * coin (the sybil-resistant signal for suggesting and upvoting), and their current balance.
  */
 export type Actor = { wallet: string; eligible: boolean; holder: boolean; balance: number };
-/** Facts from outside the coin's document: when the streamer's own heartbeat last came in. */
-export type Env = { streamerSeenAt: number | null };
+/**
+ * Facts from outside the coin's document: when the streamer's own heartbeat last came in, and
+ * when their current stream started (their first heartbeat after 2+ hours away).
+ */
+export type Env = { streamerSeenAt: number | null; streamStartedAt?: number | null };
 
 /** A balance change: `delta` points, allowed only if the balance is at least `floor` before it. */
 export type Movement = { delta: number; floor: number };
@@ -144,6 +149,7 @@ export const newGame = (creator: string): Game => ({
   mods: [],
   crowdPicks: true,
   nextId: 1,
+  stream: null,
   launched: 0,
   suggestions: [],
   live: null,
@@ -190,6 +196,9 @@ type Ctx = {
 
 function tick(ctx: Ctx) {
   const { game, now } = ctx;
+  // A new stream: a fresh 20 and a fresh stream leaderboard; past results stay.
+  const started = ctx.env.streamStartedAt ?? null;
+  if (started !== null && started !== game.stream) Object.assign(game, { stream: started, launched: 0, won: {} });
   // Suggestions that didn't go live in 20 minutes expire; their 10 points are spent.
   game.suggestions = game.suggestions.filter((s) => now < s.at + SUGGEST_TTL_MS);
   // A locked prediction nobody resolved cancels by itself (crowd picks sooner): full refunds.

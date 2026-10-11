@@ -15,6 +15,7 @@ import {
   MAX_EARNING_WALLETS_PER_IP,
   MAX_PREDICTIONS_PER_STREAM,
   STARTER_AFTER_MS,
+  STREAM_GAP_MS,
   STREAMER_PRESENT_MS,
   SUGGEST_TTL_MS,
 } from "@/lib/predictions/rules";
@@ -48,6 +49,8 @@ export class UnknownCoinError extends Error {}
 const coinKey = (mint: string) => `coin:${mint}`;
 const watchKey = (wallet: string) => `watch:${wallet}`;
 const presenceKey = (mint: string) => `presence:${mint}`;
+/** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
+type Presence = { at: number; since?: number };
 const LEADER_CANDIDATES = 50;
 const LEADERBOARD_CACHE_MS = 15_000;
 const PUBLIC_VIEW_CACHE_MS = 1_500;
@@ -78,7 +81,11 @@ export function predictionsService(deps: ServiceDeps) {
     return game;
   };
   const parseProfile = (json: string | null): Profile => (json ? JSON.parse(json) : newProfile());
-  const parseEnv = (json: string | null): Env => ({ streamerSeenAt: json ? (JSON.parse(json) as { at: number }).at : null });
+  const parsePresence = (json: string | null): Presence | null => (json ? JSON.parse(json) : null);
+  const parseEnv = (json: string | null): Env => {
+    const presence = parsePresence(json);
+    return { streamerSeenAt: presence?.at ?? null, streamStartedAt: presence?.since ?? null };
+  };
 
   /** Signs a wallet in: checks its signed message (domain, expiry, signature), uses the nonce once, returns a session token. */
   async function session(message: string, signature: string) {
@@ -111,7 +118,11 @@ export function predictionsService(deps: ServiceDeps) {
       if (!result.accepted) return { accepted: false, points: 0 };
       const docs: Commit["docs"] = [{ key: watchKey(wallet), v: watchDoc.v, json: JSON.stringify(result.profile) }];
       if (earning && !wallets.includes(wallet)) docs.push({ key: ipKey, v: ipDoc.v, json: JSON.stringify([...wallets, wallet]), ttlMs: DAY_MS });
-      if (streamer) docs.push({ key: presenceKey(mint), v: presenceDoc.v, json: JSON.stringify({ at: t }), ttlMs: 2 * STREAMER_PRESENT_MS });
+      if (streamer) {
+        const last = parsePresence(presenceDoc.json);
+        const since = last?.since !== undefined && t - last.at <= STREAM_GAP_MS ? last.since : t;
+        docs.push({ key: presenceKey(mint), v: presenceDoc.v, json: JSON.stringify({ at: t, since } satisfies Presence), ttlMs: 2 * STREAM_GAP_MS });
+      }
       const moves = result.points > 0 ? [{ wallet, delta: result.points, floor: 0 }] : [];
       const status = await store.commit({ docs, moves, won: [] });
       if (status === "ok") return { accepted: true, points: result.points };

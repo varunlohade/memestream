@@ -221,6 +221,25 @@ for (const [name, make] of STORES) {
     assert.equal((await service.view(COIN, null)).live?.text, "Will chat win this round?");
   });
 
+  test(`${name}: the streamer back after 2+ hours away starts a new stream: a fresh 20`, async () => {
+    const { service, clock, streamerHere } = setup(make);
+    await streamerHere();
+    for (let i = 0; i < 20; i++) {
+      await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?`, windowMin: 1 });
+      clock.t += MIN;
+      await service.act(COIN, STREAMER, { kind: "resolve", outcome: "cancel" });
+      await streamerHere();
+    }
+    await assert.rejects(service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }), /20 predictions/);
+    clock.t += 119 * MIN;
+    await streamerHere();
+    await assert.rejects(service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }), /20 predictions/, "away under 2 hours: same stream");
+    clock.t += 121 * MIN;
+    await streamerHere();
+    const fresh = await service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" });
+    assert.deepEqual([fresh.launched, fresh.resolved.length], [1, 5]);
+  });
+
   test(`${name}: the GET view stays lean: top 20 suggestions, last 5 results, mods only for staff`, async () => {
     const { service, clock, fund } = setup(make);
     const askers = Array.from({ length: 25 }, (_, i) => `a${String(i).padStart(2, "0")}`);
