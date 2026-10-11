@@ -42,7 +42,7 @@ function setup(make: (clock: Clock) => PredictionStore) {
   });
   /** Test-only funding: points and watch time, written straight to the store. */
   const fund = async (wallet: string, points: number, watchMinutes = 0) => {
-    const profile = { ...newProfile(), watchMs: watchMinutes * MIN, starter: watchMinutes >= 10 };
+    const profile = { ...newProfile(), watchMs: watchMinutes * MIN, earningMs: watchMinutes * MIN, starter: watchMinutes >= 10 };
     const [doc] = await store.read([`watch:${wallet}`]);
     await store.commit({ docs: [{ key: `watch:${wallet}`, v: doc.v, json: JSON.stringify(profile) }], moves: [{ wallet, delta: points, floor: 0 }], won: [] });
   };
@@ -116,6 +116,20 @@ for (const [name, make] of STORES) {
     assert.equal((await service.beat("w1", COIN, "9.9.9.9")).points, 2, "the first five keep earning");
     clock.t = Date.parse("2026-10-10T00:01:00.000Z");
     assert.equal((await service.beat("w6", COIN, "9.9.9.9")).points, 2, "a new day");
+  });
+
+  test(`${name}: a wallet over the per-IP cap can't watch its way to eligible upvotes`, async () => {
+    const { service, clock } = setup(make);
+    const wallets = ["w1", "w2", "w3", "w4", "w5", "sybil"];
+    for (let i = 0; i < 15; i++) {
+      clock.t = T0 + i * MIN;
+      for (const w of wallets) await service.beat(w, COIN, "9.9.9.9");
+    }
+    const [earner, sybil] = await Promise.all([service.view(COIN, "w1"), service.view(COIN, "sybil")]);
+    assert.deepEqual([earner.me?.watchMinutes, earner.me?.eligible], [15, true]);
+    assert.deepEqual([sybil.me?.watchMinutes, sybil.me?.eligible], [15, false]);
+    await service.act(COIN, "w1", { kind: "suggest", text: "Will the streamer eat a banana?" });
+    await assert.rejects(service.act(COIN, "sybil", { kind: "upvote", id: "1" }), /Watch 15 minutes to upvote/);
   });
 
   test(`${name}: IPv6: the 5-wallet cap counts a whole /64 as one IP`, async () => {

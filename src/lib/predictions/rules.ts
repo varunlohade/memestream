@@ -18,7 +18,7 @@ export const MIN_HEARTBEAT_GAP_MS = 50_000;
 /** A one-time starter grant, unlocked after 10 minutes of watching. */
 export const STARTER_POINTS = 200;
 export const STARTER_AFTER_MS = 10 * MINUTE_MS;
-/** Watch time (any coin) a wallet needs before its upvotes and bets count as "eligible". */
+/** Earning watch time (any coin, not over the per-IP cap) a wallet needs before its upvotes and bets count as "eligible". */
 export const ELIGIBLE_AFTER_MS = 15 * MINUTE_MS;
 /** Watch time a wallet needs to appear on a leaderboard. */
 export const LEADERBOARD_AFTER_MS = 30 * MINUTE_MS;

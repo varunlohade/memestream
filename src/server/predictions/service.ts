@@ -97,7 +97,7 @@ const parseGame = (json: string | null, streamer: string): Game => {
   game.creator = streamer;
   return game;
 };
-const parseProfile = (json: string | null): Profile => (json ? JSON.parse(json) : newProfile());
+const parseProfile = (json: string | null): Profile => (json ? { ...newProfile(), ...JSON.parse(json) } : newProfile());
 const parsePresence = (json: string | null): Presence | null => (json ? JSON.parse(json) : null);
 const parseEnv = (json: string | null): Env => {
   const presence = parsePresence(json);

@@ -69,3 +69,16 @@ test("eligibility: 15 minutes to upvote and bet as eligible, 30 for the leaderbo
   assert.equal(onLeaderboard(watch(30).profile), true);
   assert.equal(isEligible(null), false);
 });
+
+test("only earning minutes count toward eligibility: minutes over the per-IP cap don't", () => {
+  let profile = newProfile();
+  for (let i = 0; i < 60; i++) profile = heartbeat(profile, T0 + i * MIN, false).profile;
+  assert.equal(profile.watchMs, 60 * MIN, "the minutes are still watched");
+  assert.equal(isEligible(profile), false, "an hour over the IP cap is not eligible");
+  for (let i = 0; i < 14; i++) profile = heartbeat(profile, T0 + (60 + i) * MIN, true).profile;
+  assert.equal(isEligible(profile), false, "14 earning minutes");
+  profile = heartbeat(profile, T0 + 74 * MIN, true).profile;
+  assert.equal(isEligible(profile), true, "15 earning minutes");
+  const old = { watchMs: 60 * MIN, starter: true, day: "", dayEarned: 0, lastBeatAt: null } as unknown as Profile;
+  assert.equal(isEligible(old), false, "a record saved before earning time was tracked starts at 0");
+});
