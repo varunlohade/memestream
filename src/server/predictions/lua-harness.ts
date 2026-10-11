@@ -42,12 +42,13 @@ function fakeDb(now: () => number) {
   return (name: string, a: string[]): Reply => {
     switch (name.toUpperCase()) {
       case "SET": {
-        // Only the form the scripts use: SET key value NX PX ms.
-        if (a[2] !== "NX" || a[3] !== "PX") throw new Error("unsupported SET");
-        if (live(a[0])) return null;
-        strings.set(a[0], { value: a[1], until: now() + Number(a[4]) });
+        // Only the form the scripts use: SET key value PX ms.
+        if (a[2] !== "PX" || a.length !== 4) throw new Error("unsupported SET");
+        strings.set(a[0], { value: a[1], until: now() + Number(a[3]) });
         return { ok: "OK" };
       }
+      case "EXISTS":
+        return live(a[0]) || alive(a[0]) ? 1 : 0;
       case "HGET":
         return alive(a[0])?.get(a[1]) ?? null;
       case "HMGET":

@@ -35,6 +35,27 @@ for (const [name, make, options] of STORES) {
     assert.equal(await store.commit(once), "replay");
   });
 
+  test(`${name}: a refused commit does not use up its nonce`, options, async () => {
+    const store = make();
+    const nonce = { key: "act:refused", ttlMs: 60_000 };
+    const spend = commit({ docs: [{ key: "coin:n", v: 0, json: "1" }], moves: [{ wallet: "w", delta: -10, floor: 20 }], nonce });
+    assert.equal(await store.commit(spend), "insufficient");
+    await store.commit(commit({ moves: [{ wallet: "w", delta: 20, floor: 0 }] }));
+    assert.equal(await store.commit(commit({ ...spend, docs: [{ key: "coin:n", v: 7, json: "1" }] })), "conflict");
+    assert.equal(await store.commit(spend), "ok", "the same nonce still works after insufficient and conflict");
+    assert.deepEqual(await store.balances(["w"]), [10]);
+  });
+
+  test(`${name}: a commit re-sent after it landed answers "replay", not "conflict", and moves nothing`, options, async () => {
+    const store = make();
+    await store.commit(commit({ moves: [{ wallet: "w", delta: 100, floor: 0 }] }));
+    const bet = commit({ docs: [{ key: "coin:r", v: 0, json: "bet" }], moves: [{ wallet: "w", delta: -30, floor: 60 }], nonce: { key: "act:once", ttlMs: 60_000 } });
+    assert.equal(await store.commit(bet), "ok");
+    assert.equal(await store.commit(bet), "replay");
+    assert.deepEqual(await store.balances(["w"]), [70]);
+    assert.deepEqual(await store.read(["coin:r"]), [{ v: 1, json: "bet" }]);
+  });
+
   test(`${name}: balance floors and the zero floor are checked before anything moves`, options, async () => {
     const store = make();
     await store.commit(commit({ moves: [{ wallet: "a", delta: 100, floor: 0 }] }));
