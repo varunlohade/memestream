@@ -15,6 +15,8 @@ export { predictionsEnabled } from "./flag";
 
 /** "Holds this coin" answers are reused this long per wallet and coin. */
 const HOLDS_CACHE_MS = 60_000;
+/** Past this many cached answers, the expired ones are swept out. */
+const HOLDS_CACHE_SWEEP_AT = 5_000;
 const holdsCache = new Map<string, { at: number; holds: boolean }>();
 
 /** Whether `wallet` holds at least 1 whole coin: the budgeted holdings read, cached for a minute. */
@@ -25,7 +27,7 @@ async function holds(mint: string, wallet: string): Promise<boolean> {
   const detail = await getCoinDetail(mint, wallet); // throws BusyError when the RPC budget says no
   const answer = holdsEnough(detail?.holdings?.coins);
   holdsCache.set(key, { at: Date.now(), holds: answer });
-  if (holdsCache.size > 5_000) for (const [k, v] of holdsCache) if (Date.now() - v.at >= HOLDS_CACHE_MS) holdsCache.delete(k);
+  if (holdsCache.size > HOLDS_CACHE_SWEEP_AT) for (const [k, v] of holdsCache) if (Date.now() - v.at >= HOLDS_CACHE_MS) holdsCache.delete(k);
   return answer;
 }
 

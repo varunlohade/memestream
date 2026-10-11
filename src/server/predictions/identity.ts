@@ -11,10 +11,12 @@ import { parseSessionMessage, type SessionRequest } from "@/lib/predictions/mess
 
 /** A session lasts this long; then the wallet signs in again. */
 export const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+const ED25519_SIGNATURE_BYTES = 64;
+const ED25519_PUBLIC_KEY_BYTES = 32;
 
 /** True if `signature` (64 bytes) is `publicKey`'s (32 bytes) ed25519 signature over `message`. */
 export function isSignedBy(message: Uint8Array, signature: Uint8Array, publicKey: Uint8Array): boolean {
-  if (signature.length !== 64 || publicKey.length !== 32) return false;
+  if (signature.length !== ED25519_SIGNATURE_BYTES || publicKey.length !== ED25519_PUBLIC_KEY_BYTES) return false;
   try {
     const key = createPublicKey({ key: { kty: "OKP", crv: "Ed25519", x: Buffer.from(publicKey).toString("base64url") }, format: "jwk" });
     return verify(null, message, key, signature);
