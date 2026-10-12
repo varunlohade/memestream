@@ -358,17 +358,19 @@ for (const [name, make] of STORES) {
     coins.set("other", { creator: STREAMER, status: "trading" });
     await fund("a", 500);
     assert.deepEqual(await service.liveAcross(() => true, 10), []);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
-    await service.act("other", STREAMER, { kind: "launch", text: "Will the boss fall?", windowMin: 5 });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
     const id = await liveId();
     await service.act(COIN, "a", { kind: "bet", id, side: "yes", amount: 100 });
+    // The review picks the window (the same for both here), so "other" launches later to lock later.
+    clock.t += 0.5 * MIN;
+    await service.act("other", STREAMER, { kind: "launch", text: "Will the boss fall?" });
     const both = await service.liveAcross(() => true, 10);
     assert.deepEqual(both.map((l) => [l.mint, l.text, l.yes, l.no, l.bettors, l.market]).sort(), [
       ["coin", "Will chat win this round?", 100, 0, 1, null],
       ["other", "Will the boss fall?", 0, 0, 0, null],
     ]);
     assert.deepEqual((await service.liveAcross((mint) => mint !== "other", 10)).map((l) => l.mint), ["coin"], "a coin the filter rejects is never read");
-    clock.t += 2 * MIN;
+    clock.t += 0.75 * MIN;
     assert.deepEqual((await service.liveAcross(() => true, 10)).map((l) => l.mint), ["other"], "betting closed: not shown");
     await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
     assert.deepEqual(await store.members("predictions:live"), ["other"], "the resolve commit took the coin off the index");
