@@ -9,6 +9,8 @@ import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
+import { applyMarketDone, type MarketJob, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
+import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
@@ -19,7 +21,17 @@ import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
 import { REAL_WAITS, type Waits } from "./test-settings";
 
-export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated"; streamUrl?: string | null };
+export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated"; streamUrl?: string | null; symbol?: string };
+
+/**
+ * The oracle's market steps (MEMESTREAM_MARKETS). Each is idempotent on chain and throws if it
+ * didn't finish; create returns the market's addresses for the registry.
+ */
+export type MarketDeps = {
+  create: (mint: string, predictionId: string, symbol: string) => Promise<Omit<MarketRecord, "lockAt">>;
+  close: (record: MarketRecord) => Promise<unknown>;
+  resolve: (record: MarketRecord, outcome: MarketOutcome) => Promise<unknown>;
+};
 
 /** The AI check's two steps; each throws if its model fails (timeout, error, malformed answer). */
 export type AiCheckDeps = {
@@ -43,6 +55,8 @@ export type ServiceDeps = {
   review: (question: string) => Promise<ReviewVerdict>;
   /** The AI check of results; null or absent when it isn't set up (no keys). */
   ai?: AiCheckDeps | null;
+  /** On-chain markets; null or absent when MEMESTREAM_MARKETS is off (then nothing changes). */
+  markets?: MarketDeps | null;
   /** Runs a task after the response is sent (Next's `after`). */
   defer: (task: () => Promise<void>) => void;
   /** Commit attempts before answering "busy", and the pause between them. */
@@ -59,6 +73,8 @@ export class UnknownCoinError extends Error {}
 
 const watchKey = (wallet: string) => `watch:${wallet}`;
 const presenceKey = (mint: string) => `presence:${mint}`;
+/** A market the oracle created: the registry trades, odds and redeems are limited to. */
+const marketKey = (mint: string, predictionId: string) => `market:${mint}:${predictionId}`;
 /** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
 type Presence = { at: number; since?: number };
 const DEFAULT_COMMIT_ATTEMPTS = 12;
@@ -152,6 +168,7 @@ function liveView(game: Game, wallet: string | null): PredictionsView["live"] {
       no: live.no,
       bettors: live.bettors,
       myBet: myBet ? { side: myBet.side, amount: myBet.amount } : null,
+      market: live.market?.step ?? null,
     };
   });
 }
@@ -207,6 +224,7 @@ function resolvedView(game: Game, wallet: string | null, staff: boolean, now: nu
     ai: p.check ? "checking" : (p.ai?.verdict ?? null),
     flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,
     my: myResult(p, wallet, now),
+    market: p.market?.step ?? null,
   }));
 }
 
@@ -217,6 +235,8 @@ export function predictionsService(deps: ServiceDeps) {
   const { store, now } = deps;
   const attempts = deps.attempts ?? DEFAULT_COMMIT_ATTEMPTS;
   const waits = deps.waits ?? REAL_WAITS;
+  /** The coin's environment for the engine; markets follow the server flag. */
+  const envOf = (presenceJson: string | null, extra: Partial<Env> = {}): Env => ({ ...parseEnv(presenceJson), markets: Boolean(deps.markets), ...extra });
   const pause = () => new Promise((resolve) => setTimeout(resolve, deps.backoffMs?.() ?? BACKOFF_MIN_MS + Math.random() * BACKOFF_JITTER_MS));
 
   /** Runs `attempt` until it commits, up to `attempts` times; then the coin is too busy. */
@@ -298,7 +318,7 @@ export function predictionsService(deps: ServiceDeps) {
       const { game, save, extra: [watchDoc, presenceDoc] } = await readGame(mint, creator, [watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
       const eligible = isEligible(parseProfile(watchDoc.json), waits.eligibleAfterMs);
-      const result = apply(game, action, { wallet, eligible, holder, balance }, now(), { ...parseEnv(presenceDoc.json), aiCheck });
+      const result = apply(game, action, { wallet, eligible, holder, balance }, now(), envOf(presenceDoc.json, { aiCheck }));
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
@@ -306,6 +326,7 @@ export function predictionsService(deps: ServiceDeps) {
     });
     // A launch needs its first frame and a result its check, even if the view below fails to load.
     if (aiCheck && (action.kind === "launch" || action.kind === "resolve")) startAiRun(mint, coin);
+    if (deps.markets) startMarketRun(mint, coin);
     // The action is saved; a failed read now must not turn it into an error the user retries.
     return view(mint, wallet).catch(() => null);
   }
@@ -315,17 +336,18 @@ export function predictionsService(deps: ServiceDeps) {
     const { creator } = coin;
     for (let i = 0; i < TICK_COMMIT_ATTEMPTS; i++) {
       const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
-      const env = { ...parseEnv(presenceDoc.json), aiCheck: aiOn(coin) };
+      const env = envOf(presenceDoc.json, { aiCheck: aiOn(coin) });
       const result = apply(game, { kind: "tick" }, null, now(), env);
       if (reviewsDue(result.game, now())) startReviewing(mint, creator);
       if (aiDue(result.game, now(), env)) startAiRun(mint, coin);
+      if (deps.markets && marketsDue(result.game, now())) startMarketRun(mint, coin);
       if (!result.changed) return { game, env };
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       if (status === "ok") return { game: result.game, env };
     }
     // Others are saving the same tick; show what's stored.
     const { game, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
-    return { game, env: parseEnv(presenceDoc.json) };
+    return { game, env: envOf(presenceDoc.json) };
   }
 
   /** Coins with a review run in flight in this process (another process is held off by the claim). */
@@ -349,7 +371,7 @@ export function predictionsService(deps: ServiceDeps) {
    */
   async function reviewDue(mint: string, creator: string) {
     const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
-    const claim = startReviews(game, now(), parseEnv(presenceDoc.json));
+    const claim = startReviews(game, now(), envOf(presenceDoc.json));
     if (claim.due.length === 0) return;
     const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
@@ -366,7 +388,7 @@ export function predictionsService(deps: ServiceDeps) {
     }
     await retryOnConflict(async () => {
       const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
-      const result = applyReview(game, target, verdict, now(), parseEnv(presenceDoc.json));
+      const result = applyReview(game, target, verdict, now(), envOf(presenceDoc.json));
       if (!result.changed) return true;
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
@@ -393,7 +415,7 @@ export function predictionsService(deps: ServiceDeps) {
   const commitGame = (mint: string, creator: string, step: (game: Game, env: Env) => ReturnType<typeof apply>) =>
     retryOnConflict(async () => {
       const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
-      const result = step(game, parseEnv(presenceDoc.json));
+      const result = step(game, envOf(presenceDoc.json));
       if (!result.changed) return true;
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
@@ -405,7 +427,7 @@ export function predictionsService(deps: ServiceDeps) {
     const streamUrl = coin.streamUrl;
     if (!ai || !streamUrl || !aiOn(coin)) return;
     const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
-    const claim = startAi(game, now(), { ...parseEnv(presenceDoc.json), aiCheck: true });
+    const claim = startAi(game, now(), envOf(presenceDoc.json, { aiCheck: true }));
     if (claim.captures.length === 0 && claim.checks.length === 0) return;
     const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
@@ -449,6 +471,71 @@ export function predictionsService(deps: ServiceDeps) {
     }
     await commitGame(mint, creator, (game, env) => applyAiVerdict(game, target.id, verdict, now(), env));
   }
+
+  /** Coins with a market run in flight in this process (another process is held off by the claim). */
+  const marketRunning = new Set<string>();
+
+  /** Runs due market steps after the response is sent; one run per coin at a time. */
+  function startMarketRun(mint: string, coin: CoinFacts) {
+    if (marketRunning.has(mint)) return;
+    marketRunning.add(mint);
+    deps.defer(() =>
+      marketRun(mint, coin)
+        .catch((error: Error) => console.warn(`predictions: a market run failed (${error.message}); the next view retries it`))
+        .finally(() => marketRunning.delete(mint)),
+    );
+  }
+
+  /** The registered market of a coin's prediction, or null (none, or not created yet). */
+  async function market(mint: string, predictionId: string): Promise<MarketRecord | null> {
+    const [doc] = await store.read([marketKey(mint, predictionId)]);
+    return doc.json ? (JSON.parse(doc.json) as MarketRecord) : null;
+  }
+
+  /** Claims every due market step (so no other server starts it), then runs them one by one: they all sign as the oracle. */
+  async function marketRun(mint: string, coin: CoinFacts) {
+    const markets = deps.markets;
+    if (!markets) return;
+    const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
+    const claim = startMarkets(game, now(), envOf(presenceDoc.json));
+    if (claim.jobs.length === 0) return;
+    const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
+    if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
+    for (const job of claim.jobs) await marketStep(markets, mint, coin, claim.game, job);
+  }
+
+  /** One market step on chain, then its success saved. A failure is logged and tried again after the pause. */
+  async function marketStep(markets: MarketDeps, mint: string, coin: CoinFacts, game: Game, job: MarketJob) {
+    try {
+      if (job.kind === "create") {
+        const live = game.live.find((p) => p.id === job.id);
+        if (!live) return;
+        const record: MarketRecord = { ...(await markets.create(mint, job.id, coin.symbol ?? "")), lockAt: live.lockAt };
+        await commitMarketDone(mint, coin.creator, job, record);
+        return;
+      }
+      const record = await market(mint, job.id);
+      if (!record) throw new Error("no registry entry");
+      if (job.kind === "close") await markets.close(record);
+      else await markets.resolve(record, job.outcome);
+      await commitMarketDone(mint, coin.creator, job, null);
+    } catch (error) {
+      console.warn(`predictions: market ${job.kind} for prediction ${job.id} failed (${error instanceof Error ? error.message : "unknown error"}); it is tried again later`);
+    }
+  }
+
+  /** Saves a market step's success; a create also registers the market, in the same commit. */
+  const commitMarketDone = (mint: string, creator: string, job: MarketJob, record: MarketRecord | null) =>
+    retryOnConflict(async () => {
+      const registry = record ? [marketKey(mint, job.id)] : [];
+      const { game, save, extra: [presenceDoc, registryDoc] } = await readGame(mint, creator, [presenceKey(mint), ...registry]);
+      const result = applyMarketDone(game, job, record?.question ?? null, now(), envOf(presenceDoc.json));
+      if (!result.changed) return true;
+      const docs = save(result.game);
+      if (record) docs.push({ key: marketKey(mint, job.id), v: registryDoc.v, json: JSON.stringify(record) });
+      const status = await store.commit({ docs, ...ledgerChanges(result) });
+      return status === "ok" ? true : RETRY;
+    });
 
   /** Only wallets with 30+ minutes watched appear on leaderboards. */
   async function eligibleLeaders(candidates: LeaderRow[]): Promise<LeaderRow[]> {
@@ -543,7 +630,7 @@ export function predictionsService(deps: ServiceDeps) {
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf, reviewDue, aiRun };
+  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;

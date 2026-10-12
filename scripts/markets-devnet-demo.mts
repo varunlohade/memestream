@@ -9,12 +9,13 @@
  * Each step runs only if the market still needs it, so a stopped run can be finished without
  * paying for a second market. Prints every signature and the SOL each wallet spent.
  */
+import { randomBytes } from "node:crypto";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import { solToLamports } from "../src/lib/dbc/units";
 import { lpPositionsOf } from "../src/lib/damm/positions";
-import { buildCreateMarketTxs } from "../src/lib/markets/create";
+import { buildCreateMarketTxs, buildMarketMetadataTx } from "../src/lib/markets/create";
 import { loadMarketPools, type MarketKeys, marketKeys, marketKeysFromId, marketOdds } from "../src/lib/markets/pool";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "../src/lib/markets/settle";
 import { isTradingOpen, prepareMarketTrade } from "../src/lib/markets/trade";
@@ -46,10 +47,11 @@ async function market(): Promise<MarketKeys> {
     return marketKeysFromId(connection, question.questionId, oracle.publicKey);
   }
   // A throwaway coin address: the market only uses it to derive its question id.
-  const keys = marketKeys(connection, Keypair.generate().publicKey, "1", oracle.publicKey);
+  const keys = marketKeys(connection, randomBytes(32).toString("hex"), Keypair.generate().publicKey, "1", oracle.publicKey);
   const names = { yes: { name: "$DEMO #1 YES", symbol: "YES", uri: "" }, no: { name: "$DEMO #1 NO", symbol: "NO", uri: "" } };
-  const created = await buildCreateMarketTxs(connection, keys, names, solToLamports(SEED_PER_POOL));
+  const created = await buildCreateMarketTxs(connection, keys, solToLamports(SEED_PER_POOL));
   for (const [i, tx] of created.entries()) step(["create", "split", "pool YES", "pool NO"][i], await sendAndConfirm(connection, tx, [oracle]));
+  step("names", await sendAndConfirm(connection, await buildMarketMetadataTx(connection, keys, names), [oracle]));
   return keys;
 }
 

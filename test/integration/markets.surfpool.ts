@@ -2,6 +2,7 @@
 // programs (MetaDAO conditional vault + Meteora DAMM v2): create and seed, bet both sides, sell,
 // close trading, resolve, redeem. Plus the refund path, where every token pays half.
 import assert from "node:assert/strict";
+import { randomBytes } from "node:crypto";
 import { after, before, test } from "node:test";
 import { getAssociatedTokenAddressSync, NATIVE_MINT } from "@solana/spl-token";
 import type { Surfnet } from "@solana/surfpool";
@@ -10,9 +11,9 @@ import BN from "bn.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 import { solToLamports } from "../../src/lib/dbc/units";
-import { buildCreateMarketTxs } from "../../src/lib/markets/create";
+import { buildCreateMarketTxs, buildMarketMetadataTx } from "../../src/lib/markets/create";
 import { payoutNumerators, redeemLamports } from "../../src/lib/markets/math";
-import { loadMarketPools, type MarketKeys, marketKeys, marketOdds, type MarketPools } from "../../src/lib/markets/pool";
+import { loadMarketPools, type MarketKeys, marketKeys, marketOdds, type MarketPools, verifyMarketPools } from "../../src/lib/markets/pool";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "../../src/lib/markets/settle";
 import { isTradingOpen, type MarketOrder, prepareMarketTrade, quoteMarketTrade } from "../../src/lib/markets/trade";
 import { pollUntil } from "../../src/lib/poll";
@@ -21,6 +22,7 @@ import { stepRunner } from "../support/steps";
 
 const [oracle, alice, bob] = [Keypair.generate(), Keypair.generate(), Keypair.generate()];
 const coinMint = Keypair.generate().publicKey;
+const SECRET = randomBytes(32).toString("hex");
 const SEED_PER_POOL = solToLamports("0.5");
 const NAMES = {
   yes: { name: "TEST #1 YES", symbol: "YES", uri: "https://memestream.lol/m/yes.json" },
@@ -58,8 +60,9 @@ async function signAndSend(prepared: { transaction: string; blockhash: string },
 }
 
 async function createMarket(predictionId: string): Promise<{ keys: MarketKeys; pools: MarketPools }> {
-  const keys = marketKeys(connection, coinMint, predictionId, oracle.publicKey);
-  for (const tx of await buildCreateMarketTxs(connection, keys, NAMES, SEED_PER_POOL)) await sendAndConfirm(connection, tx, [oracle]);
+  const keys = marketKeys(connection, SECRET, coinMint, predictionId, oracle.publicKey);
+  for (const tx of await buildCreateMarketTxs(connection, keys, SEED_PER_POOL)) await sendAndConfirm(connection, tx, [oracle]);
+  await sendAndConfirm(connection, await buildMarketMetadataTx(connection, keys, NAMES), [oracle]);
   const pools = await loadMarketPools(connection, keys);
   assert.ok(pools, "both pools exist");
   return { keys, pools };
@@ -99,6 +102,19 @@ test("a market lives: seed, bet YES and NO, sell, close, resolve YES, redeem", a
       assert.ok(created.pools[side].state.tokenBMint.equals(NATIVE_MINT));
       const meta = await connection.getParsedAccountInfo(keys.mints[side]);
       assert.ok(meta.value, "the conditional mint exists");
+    }
+    verifyMarketPools(keys, created.pools);
+    // Any one field off and the pools aren't ours.
+    const off = (side: "yes" | "no", patch: Record<string, unknown>) => ({ ...created.pools, [side]: { ...created.pools[side], state: { ...created.pools[side].state, ...patch } } });
+    for (const patch of [
+      { tokenAMint: NATIVE_MINT },
+      { tokenBMint: keys.mints.yes },
+      { sqrtMinPrice: created.pools.yes.state.sqrtMinPrice.addn(1) },
+      { sqrtMaxPrice: created.pools.yes.state.sqrtMaxPrice.subn(1) },
+      { collectFeeMode: 0 },
+      { poolFees: { ...created.pools.yes.state.poolFees, dynamicFee: { ...created.pools.yes.state.poolFees.dynamicFee, initialized: 1 } } },
+    ]) {
+      assert.throws(() => verifyMarketPools(keys, off("yes", patch)), /don't match/, JSON.stringify(Object.keys(patch)));
     }
     const spent = (before - (await balance(oracle))) / 1e9;
     t.diagnostic(`market cost the oracle ${spent} SOL with ${Number(SEED_PER_POOL) / 1e9} SOL per pool`);
@@ -190,38 +206,74 @@ test("a disputed or cancelled market refunds: every YES and NO pays half", async
   assert.ok((await vaultLamports(keys)) <= BigInt(2), "at most rounding dust stays in the vault");
 });
 
-test("the server runs a market: the oracle creates, closes and resolves; wallets bet and redeem", async () => {
+test("the server runs a market: the oracle creates, closes and resolves; wallets bet and redeem in registered markets only", async () => {
   process.env.MEMESTREAM_RPC_URL = surfnet.rpcUrl;
   process.env.MEMESTREAM_CONFIG = Keypair.generate().publicKey.toBase58(); // unused by markets
   process.env.MEMESTREAM_PUBLIC_URL = "http://127.0.0.1:3000";
   process.env.MEMESTREAM_MARKET_ORACLE = oracle.publicKey.toBase58();
   process.env.MEMESTREAM_MARKET_ORACLE_KEY = JSON.stringify(Array.from(oracle.secretKey));
+  process.env.MEMESTREAM_MARKET_SECRET = SECRET;
   const server = await import("../../src/server/markets");
   const ref = { mint: coinMint.toBase58(), predictionId: "3" };
+  const now = Date.now();
 
-  assert.equal((await server.createMarket({ ...ref, ticker: "test", seedSolPerPool: "0.05" })).length, 4);
-  const opened = await server.getMarket(ref);
+  const created = await server.createMarket({ ...ref, ticker: "test", seedSolPerPool: "0.05" });
+  assert.equal(created.signatures.length, 4, "init, split, two pools");
+  const record = { ...created.record, lockAt: now + 60_000 };
+  assert.deepEqual((await server.createMarket({ ...ref, ticker: "test", seedSolPerPool: "0.05" })).signatures, [], "a second create finds every step done");
+  const opened = await server.getMarket(record, alice.publicKey.toBase58(), now);
   assert.equal(opened.trading, true);
   assert.equal(opened.resolved, false);
   assert.ok(Math.abs(opened.probability.yes - 0.5) < 1e-6);
+  assert.equal(opened.volumeSol, "0");
+  assert.deepEqual([opened.position?.yes, opened.position?.no], ["0", "0"]);
+  assert.ok(Number(opened.maxBuySol.yes) > 0.015 && Number(opened.maxBuySol.yes) < 0.0215, `max buy ${opened.maxBuySol.yes} SOL on a 0.05 seed`);
 
   const bet = { ...ref, side: "yes" as const, action: "buy" as const, amount: "0.01", slippageBps: 100 };
-  const preview = await server.previewMarketTrade(bet);
+  const preview = await server.previewMarketTrade(record, bet, now);
   assert.equal(preview.spent, "0.01");
-  const prepared = await server.buildMarketTradeForWallet({ ...bet, wallet: alice.publicKey.toBase58(), minReceived: preview.minimumReceived });
+  const prepared = await server.buildMarketTradeForWallet(record, { ...bet, wallet: alice.publicKey.toBase58(), minReceived: preview.minimumReceived }, now);
   assert.equal(await signAndSend(prepared, alice), "confirmed");
-  assert.ok((await server.getMarket(ref)).probability.yes > 0.5, "the YES bet moved the odds");
+  const after = await server.getMarket(record, alice.publicKey.toBase58(), now);
+  assert.ok(after.probability.yes > 0.5, "the YES bet moved the odds");
+  assert.equal(after.volumeSol, "0.01", "volume from the SOL fees");
+  assert.ok(Number(after.position?.yes) > 0.01, `alice holds ${after.position?.yes} YES`);
+  await assert.rejects(server.previewMarketTrade(record, { ...bet, amount: opened.maxBuySol.yes }, now), /Too big/, "the pool's stock moved: the old max no longer fits");
 
-  await assert.rejects(server.buildMarketRedeemForWallet({ ...ref, wallet: alice.publicKey.toBase58() }), /isn't resolved yet/);
-  assert.equal((await server.closeMarketTrading(ref)).length, 2);
-  await assert.rejects(server.previewMarketTrade(bet), /closed/);
-  await server.resolveMarket({ ...ref, outcome: "yes" });
-  const resolved = await server.getMarket(ref);
-  assert.deepEqual([resolved.trading, resolved.resolved, resolved.payoutNumerators], [false, true, [1, 0]]);
+  // Betting closes at lockAt, whatever the pools hold.
+  await assert.rejects(server.previewMarketTrade(record, bet, record.lockAt), /closed/);
+  await assert.rejects(server.buildMarketTradeForWallet(record, { ...bet, wallet: alice.publicKey.toBase58() }, record.lockAt), /closed/);
+  assert.equal((await server.getMarket(record, null, record.lockAt)).trading, false);
+
+  await assert.rejects(server.buildMarketRedeemForWallet(record, alice.publicKey.toBase58()), /isn't resolved yet/);
+  assert.equal((await server.closeMarketTrading(record)).length, 2);
+  assert.deepEqual(await server.closeMarketTrading(record), [], "closing again sends nothing");
+  assert.ok(await server.resolveMarket(record, "yes"));
+  assert.equal(await server.resolveMarket(record, "no"), null, "resolving again sends nothing");
+  const resolved = await server.getMarket(record, null, now);
+  assert.deepEqual([resolved.trading, resolved.resolved, resolved.payoutNumerators], [false, true, [1, 0]], "a resolved market is closed even before lockAt");
 
   const before = await balance(alice);
-  assert.equal(await signAndSend(await server.buildMarketRedeemForWallet({ ...ref, wallet: alice.publicKey.toBase58() }), alice), "confirmed");
+  assert.equal(await signAndSend(await server.buildMarketRedeemForWallet(record, alice.publicKey.toBase58()), alice), "confirmed");
   assert.ok((await balance(alice)) - before > Number(solToLamports("0.01")), "alice's YES paid more than her 0.01 SOL bet");
-  await server.redeemOracleTokens(ref);
-  await assert.rejects(server.getMarket({ ...ref, predictionId: "999" }), /No market/);
+  await server.redeemOracleTokens(record);
+
+  // A record that doesn't match what our oracle would make is refused.
+  const otherOracle = Keypair.generate().publicKey.toBase58();
+  await assert.rejects(server.getMarket({ ...record, oracle: otherOracle }, null, now), /No market/);
+  await assert.rejects(server.getMarket({ ...record, pools: { ...record.pools, yes: record.pools.no } }, null, now), /No market/);
+});
+
+test("a bad oracle key never shows in the error", async () => {
+  const server = await import("../../src/server/markets");
+  const saved = process.env.MEMESTREAM_MARKET_ORACLE_KEY;
+  process.env.MEMESTREAM_MARKET_ORACLE_KEY = "[12,34,56,secret-looking";
+  try {
+    await assert.rejects(server.createMarket({ mint: coinMint.toBase58(), predictionId: "4", ticker: "test", seedSolPerPool: "0.05" }), (error: Error) => {
+      assert.equal(error.message, "Oracle key is not set up correctly");
+      return true;
+    });
+  } finally {
+    process.env.MEMESTREAM_MARKET_ORACLE_KEY = saved;
+  }
 });

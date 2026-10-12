@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Keypair } from "@solana/web3.js";
 import { isPredictionId, oddsFromPrices, payoutNumerators, priceFromSqrtPrice, questionIdFor, redeemLamports } from "./math";
@@ -6,18 +7,30 @@ import { isPredictionId, oddsFromPrices, payoutNumerators, priceFromSqrtPrice, q
 const coin = Keypair.generate().publicKey;
 const other = Keypair.generate().publicKey;
 
-test("a question id is 32 bytes, the same for the same coin and prediction, different otherwise", () => {
-  const id = questionIdFor(coin, "42");
+const SECRET = "s".repeat(32);
+
+test("a question id is 32 bytes, the same for the same secret, coin and prediction, different otherwise", () => {
+  const id = questionIdFor(SECRET, coin, "42");
   assert.equal(id.length, 32);
-  assert.deepEqual(questionIdFor(coin, "42"), id);
-  assert.notDeepEqual(questionIdFor(coin, "43"), id);
-  assert.notDeepEqual(questionIdFor(other, "42"), id);
+  assert.deepEqual(questionIdFor(SECRET, coin, "42"), id);
+  assert.notDeepEqual(questionIdFor(SECRET, coin, "43"), id);
+  assert.notDeepEqual(questionIdFor(SECRET, other, "42"), id);
+  assert.notDeepEqual(questionIdFor("t".repeat(32), coin, "42"), id, "another secret: another market");
+});
+
+test("a question id can't be worked out from public facts: it isn't the old sha256(coin:id)", () => {
+  const publicGuess = createHash("sha256").update(`memestream:market:v1:${coin.toBase58()}:42`).digest();
+  assert.notDeepEqual(questionIdFor(SECRET, coin, "42"), new Uint8Array(publicGuess));
+});
+
+test("a short secret is refused", () => {
+  assert.throws(() => questionIdFor("short", coin, "42"), /too short/);
 });
 
 test("only the predictions engine's ids make a question id", () => {
   assert.ok(isPredictionId("1") && isPredictionId("999999999"));
   for (const bad of ["", "0", "01", "1234567890", "-1", "1.5", "42 "]) {
-    assert.throws(() => questionIdFor(coin, bad), /Not a prediction id/, bad);
+    assert.throws(() => questionIdFor(SECRET, coin, bad), /Not a prediction id/, bad);
   }
 });
 

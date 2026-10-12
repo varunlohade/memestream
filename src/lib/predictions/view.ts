@@ -1,6 +1,12 @@
 /** What the predictions API returns for a coin (shared by the server and the browser; types only). */
 import type { Outcome, Side } from "./rules";
 
+/**
+ * A prediction's on-chain market (MEMESTREAM_MARKETS): "opening" until the oracle created it,
+ * "failed" if it couldn't (the points bet stays), else open/closed/resolved. null: no market.
+ */
+export type MarketStepView = "opening" | "open" | "closed" | "resolved" | "failed" | null;
+
 export type LeaderRow = { wallet: string; points: number };
 export type Standing = { points: number; rank: number | null };
 
@@ -38,6 +44,7 @@ export type PredictionsView = {
     no: number;
     bettors: number;
     myBet: { side: Side; amount: number } | null;
+    market: MarketStepView;
   }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;
@@ -61,6 +68,7 @@ export type PredictionsView = {
     /** Flags are taken until then (ms); null once the result counts. */
     flagUntil: number | null;
     my: { bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
+    market: MarketStepView;
   }[];
   /** The coin's mods (sent to the streamer and mods only). */
   mods: string[];

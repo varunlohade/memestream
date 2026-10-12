@@ -49,24 +49,25 @@ export function vaultKeys(connection: Connection, questionId: Uint8Array, oracle
 const allInstructions = async (builder: { transaction(): Promise<{ instructions: TransactionInstruction[] }> }) =>
   (await builder.transaction()).instructions;
 
-/** Creates the question (oracle = who may resolve) and its wSOL vault with YES/NO mints and names. */
-export async function initializeMarketIxs(
-  connection: Connection,
-  questionId: Uint8Array,
-  oracle: PublicKey,
-  payer: PublicKey,
-  names: Record<Side, { name: string; symbol: string; uri: string }>,
-): Promise<TransactionInstruction[]> {
+/** Creates the question (oracle = who may resolve) and its wSOL vault with YES/NO mints. */
+export async function initializeMarketIxs(connection: Connection, questionId: Uint8Array, oracle: PublicKey, payer: PublicKey): Promise<TransactionInstruction[]> {
   const vc = client(connection);
-  const { question, vault } = vaultKeys(connection, questionId, oracle);
-  const metadata = (side: Side) =>
-    vc.addMetadataToConditionalTokensIx(vault, OUTCOME_INDEX[side], names[side].name, names[side].symbol, names[side].uri, payer).instruction();
+  const { question } = vaultKeys(connection, questionId, oracle);
   return [
     await vc.initializeQuestionIx(questionId, oracle, NUM_OUTCOMES).accounts({ payer }).instruction(),
     ...(await allInstructions(vc.initializeVaultIx(question, NATIVE_MINT, NUM_OUTCOMES, payer).accounts({ payer }))),
-    await metadata("yes"),
-    await metadata("no"),
   ];
+}
+
+/**
+ * Names for the YES/NO mints, so wallets show what they are. Optional: on mainnet MetaDAO lets only
+ * its deployer pay for this, so the market never depends on it.
+ */
+export async function metadataIxs(connection: Connection, keys: VaultKeys, payer: PublicKey, names: Record<Side, { name: string; symbol: string; uri: string }>): Promise<TransactionInstruction[]> {
+  const vc = client(connection);
+  const metadata = (side: Side) =>
+    vc.addMetadataToConditionalTokensIx(keys.vault, OUTCOME_INDEX[side], names[side].name, names[side].symbol, names[side].uri, payer).instruction();
+  return [await metadata("yes"), await metadata("no")];
 }
 
 /** wSOL in `user`'s wrapped-SOL account → `amount` YES + `amount` NO (token accounts created if missing). */

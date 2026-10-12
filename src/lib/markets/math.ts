@@ -3,7 +3,7 @@
  * prediction. Its YES and NO tokens each redeem for up to 1 SOL, so a token's SOL price is the
  * market's probability for that side.
  */
-import { createHash } from "node:crypto";
+import { createHmac } from "node:crypto";
 import type { PublicKey } from "@solana/web3.js";
 
 export type Side = "yes" | "no";
@@ -19,13 +19,18 @@ const PREDICTION_ID = /^[1-9]\d{0,8}$/;
 
 export const isPredictionId = (id: string) => PREDICTION_ID.test(id);
 
+/** The server secret that keys question ids must be at least this long. */
+export const MIN_MARKET_SECRET_CHARS = 32;
+
 /**
- * The 32-byte MetaDAO question id for a coin's prediction. Deterministic, so every market address
- * (question, vault, YES/NO mints, pools) follows from (coin mint, prediction id, oracle) alone.
+ * The 32-byte MetaDAO question id for a coin's prediction: an HMAC under the server's secret, so
+ * nobody can work out a market's addresses (question, vault, YES/NO mints, pools) before the
+ * oracle creates it, and squat them. Deterministic for the server, so a retried create is the same market.
  */
-export function questionIdFor(coinMint: PublicKey, predictionId: string): Uint8Array {
+export function questionIdFor(secret: string, coinMint: PublicKey, predictionId: string): Uint8Array {
+  if (secret.length < MIN_MARKET_SECRET_CHARS) throw new Error("Market secret is too short");
   if (!isPredictionId(predictionId)) throw new Error(`Not a prediction id: "${predictionId}"`);
-  return new Uint8Array(createHash("sha256").update(`memestream:market:v1:${coinMint.toBase58()}:${predictionId}`).digest());
+  return new Uint8Array(createHmac("sha256", secret).update(`memestream:market:v2:${coinMint.toBase58()}:${predictionId}`).digest());
 }
 
 /** resolveQuestion's payout numerators: [YES, NO]. A refund pays each token half its full value. */

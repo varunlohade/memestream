@@ -22,7 +22,10 @@ export type MarketOrder = { side: Side; action: "buy" | "sell"; amount: BN };
 const tradeInput = (order: MarketOrder): TradeInput =>
   order.action === "buy" ? { side: "buy", lamports: order.amount } : { side: "sell", baseUnits: order.amount };
 
-/** After closeTrading the pools hold no liquidity: no trade can fill. */
+/**
+ * Whether both pools hold liquidity. Not whether betting is open: anyone can add a little after the
+ * oracle closes trading, so the server decides that from the prediction's lockAt (server/markets.ts).
+ */
 export const isTradingOpen = (pools: MarketPools) => !pools.yes.state.liquidity.isZero() && !pools.no.state.liquidity.isZero();
 
 function openPool(pools: MarketPools, side: Side): DammSnapshot {

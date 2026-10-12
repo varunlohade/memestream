@@ -8,14 +8,51 @@ import { randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { Redis } from "@upstash/redis";
 import { holdsEnough } from "@/lib/predictions/rules";
+import { isBase58Of } from "@/lib/base58";
+import { isPredictionId } from "@/lib/markets/math";
+import type { MarketRecord } from "@/lib/markets/record";
 import { getCoinDetail } from "@/server/coins";
+import { closeMarketTrading, createMarket, resolveMarket } from "@/server/markets";
+import { UserError } from "@/server/errors";
 import { aiCheckFromEnv } from "./ai-check";
 import { reviewFromEnv } from "./review";
-import { predictionsService, type PredictionsService } from "./service";
+import { marketsEnabled } from "./flag";
+import { type MarketDeps, predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
 import { testSettings } from "./test-settings";
 
-export { predictionsEnabled } from "./flag";
+export { marketsEnabled, predictionsEnabled } from "./flag";
+
+/** SOL on each pool's wSOL side when a market opens (the whole seed is ~2.6x this; it comes back at redemption). */
+const DEFAULT_SEED_SOL = "0.05";
+
+/** One oracle step at a time in this process: they share the oracle's wrapped-SOL account. */
+let oracleQueue: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const next = oracleQueue.then(work, work);
+  oracleQueue = next.catch(() => undefined);
+  return next;
+}
+
+/** The oracle's market steps, or null with MEMESTREAM_MARKETS off. */
+function marketDeps(): MarketDeps | null {
+  if (!marketsEnabled()) return null;
+  const seedSolPerPool = process.env.MEMESTREAM_MARKET_SEED_SOL || DEFAULT_SEED_SOL;
+  return {
+    create: (mint, predictionId, ticker) => oneAtATime(async () => (await createMarket({ mint, predictionId, ticker, seedSolPerPool })).record),
+    close: (record) => oneAtATime(() => closeMarketTrading(record)),
+    resolve: (record, outcome) => oneAtATime(() => resolveMarket(record, outcome)),
+  };
+}
+
+/** The registered market of a coin's prediction (only markets the oracle created); throws a user error if there's none. */
+export async function registeredMarket(mint: string, predictionId: string): Promise<MarketRecord> {
+  if (!isBase58Of(mint, 32) || !isPredictionId(predictionId)) throw new UserError("No market for this prediction");
+  const ready = marketsEnabled() ? predictions() : null;
+  const record = ready && "service" in ready ? await ready.service.market(mint, predictionId) : null;
+  if (!record) throw new UserError("No market for this prediction");
+  return record;
+}
 
 /** "Holds this coin" answers are reused this long per wallet and coin. */
 const HOLDS_CACHE_MS = 60_000;
@@ -78,10 +115,11 @@ export function predictions(): { service: PredictionsService } | { error: string
     domain,
     review: reviewFromEnv(),
     ai: aiCheckFromEnv(),
+    markets: marketDeps(),
     defer: (task) => after(task),
     coin: async (mint) => {
       const coin = (await getCoinDetail(mint, null))?.coin;
-      return coin ? { creator: coin.creator, status: coin.status, streamUrl: coin.streamUrl } : null;
+      return coin ? { creator: coin.creator, status: coin.status, streamUrl: coin.streamUrl, symbol: coin.symbol } : null;
     },
     holds,
     waits,

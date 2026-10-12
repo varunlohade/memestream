@@ -21,7 +21,7 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], message:
 }
 
 export type ParsedMarketRequest =
-  | { action: "odds"; req: MarketRef }
+  | { action: "odds"; req: MarketRef & { wallet: string | null } }
   | { action: "preview"; req: MarketQuoteRequest }
   | { action: "trade"; req: MarketTradeRequest }
   | { action: "redeem"; req: MarketRef & { wallet: string } };
@@ -29,7 +29,7 @@ export type ParsedMarketRequest =
 export function parseMarketRequest(action: string, body: Body): ParsedMarketRequest {
   const known = oneOf(action, ACTIONS, "Unknown action");
   const ref: MarketRef = { mint: requiredText(body, "mint"), predictionId: requiredText(body, "predictionId") };
-  if (known === "odds") return { action: known, req: ref };
+  if (known === "odds") return { action: known, req: { ...ref, wallet: typeof body.wallet === "string" && body.wallet ? body.wallet : null } };
   if (known === "redeem") return { action: known, req: { ...ref, wallet: requiredText(body, "wallet") } };
   const quote: MarketQuoteRequest = {
     ...ref,

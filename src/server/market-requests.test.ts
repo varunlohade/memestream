@@ -6,7 +6,8 @@ import { parseMarketRequest } from "./market-requests";
 const ref = { mint: "So11111111111111111111111111111111111111112", predictionId: "42" };
 
 test("odds and redeem need the market; redeem also the wallet", () => {
-  assert.deepEqual(parseMarketRequest("odds", ref), { action: "odds", req: ref });
+  assert.deepEqual(parseMarketRequest("odds", ref), { action: "odds", req: { ...ref, wallet: null } });
+  assert.deepEqual(parseMarketRequest("odds", { ...ref, wallet: "w" }), { action: "odds", req: { ...ref, wallet: "w" } }, "a wallet adds its position");
   assert.deepEqual(parseMarketRequest("redeem", { ...ref, wallet: "w" }), { action: "redeem", req: { ...ref, wallet: "w" } });
   assert.throws(() => parseMarketRequest("redeem", ref), /Missing wallet/);
   assert.throws(() => parseMarketRequest("odds", { mint: ref.mint }), /Missing predictionId/);

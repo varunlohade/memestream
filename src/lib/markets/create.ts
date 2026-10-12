@@ -1,7 +1,9 @@
 /**
  * Creating a market, paid and signed by the oracle (the memestream server key): the MetaDAO
  * question + wSOL vault, then seed liquidity — SOL split into YES + NO, and one DAMM v2 pool per side
- * starting at 0.5 SOL per token. Four transactions, sent in order (each fits a legacy transaction).
+ * starting at 0.5 SOL per token. Up to four transactions, sent in order (each fits a legacy
+ * transaction). Steps already on chain are skipped, so a create cut short can be run again.
+ * Names for the YES/NO mints are a separate, optional transaction (buildMarketMetadataTx).
  */
 import { CpAmm } from "@meteora-ag/cp-amm-sdk";
 import {
@@ -13,11 +15,11 @@ import {
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
 import { type Connection, Keypair, type PublicKey, SystemProgram, Transaction, type TransactionInstruction } from "@solana/web3.js";
-import type BN from "bn.js";
+import BN from "bn.js";
 import { built, type BuiltTx } from "../dbc/tx";
 import type { Side } from "./math";
 import { ACTIVATION_TYPE, COLLECT_FEE_MODE, type MarketKeys, marketPoolFees, PRICE_RANGE, seedPlan, type SeedPlan } from "./pool";
-import { initializeMarketIxs, splitIxs } from "./vault";
+import { fetchQuestion, initializeMarketIxs, metadataIxs, splitIxs } from "./vault";
 
 export type TokenNames = Record<Side, { name: string; symbol: string; uri: string }>;
 
@@ -62,18 +64,38 @@ async function poolTx(connection: Connection, keys: MarketKeys, side: Side, plan
   return built(tx, keys.oracle, [positionNft]);
 }
 
+/** Token account amount (u64 @64), or 0 if the account doesn't exist. */
+const tokenAmount = (data: Buffer | undefined) => new BN(data && data.length >= 72 ? data.readBigUInt64LE(64).toString() : "0");
+
 /**
- * The market's transactions, in send order. `lamportsPerPool` is the SOL on each pool's wSOL side;
- * the oracle also splits ~0.61× that into YES + NO for the pools' token side.
+ * The market's transactions still to send, in order. `lamportsPerPool` is the SOL on each pool's
+ * wSOL side; the oracle also splits ~0.61× that into YES + NO for the pools' token side (only what
+ * it doesn't hold already for a pool still missing).
  */
-export async function buildCreateMarketTxs(connection: Connection, keys: MarketKeys, names: TokenNames, lamportsPerPool: BN): Promise<BuiltTx[]> {
+export async function buildCreateMarketTxs(connection: Connection, keys: MarketKeys, lamportsPerPool: BN): Promise<BuiltTx[]> {
   const plan = seedPlan(lamportsPerPool);
   const { oracle } = keys;
-  const init = new Transaction().add(...(await initializeMarketIxs(connection, keys.questionId, oracle, oracle, names)));
-  const split = new Transaction().add(
-    ...wrapSolIxs(oracle, plan.outcomeTokens),
-    ...(await splitIxs(connection, keys, oracle, plan.outcomeTokens)),
-    unwrapSolIx(oracle),
-  );
-  return [built(init, oracle), built(split, oracle), await poolTx(connection, keys, "yes", plan), await poolTx(connection, keys, "no", plan)];
+  const sides: Side[] = ["yes", "no"];
+  const outcomeAccounts = sides.map((side) => getAssociatedTokenAddressSync(keys.mints[side], oracle));
+  const [question, infos] = await Promise.all([
+    fetchQuestion(connection, keys.question),
+    connection.getMultipleAccountsInfo([keys.pools.yes, keys.pools.no, ...outcomeAccounts]),
+  ]);
+  const missing = sides.filter((_, i) => !infos[i]);
+  const held = sides.map((_, i) => tokenAmount(infos[2 + i]?.data));
+  const short = missing.map((side) => BN.max(plan.outcomeTokens.sub(held[sides.indexOf(side)]), new BN(0))).reduce((a, b) => BN.max(a, b), new BN(0));
+
+  const txs: BuiltTx[] = [];
+  if (!question) txs.push(built(new Transaction().add(...(await initializeMarketIxs(connection, keys.questionId, oracle, oracle))), oracle));
+  if (!short.isZero()) {
+    const split = new Transaction().add(...wrapSolIxs(oracle, short), ...(await splitIxs(connection, keys, oracle, short)), unwrapSolIx(oracle));
+    txs.push(built(split, oracle));
+  }
+  for (const side of missing) txs.push(await poolTx(connection, keys, side, plan));
+  return txs;
+}
+
+/** Names the YES/NO mints (optional; see metadataIxs). */
+export async function buildMarketMetadataTx(connection: Connection, keys: MarketKeys, names: TokenNames): Promise<BuiltTx> {
+  return built(new Transaction().add(...(await metadataIxs(connection, keys, keys.oracle, names))), keys.oracle);
 }

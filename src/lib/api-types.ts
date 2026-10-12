@@ -63,7 +63,8 @@ export type TradePreview = { spent: string; received: string; minimumReceived: s
  */
 export type PreparedTx = { transaction: string; blockhash: string };
 
-export type TxAction = "launch" | "trade" | "claim" | "graduate" | "claim-lp";
+/** "market" and "market-redeem": a bet or a redemption in a prediction's on-chain market (MEMESTREAM_MARKETS). */
+export type TxAction = "launch" | "trade" | "claim" | "graduate" | "claim-lp" | "market" | "market-redeem";
 
 /** expired = the server's blockhash ran out with the signature unseen; the user must check their wallet. */
 export type TxStatus = { status: "pending" | "confirmed" | "failed" | "expired"; error?: string };

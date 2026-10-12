@@ -20,11 +20,14 @@ import { unwrapSolIx } from "./create";
 import { fetchQuestion, redeemIxs, resolveIx } from "./vault";
 
 const SIDES: Side[] = ["yes", "no"];
+export const CLOSE_SLIPPAGE_BPS = 100;
+const atLeast = (amount: BN) => amount.muln(10_000 - CLOSE_SLIPPAGE_BPS).divn(10_000);
 
 /**
  * One transaction per pool that still has the oracle's liquidity: claims its fees, removes all
- * liquidity and closes the position (its rent comes back). The SOL side is unwrapped. Minimums
- * are zero: trading is meant to be over, and the oracle takes whatever the pool holds.
+ * liquidity and closes the position (its rent comes back). The SOL side is unwrapped. Minimums come
+ * from a fresh withdraw quote, less CLOSE_SLIPPAGE_BPS: a price pushed around between the quote and
+ * the close makes the close fail (and the server tries again) rather than fill worse.
  */
 export async function buildCloseTradingTxs(connection: Connection, keys: MarketKeys, pools: MarketPools): Promise<BuiltTx[]> {
   const cpAmm = new CpAmm(connection);
@@ -32,14 +35,24 @@ export async function buildCloseTradingTxs(connection: Connection, keys: MarketK
   for (const side of SIDES) {
     const pool = pools[side];
     for (const p of await lpPositionsOf(connection, pool.address, keys.oracle)) {
+      const quote = cpAmm.getWithdrawQuote({
+        liquidityDelta: p.positionState.unlockedLiquidity,
+        minSqrtPrice: pool.state.sqrtMinPrice,
+        maxSqrtPrice: pool.state.sqrtMaxPrice,
+        sqrtPrice: pool.state.sqrtPrice,
+        collectFeeMode: pool.state.collectFeeMode,
+        tokenAAmount: pool.state.tokenAAmount,
+        tokenBAmount: pool.state.tokenBAmount,
+        liquidity: pool.state.liquidity,
+      });
       const tx = await cpAmm.removeAllLiquidityAndClosePosition({
         owner: keys.oracle,
         position: p.position,
         positionNftAccount: p.positionNftAccount,
         poolState: pool.state,
         positionState: p.positionState,
-        tokenAAmountThreshold: new BN(0),
-        tokenBAmountThreshold: new BN(0),
+        tokenAAmountThreshold: atLeast(quote.outAmountA),
+        tokenBAmountThreshold: atLeast(quote.outAmountB),
         vestings: [],
         currentPoint: pool.currentPoint,
       });

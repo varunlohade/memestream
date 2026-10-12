@@ -9,6 +9,8 @@
 import {
   ActivationType,
   BaseFeeMode,
+  bpsToFeeNumerator,
+  getBaseFeeHandlerFromPodAlignedData,
   CollectFeeMode,
   deriveCustomizablePoolAddress,
   getAmountAFromLiquidityDelta,
@@ -21,6 +23,7 @@ import {
 import { NATIVE_MINT } from "@solana/spl-token";
 import type { Connection, PublicKey } from "@solana/web3.js";
 import type BN from "bn.js";
+import { InputError } from "../dbc/errors";
 import { type DammSnapshot, loadDammSnapshot } from "../damm/pool";
 import { questionIdFor, type MarketOdds, oddsFromPrices, priceFromSqrtPrice, type Side } from "./math";
 import { vaultKeys, type VaultKeys } from "./vault";
@@ -79,9 +82,9 @@ export function marketKeysFromId(connection: Connection, questionId: Uint8Array,
   return { ...vault, oracle, questionId, pools: { yes: pool("yes"), no: pool("no") } };
 }
 
-/** A coin prediction's market. */
-export const marketKeys = (connection: Connection, coinMint: PublicKey, predictionId: string, oracle: PublicKey): MarketKeys =>
-  marketKeysFromId(connection, questionIdFor(coinMint, predictionId), oracle);
+/** A coin prediction's market; `secret` is the server's market secret (see questionIdFor). */
+export const marketKeys = (connection: Connection, secret: string, coinMint: PublicKey, predictionId: string, oracle: PublicKey): MarketKeys =>
+  marketKeysFromId(connection, questionIdFor(secret, coinMint, predictionId), oracle);
 
 export type MarketPools = Record<Side, DammSnapshot>;
 
@@ -95,4 +98,25 @@ export async function loadMarketPools(connection: Connection, keys: MarketKeys):
 export function marketOdds(pools: MarketPools): MarketOdds {
   const price = (side: Side) => priceFromSqrtPrice(BigInt(pools[side].state.sqrtPrice.toString()));
   return oddsFromPrices(price("yes"), price("no"));
+}
+
+const NOT_OURS = "This market's pools don't match memestream's, so trading is off for it";
+
+/**
+ * A pool at a market's address is ours only if it is exactly what buildCreateMarketTxs makes: anyone
+ * can create a pool at that address first, with the tokens the other way round, another range or
+ * fee. Token A must be the outcome and B wSOL (the trade builders assume it), on our price range,
+ * with our flat 1% fee, no dynamic fee, and fees collected in SOL. These never change, so a pass can be cached.
+ */
+export function verifyMarketPools(keys: MarketKeys, pools: MarketPools): void {
+  for (const side of ["yes", "no"] as const) {
+    const { state, address } = pools[side];
+    if (!address.equals(keys.pools[side])) throw new InputError(NOT_OURS);
+    if (!state.tokenAMint.equals(keys.mints[side]) || !state.tokenBMint.equals(NATIVE_MINT)) throw new InputError(NOT_OURS);
+    if (!state.sqrtMinPrice.eq(PRICE_RANGE.min) || !state.sqrtMaxPrice.eq(PRICE_RANGE.max)) throw new InputError(NOT_OURS);
+    if (state.collectFeeMode !== COLLECT_FEE_MODE || state.poolFees.dynamicFee.initialized !== 0) throw new InputError(NOT_OURS);
+    const fee = getBaseFeeHandlerFromPodAlignedData(state.poolFees.baseFee.baseFeeInfo.data);
+    const ours = bpsToFeeNumerator(MARKET_FEE_BPS);
+    if (!fee.getMinFeeNumerator().eq(ours) || !fee.getMaxFeeNumerator().eq(ours)) throw new InputError(NOT_OURS);
+  }
 }
