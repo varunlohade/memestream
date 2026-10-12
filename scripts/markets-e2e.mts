@@ -2,14 +2,15 @@
  * DEVNET ONLY: one full prediction-market round against a running memestream server (next start
  * with MEMESTREAM_PREDICTIONS=1 and MEMESTREAM_MARKETS=1), through its real HTTP routes:
  * the streamer launches a question -> the server opens its market -> a viewer buys YES (devnet SOL)
- * -> the lock closes trading -> the streamer resolves YES -> the flag window and AI check pass -> the
- * server resolves the market -> the viewer redeems. Then the oracle redeems its own seed tokens.
+ * and sells half back -> the lock closes trading -> the streamer proposes YES -> the challenge window
+ * ends -> the server resolves the market -> the viewer redeems. Then the oracle redeems its seed.
+ * Run the server with MEMESTREAM_MARKET_CHALLENGE_MIN=3 (test runs only) so the window is short.
  *
  * Run:  BASE_URL=http://127.0.0.1:3000 MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<run>: \
  *       KV_REST_API_URL=... KV_REST_API_TOKEN=... npx tsx --conditions=react-server scripts/markets-e2e.mts
  * Optional: MARKET_E2E_MINT=<a devnet memestream coin by .keys/devnet-creator.json> (else one is
  * launched), MARKET_E2E_WINDOW_MIN (1, 2, 5 or 10; default 5), SHOT_CMD (run as `SHOT_CMD <state>
- * <mint> <wallet>` at each card state: open, position, closed, resolved).
+ * <mint> <wallet>` at each card state: open, position, closed, proposed, resolved).
  *
  * Wallets: streamer .keys/devnet-creator.json, viewer .keys/e2e-viewer-1.json, oracle
  * .keys/partner.json (also tops the others up). Prints every devnet signature; never a key.
@@ -185,6 +186,13 @@ async function run() {
   log(`bet: viewer bought YES for ${BET_SOL} SOL  ${bought.sig}`);
   const after = await odds(viewer);
   check("bet: the odds moved to YES and the viewer holds YES", after.probability.yes > 0.5 && Number(after.position?.yes) >= Number(preview.minimumReceived), `yes ${after.probability.yes.toFixed(3)}, holds ${after.position?.yes} YES, vol ${after.volumeSol}`);
+  const half = (Number(after.position?.yes ?? 0) / 2).toFixed(9);
+  const sellPreview = await ok<{ received: string }>("POST", "/api/markets/preview", { body: { mint, predictionId: id, side: "yes", action: "sell", amount: half } });
+  const solBeforeSell = await connection.getBalance(viewer.publicKey);
+  const sold = await sendViaApp("market", viewer, { mint, predictionId: id, side: "yes", action: "sell", amount: half, minReceived: sellPreview.received });
+  const soldFor = (await connection.getBalance(viewer.publicKey)) - solBeforeSell;
+  log(`sell: viewer sold ${half} YES for ${sellPreview.received} SOL  ${sold.sig}`);
+  check("sell: half the YES sold back for SOL", soldFor > 0, `+${soldFor / LAMPORTS_PER_SOL} SOL after network fees`);
   shot("position", mint, viewer.publicKey.toBase58());
 
   const wait = record.lockAt - Date.now() + 2_000;
@@ -197,12 +205,15 @@ async function run() {
   shot("closed", mint, viewer.publicKey.toBase58());
 
   await ok("POST", coinPath, { token: session.token, body: { kind: "resolve", id, outcome: "yes" } });
-  log("resolve: the streamer resolved YES; waiting for the flag window and the AI check");
+  log("resolve: the streamer proposed YES; the challenge window runs");
+  const proposed = await waitFor("the proposal", (v) => v.resolved.find((x) => x.id === id && x.verdict?.status === "proposed"), 60_000);
+  check("challenge window: the result is proposed, final at the window's end", proposed.verdict?.finalAt !== null, `final at ${new Date(proposed.verdict!.finalAt!).toISOString()}`);
+  shot("proposed", mint, viewer.publicKey.toBase58());
   const result = await waitFor("the market to resolve", (v) => {
     const r = v.resolved.find((x) => x.id === id);
     return r?.market === "resolved" ? r : undefined;
   }, 25 * 60_000);
-  check("resolve: the server resolved the market after the flag window", result.flagUntil === null, `ai ${result.ai}, disputed ${result.disputed}`);
+  check("resolve: the server resolved the market once the window ended", Date.now() >= proposed.verdict!.finalAt!, `final ${result.verdict?.final}, ai ${result.ai}`);
   const settled = await odds(viewer);
   check("resolve: YES pays [1,0]", JSON.stringify(settled.payoutNumerators) === "[1,0]", JSON.stringify(settled.payoutNumerators));
   shot("resolved", mint, viewer.publicKey.toBase58());
