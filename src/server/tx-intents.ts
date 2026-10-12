@@ -1,22 +1,26 @@
 /**
  * Server-side guard against paying twice: the same wallet asking to build the same transaction
- * (same action and inputs) while an earlier one, built within INTENT_WINDOW_MS, is signed but not
- * yet confirmed, failed or expired gets a 409. The client reports each intent's signature through
- * the status poll (?intent=), so a built-but-rejected transaction never counts as pending.
+ * (same action and inputs, amount compared in base units) gets a 409 while an earlier one is held:
+ * - from its build for BUILD_HOLD_MS (the wallet popup), so a second tab or a reload can't build it again;
+ * - once the client reports its signature (status poll, ?intent=), until SIGNED_HOLD_MS after the build;
+ * - until it's confirmed, failed or expired (status poll), or the wallet rejected it (/api/tx/rejected).
+ * A record is only ever added if none exists (never overwritten), so two racing builds can't both pass.
  *
- * State lives in the shared Redis (one record per wallet + intent, expiring with the blockhash);
+ * State lives in the shared Redis (one record per wallet + intent, expiring on its own);
  * without Redis, or while it is down, each instance keeps its own in-memory copy. Any store error
  * lets the trade through: this is a convenience check, the chain is still the source of truth.
  */
 import { createHash, randomUUID } from "node:crypto";
-import type { TxStatus } from "@/lib/api-types";
+import { SOL_DECIMALS, type TxStatus } from "@/lib/api-types";
+import { BASE_DECIMALS, parseUnits } from "@/lib/dbc/units";
+import { OUTCOME_DECIMALS } from "@/lib/markets/pool";
 import type { ParsedTx } from "./requests";
 import { sharedRedis } from "./shared-limit";
 
-/** A blockhash's longest life (150 blocks, with margin): after it, the transaction can't land. */
-export const INTENT_WINDOW_MS = 90_000;
-/** Records outlive the window a little, so a late status report still finds its record. */
-const RECORD_TTL_MS = 150_000;
+/** Held from the build while the wallet popup is open; a client that never reports lets it lapse. */
+export const BUILD_HOLD_MS = 30_000;
+/** Held once signed: past the blockhash's life (~90 s) plus the grace a wallet's own blockhash may take. */
+export const SIGNED_HOLD_MS = 150_000;
 const REDIS_TIMEOUT_MS = 800;
 const REDIS_PAUSE_MS = 30_000;
 const PREFIX = "memestream:intent:";
@@ -26,22 +30,31 @@ export type IntentRecord = { id: string; blockhash: string; at: number; signatur
 export type IntentStore = {
   get: (key: string) => Promise<IntentRecord | null>;
   set: (key: string, record: IntentRecord, ttlMs: number) => Promise<void>;
+  /** Adds the record only if the key has none; false if one exists. */
+  add: (key: string, record: IntentRecord, ttlMs: number) => Promise<boolean>;
   del: (key: string) => Promise<void>;
 };
 
 export function memoryIntentStore(clock: () => number = Date.now): IntentStore {
   const records = new Map<string, { record: IntentRecord; until: number }>();
+  const get = (key: string) => {
+    const hit = records.get(key);
+    if (hit && hit.until > clock()) return hit.record;
+    records.delete(key);
+    return null;
+  };
+  const set = (key: string, record: IntentRecord, ttlMs: number) => {
+    const now = clock();
+    for (const [k, v] of records) if (v.until <= now) records.delete(k);
+    records.set(key, { record, until: now + ttlMs });
+  };
   return {
-    async get(key) {
-      const hit = records.get(key);
-      if (hit && hit.until > clock()) return hit.record;
-      records.delete(key);
-      return null;
-    },
-    async set(key, record, ttlMs) {
-      const now = clock();
-      for (const [k, v] of records) if (v.until <= now) records.delete(k);
-      records.set(key, { record, until: now + ttlMs });
+    get: async (key) => get(key),
+    set: async (key, record, ttlMs) => set(key, record, ttlMs),
+    async add(key, record, ttlMs) {
+      if (get(key)) return false;
+      set(key, record, ttlMs);
+      return true;
     },
     async del(key) {
       records.delete(key);
@@ -77,13 +90,33 @@ export function sharedIntentStore(): IntentStore {
   return {
     get: (key) => viaRedis((r) => r.get<IntentRecord>(PREFIX + key), () => local.get(key)),
     set: (key, record, ttlMs) => viaRedis(async (r) => void (await r.set(PREFIX + key, record, { px: ttlMs })), () => local.set(key, record, ttlMs)),
+    add: (key, record, ttlMs) => viaRedis(async (r) => (await r.set(PREFIX + key, record, { px: ttlMs, nx: true })) === "OK", () => local.add(key, record, ttlMs)),
     del: (key) => viaRedis(async (r) => void (await r.del(PREFIX + key)), () => local.del(key)),
   };
 }
 
+/** The decimals an amount is sent in: SOL in for a buy, coins or outcome shares out for a sell. */
+function amountDecimals(parsed: ParsedTx): number | null {
+  if (parsed.action === "trade") return parsed.req.side === "buy" ? SOL_DECIMALS : BASE_DECIMALS;
+  if (parsed.action === "market") return parsed.req.action === "buy" ? SOL_DECIMALS : OUTCOME_DECIMALS;
+  return null;
+}
+
+/** "0.1", "0.10" and ".1" are one amount: compare base units. Bad input stays as typed (the build refuses it). */
+function normalAmount(amount: string, decimals: number): string {
+  const text = amount.trim();
+  try {
+    return parseUnits(text.startsWith(".") ? `0${text}` : text, decimals).toString();
+  } catch {
+    return amount;
+  }
+}
+
 /** Who and what: the wallet, the action and its inputs. Slippage and the quoted minimum don't make a trade different. */
 export function intentKey(parsed: ParsedTx): string {
-  const inputs = parsed.req as Record<string, unknown>;
+  const decimals = amountDecimals(parsed);
+  const inputs: Record<string, unknown> = { ...parsed.req };
+  if (decimals !== null && typeof inputs.amount === "string") inputs.amount = normalAmount(inputs.amount, decimals);
   const sorted = Object.keys(inputs)
     .filter((k) => k !== "slippageBps" && k !== "minReceived")
     .sort()
@@ -104,19 +137,33 @@ export function txIntents(store: IntentStore) {
     }
   };
   return {
-    /** The pending signature of an identical intent, or null if this one may go ahead. */
+    /** The identical intent still held (its signature may be null: the popup is still open), or null. */
     pending: (key: string, now: number) =>
       safely(async () => {
         const record = await store.get(key);
-        return record?.signature && now - record.at < INTENT_WINDOW_MS ? record.signature : null;
+        if (!record) return null;
+        return now - record.at < (record.signature ? SIGNED_HOLD_MS : BUILD_HOLD_MS) ? { signature: record.signature } : null;
       }, null),
 
-    /** Records a freshly built intent; the token goes back to the client for its status polls. */
-    remember: async (key: string, blockhash: string, now: number) => {
+    /**
+     * Holds a freshly built intent. Returns the token the client sends back on its status polls,
+     * or null if an identical intent got there first (answer 409). A store error lets it through.
+     */
+    remember: async (key: string, blockhash: string, now: number): Promise<string | null> => {
       const id = randomUUID();
-      await safely(() => store.set(key, { id, blockhash, at: now, signature: null }, RECORD_TTL_MS), undefined);
-      return `${key}.${id}`;
+      const added = await safely(() => store.add(key, { id, blockhash, at: now, signature: null }, BUILD_HOLD_MS), true);
+      return added ? `${key}.${id}` : null;
     },
+
+    /** The wallet rejected it: nothing was signed, so the same trade may be built again at once. */
+    release: (token: string) =>
+      safely(async () => {
+        const match = TOKEN.exec(token);
+        if (!match) return;
+        const [, key, id] = match;
+        const record = await store.get(key);
+        if (record && record.id === id && !record.signature) await store.del(key);
+      }, undefined),
 
     /** From a status poll: the signature makes the intent pending; a final answer ends it. */
     report: (token: string, blockhash: string, signature: string | null, status: TxStatus["status"], now: number) =>
@@ -127,14 +174,14 @@ export function txIntents(store: IntentStore) {
         const record = await store.get(key);
         if (!record || record.id !== id || record.blockhash !== blockhash) return;
         if (status !== "pending") return store.del(key);
-        const left = RECORD_TTL_MS - (now - record.at);
+        const left = SIGNED_HOLD_MS - (now - record.at);
         if (signature && !record.signature && left > 0) await store.set(key, { ...record, signature }, left);
       }, undefined),
   };
 }
 
 export const DUPLICATE_MESSAGE = "Your last trade is still confirming. Check your wallet before trading again.";
-export const duplicateResponse = (pendingSignature: string) =>
+export const duplicateResponse = (pendingSignature: string | null) =>
   Response.json({ error: DUPLICATE_MESSAGE, duplicate: true, pendingSignature }, { status: 409 });
 
 let shared: ReturnType<typeof txIntents> | undefined;
