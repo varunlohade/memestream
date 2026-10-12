@@ -1,124 +1,27 @@
 "use client";
 /**
- * Wires the money state machine (lib/tx-flow.ts) to the browser. The per-wallet ledger in
- * localStorage is the only source of truth: the lock, the banner and the unlock button are derived
- * from it (viewOf). This file only stores it, runs one status tracker per own entry, and feeds
- * wallet and network events into it.
+ * Runs a transaction: the server builds it, the wallet signs and sends it, then we poll its status
+ * until it lands, fails or expires. No lock: other trades stay open while one confirms. The banner
+ * shows only the last result (went through / failed), kept in memory for this tab.
  */
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { solscanTx } from "@/lib/explorer";
 import type { PreparedTx, TxAction, TxStatus } from "@/lib/api-types";
 import { fetchJson, postJson } from "@/lib/http";
-import {
-  applyEvent,
-  begin,
-  EMPTY_LEDGER,
-  type Entry,
-  type FlowEvent,
-  isBusy,
-  isUserRejection,
-  lateSignature,
-  type Ledger,
-  MESSAGES,
-  POLL_MS,
-  STALE_AFTER_MS,
-  type View,
-  viewOf,
-} from "@/lib/tx-flow";
-
-const KEY_PREFIX = "memestream.ledger.";
-const listeners = new Set<() => void>();
-const notify = () => listeners.forEach((listener) => listener());
-/** Used if localStorage writes fail (e.g. full): the in-memory copy still holds the lock. */
-const memory: Record<string, Ledger> = {};
-/** Keys whose last write failed: localStorage holds an older copy, so memory wins. */
-const writeFailed = new Set<string>();
-
-function load(wallet: string): Ledger {
-  const key = KEY_PREFIX + wallet;
-  if (writeFailed.has(key)) return memory[key] ?? EMPTY_LEDGER;
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as Ledger) : (memory[key] ?? EMPTY_LEDGER);
-  } catch {
-    return memory[key] ?? EMPTY_LEDGER;
-  }
-}
-
-function save(wallet: string, ledger: Ledger) {
-  const key = KEY_PREFIX + wallet;
-  memory[key] = ledger;
-  try {
-    localStorage.setItem(key, JSON.stringify(ledger));
-    writeFailed.delete(key);
-  } catch {
-    writeFailed.add(key);
-  }
-  notify();
-}
-
-/** Read-modify-write in one synchronous step (no await in between), so it can't interleave. */
-function update(wallet: string, change: (ledger: Ledger) => Ledger): Ledger {
-  const next = change(load(wallet));
-  save(wallet, next);
-  return next;
-}
-
-function subscribe(onChange: () => void) {
-  listeners.add(onChange);
-  window.addEventListener("storage", onChange); // other tabs' writes
-  return () => {
-    listeners.delete(onChange);
-    window.removeEventListener("storage", onChange);
-  };
-}
-
-/** Stable per-tab id that survives a reload of the same tab. */
-function tabId(): string {
-  try {
-    let id = sessionStorage.getItem("memestream.tab");
-    if (!id) sessionStorage.setItem("memestream.tab", (id = crypto.randomUUID()));
-    return id;
-  } catch {
-    return "this-tab";
-  }
-}
+import { isBusy, isUserRejection, type LastResult, MESSAGES, POLL_MS, type View } from "@/lib/tx-flow";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
-const fetchStatus = (entry: Entry) =>
-  fetchJson<TxStatus>(`/api/tx/status?${new URLSearchParams({ blockhash: entry.blockhash, ...(entry.signature ? { signature: entry.signature } : {}) })}`);
 
-/** Polls one entry until it's resolved or waiting for the user. One per entry per tab. */
-const running = new Set<string>();
-async function trackEntry(wallet: string, id: string) {
-  if (running.has(id)) return;
-  running.add(id);
-  try {
-    for (;;) {
-      const entry = load(wallet).entries.find((e) => e.id === id);
-      if (!entry || entry.phase === "check-wallet") return;
-      let event: FlowEvent;
-      try {
-        event = { type: "status", answer: await fetchStatus(entry) };
-      } catch (error) {
-        event = { type: "status-error", busy: isBusy(error) };
-      }
-      update(wallet, (ledger) => applyEvent(ledger, id, event, Date.now()));
-      await sleep(POLL_MS);
-    }
-  } finally {
-    running.delete(id);
-  }
-}
-
-/** How long the button shows "Confirming" before the banner alone takes over. */
-const FOREGROUND_WAIT_MS = 90_000;
+/** How long to wait for an answer before telling the user to check their wallet. */
+const CONFIRM_WAIT_MS = 120_000;
+const UNKNOWN = "We couldn't confirm it yet. Check your wallet history before you try again.";
 
 export type Stage = "Preparing" | "Check your wallet" | "Confirming";
 
 type TxState = {
   view: View;
+  /** Always false: kept so callers don't change. */
   locked: boolean;
   unlock: (id: string) => void;
   dismiss: () => void;
@@ -133,100 +36,57 @@ export function useTx(): TxState {
   return state;
 }
 
-const FREE: View = { kind: "free", last: null };
+/** Polls the status route until the transaction lands or fails; null if there's no answer in time. */
+async function waitForResult(signature: string, blockhash: string): Promise<TxStatus | null> {
+  const deadline = Date.now() + CONFIRM_WAIT_MS;
+  while (Date.now() < deadline) {
+    try {
+      const answer = await fetchJson<TxStatus>(`/api/tx/status?${new URLSearchParams({ signature, blockhash })}`);
+      if (answer.status === "confirmed" || answer.status === "failed") return answer;
+    } catch (error) {
+      if (!isBusy(error)) console.warn("tx status check failed:", (error as Error).message);
+    }
+    await sleep(POLL_MS);
+  }
+  return null;
+}
 
 export function TxProvider({ children }: { children: ReactNode }) {
   const { address, signAndSend } = useWallet();
-  const snapshot = useSyncExternalStore(
-    subscribe,
-    () => (address ? JSON.stringify({ ledger: load(address), view: viewOf(load(address), tabId(), Date.now()) }) : "null"),
-    () => "null",
-  );
-  const { ledger, view } = (JSON.parse(snapshot) as { ledger: Ledger; view: View } | null) ?? { ledger: EMPTY_LEDGER, view: FREE };
-
-  // Track every own entry still in flight, including after a reload. A "signing" entry from an
-  // earlier page load has lost its wallet prompt: it continues as tracking (row 5).
-  const resumed = useRef<string | null>(null);
-  useEffect(() => {
-    if (!address) return;
-    const tab = tabId();
-    if (resumed.current !== address) {
-      resumed.current = address;
-      for (const e of ledger.entries) {
-        if (e.tab === tab && e.phase === "signing" && !running.has(e.id)) {
-          update(address, (l) => applyEvent(l, e.id, { type: "wallet-error" }, Date.now()));
-        }
-      }
-    }
-    for (const e of ledger.entries) if (e.tab === tab && e.phase !== "check-wallet") void trackEntry(address, e.id);
-  }, [address, ledger]);
-
-  // Another tab's entry stops locking this tab once stale; re-read then, so no reload is needed.
-  useEffect(() => {
-    if (view.kind !== "other-tab") return;
-    const oldest = Math.min(...ledger.entries.map((e) => e.startedAt));
-    const timer = setTimeout(notify, Math.max(0, oldest + STALE_AFTER_MS - Date.now()) + 1_000);
-    return () => clearTimeout(timer);
-  }, [view.kind, ledger]);
+  const [last, setLast] = useState<LastResult | null>(null);
 
   const run = useCallback(
-    async <T extends PreparedTx>(action: TxAction, label: string, body: unknown, onStage: (stage: Stage) => void): Promise<T> => {
+    async <T extends PreparedTx>(action: TxAction, _label: string, body: unknown, onStage: (stage: Stage) => void): Promise<T> => {
       if (!address) throw new Error("Connect a wallet first");
-      const wallet = address;
-      if (viewOf(load(wallet), tabId(), Date.now()).kind !== "free") throw new Error(MESSAGES.locked);
+      const id = crypto.randomUUID();
       onStage("Preparing");
       const prepared = await postJson<T>(`/api/tx/${action}`, body);
-
-      // Lock: check and add in one synchronous step, right before the wallet prompt opens.
-      const id = crypto.randomUUID();
-      const started = update(wallet, (l) => begin(l, { id, label, tab: tabId(), blockhash: prepared.blockhash }, Date.now()));
-      const original = started.entries.find((e) => e.id === id) as Entry;
-      void trackEntry(wallet, id); // also catches a wallet that never answers
       onStage("Check your wallet");
-
-      let trackedId = id;
+      let signature: string;
       try {
-        const signature = await signAndSend(prepared.transaction);
-        const after = update(wallet, (l) => lateSignature(l, original, signature, Date.now()));
-        if (!after.entries.some((e) => e.id === id)) trackedId = `${id}-late`; // it had been unlocked meanwhile
-        void trackEntry(wallet, trackedId);
+        signature = await signAndSend(prepared.transaction);
       } catch (error) {
-        update(wallet, (l) => applyEvent(l, id, isUserRejection(error) ? { type: "rejected" } : { type: "wallet-error" }, Date.now()));
+        throw new Error(isUserRejection(error) ? MESSAGES.rejected : (error as Error).message || "Your wallet couldn't send it");
       }
-
       onStage("Confirming");
-      const deadline = Date.now() + FOREGROUND_WAIT_MS;
-      for (;;) {
-        const current = load(wallet);
-        const entry = current.entries.find((e) => e.id === trackedId);
-        if (!entry) {
-          const last = current.last?.id === trackedId ? current.last : null;
-          if (last?.kind === "confirmed") return prepared;
-          throw new Error(last?.text ?? MESSAGES.locked);
-        }
-        if (entry.phase === "check-wallet") throw new Error(entry.message ?? MESSAGES.expired);
-        if (Date.now() > deadline) throw new Error("Still confirming. Trading is paused until we know, so you can't pay twice.");
-        await sleep(500);
+      const answer = await waitForResult(signature, prepared.blockhash);
+      if (answer?.status === "confirmed") {
+        setLast({ id, kind: "confirmed", text: MESSAGES.confirmed, signature });
+        return prepared;
       }
+      const text = answer?.status === "failed" ? MESSAGES.failed(answer.error) : UNKNOWN;
+      setLast({ id, kind: "failed", text, signature });
+      throw new Error(text);
     },
     [address, signAndSend],
   );
 
-  const unlock = useCallback(
-    (id: string) => {
-      if (address) update(address, (l) => applyEvent(l, id, { type: "unlock" }, Date.now()));
-    },
-    [address],
-  );
-  const dismiss = useCallback(() => {
-    if (address) update(address, (l) => ({ ...l, last: null }));
-  }, [address]);
-
-  const value = useMemo<TxState>(() => ({ view, locked: view.kind !== "free", unlock, dismiss, run }), [view, unlock, dismiss, run]);
+  const dismiss = useCallback(() => setLast(null), []);
+  const value = useMemo<TxState>(() => ({ view: { kind: "free", last }, locked: false, unlock: () => {}, dismiss, run }), [last, dismiss, run]);
   return <TxContext.Provider value={value}>{children}</TxContext.Provider>;
 }
 
-/** Under the top bar, derived only from the ledger: paused / check your wallet (with unlock) / last result. */
+/** Under the top bar: the last result (went through / failed), with a link to Solscan. */
 export function TxBanner() {
   const { view, unlock, dismiss } = useTx();
   const { chain } = useWallet();
