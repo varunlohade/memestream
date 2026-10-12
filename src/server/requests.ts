@@ -1,5 +1,5 @@
 /** Parses API request bodies into typed requests. Pure, so it unit-tests without HTTP. */
-import { DEFAULT_SLIPPAGE_BPS, type TxAction } from "@/lib/api-types";
+import { DEFAULT_SLIPPAGE_BPS, SLIPPAGE_CHOICES_BPS, type TxAction } from "@/lib/api-types";
 import { UserError } from "./errors";
 import type { LaunchRequest, QuoteRequest, TradeRequest } from "./transactions";
 
@@ -16,13 +16,19 @@ function parseSide(value: unknown): "buy" | "sell" {
   return value;
 }
 
+/** A whitelisted max slippage (number, or digits from a query string); anything else gets the default. */
+export function parseSlippage(value: unknown): number {
+  const bps = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  return (SLIPPAGE_CHOICES_BPS as readonly unknown[]).includes(bps) ? (bps as number) : DEFAULT_SLIPPAGE_BPS;
+}
+
 export function parseQuote(params: URLSearchParams): QuoteRequest {
   const query: Body = Object.fromEntries(params);
   return {
     mint: requiredText(query, "mint"),
     side: parseSide(params.get("side")),
     amount: requiredText(query, "amount"),
-    slippageBps: DEFAULT_SLIPPAGE_BPS,
+    slippageBps: parseSlippage(params.get("slippageBps")),
   };
 }
 
@@ -56,7 +62,7 @@ export function parseTxRequest(action: string, body: Body): ParsedTx {
           mint: requiredText(body, "mint"),
           side: parseSide(body.side),
           amount: requiredText(body, "amount"),
-          slippageBps: DEFAULT_SLIPPAGE_BPS,
+          slippageBps: parseSlippage(body.slippageBps),
           minReceived: typeof body.minReceived === "string" ? body.minReceived : undefined,
         },
       };

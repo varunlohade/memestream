@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseQuote, parseTxRequest } from "./requests";
+import { parseQuote, parseSlippage, parseTxRequest } from "./requests";
 
 test("parses each action", () => {
   assert.equal(parseTxRequest("claim", { wallet: "W", mint: "M" }).action, "claim");
@@ -16,9 +16,24 @@ test("a trade keeps the minimum the user saw, only as a string", () => {
   assert.equal(minOf(trade(42)), undefined);
 });
 
-test("a trade always uses the default slippage", () => {
-  const trade = parseTxRequest("trade", { wallet: "W", mint: "M", side: "sell", amount: "5", slippageBps: 5_000 });
-  assert.equal(trade.action === "trade" && trade.req.slippageBps, 100);
+test("slippage: only the whitelist passes, anything else is the 1% default", () => {
+  for (const bps of [50, 100, 300, 500]) {
+    assert.equal(parseSlippage(bps), bps);
+    assert.equal(parseSlippage(String(bps)), bps);
+  }
+  for (const bad of [0, 10_000, -1, "abc", undefined, null, "", 5_000, 300.5, "300.0", " 300", "-1", "1e2"]) {
+    assert.equal(parseSlippage(bad), 100, `for ${JSON.stringify(bad)}`);
+  }
+});
+
+test("a trade uses the picked slippage only from the whitelist", () => {
+  const slippageOf = (slippageBps: unknown) => {
+    const trade = parseTxRequest("trade", { wallet: "W", mint: "M", side: "sell", amount: "5", slippageBps });
+    return trade.action === "trade" ? trade.req.slippageBps : null;
+  };
+  assert.equal(slippageOf(300), 300);
+  assert.equal(slippageOf(5_000), 100);
+  assert.equal(slippageOf(undefined), 100);
 });
 
 test("a launch keeps only a string stream link", () => {
@@ -39,6 +54,8 @@ test("rejects bad input", () => {
 test("parses quote query params", () => {
   const q = parseQuote(new URLSearchParams({ mint: "M", side: "buy", amount: "0.5" }));
   assert.deepEqual(q, { mint: "M", side: "buy", amount: "0.5", slippageBps: 100 });
+  assert.equal(parseQuote(new URLSearchParams({ mint: "M", side: "buy", amount: "0.5", slippageBps: "500" })).slippageBps, 500);
+  assert.equal(parseQuote(new URLSearchParams({ mint: "M", side: "buy", amount: "0.5", slippageBps: "10000" })).slippageBps, 100);
   assert.throws(() => parseQuote(new URLSearchParams({ mint: "M", side: "buy" })), /Missing amount/);
   assert.throws(() => parseQuote(new URLSearchParams({ side: "buy", amount: "1" })), /Missing mint/);
 });
