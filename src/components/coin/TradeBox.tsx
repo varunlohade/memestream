@@ -16,7 +16,11 @@ type Status = { kind: "busy" | "done" | "error"; text: string };
 const amountKey = (mint: string, side: Side) => `memestream.amount.${mint}.${side}`;
 const DEFAULT_AMOUNT: Record<Side, string> = { buy: "0.5", sell: "" };
 
-/** The input unit (per side) and the max slippage are browser-wide choices, kept in localStorage. */
+/**
+ * The input unit (per side) lives in sessionStorage, in the same tab as the typed amount it describes:
+ * another tab flipping its unit must never reinterpret this tab's amount (a coin amount read as SOL
+ * would cap to a 100% sell). The max slippage is a browser-wide choice in localStorage.
+ */
 const unitKey = (side: Side) => `memestream.unit.${side}`;
 const SLIPPAGE_KEY = "memestream.slippageBps";
 
@@ -49,7 +53,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const [side, setSide] = useState<Side>("buy");
 
   const [pickedUnits, setPickedUnits] = useState<Partial<Record<Side, Unit>>>({});
-  const savedUnit = useSyncExternalStore(noSubscription, () => asUnit(read(local, unitKey(side))), () => null);
+  const savedUnit = useSyncExternalStore(noSubscription, () => asUnit(read(session, unitKey(side))), () => null);
   const unit = pickedUnits[side] ?? savedUnit ?? NATURAL_UNIT[side];
 
   /** null = nothing typed in this page view yet: show the saved amount (or the default). */
@@ -85,7 +89,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
     const next: Unit = unit === "sol" ? "coin" : "sol";
     setAmount(convertTyped(amount, unit, coin.priceSol));
     setPickedUnits((units) => ({ ...units, [side]: next }));
-    save(local, unitKey(side), next);
+    save(session, unitKey(side), next);
   };
 
   const pickSlippage = (bps: number) => {
