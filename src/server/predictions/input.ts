@@ -3,7 +3,7 @@ import { isBase58Of } from "@/lib/base58";
 import type { Action } from "@/lib/predictions/engine";
 import { isOutcome, isSide } from "@/lib/predictions/rules";
 
-const isId = (value: unknown): value is string => typeof value === "string" && /^[1-9][0-9]{0,3}$/.test(value);
+const isId = (value: unknown): value is string => typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value);
 
 export function parseAction(body: Record<string, unknown>): Action | null {
   switch (body.kind) {

@@ -41,3 +41,8 @@ test("malformed actions, and any way to move points between wallets, are refused
   ];
   for (const body of bad) assert.equal(parseAction(body), null, JSON.stringify(body));
 });
+
+test("prediction ids past 9999 still parse, so a busy coin's later predictions can be bet on and resolved", () => {
+  assert.deepEqual(parseAction({ kind: "bet", id: "10000", side: "yes", amount: 10 }), { kind: "bet", id: "10000", side: "yes", amount: 10 });
+  assert.equal(parseAction({ kind: "bet", id: "1234567890", side: "yes", amount: 10 }), null, "bounded at 9 digits");
+});

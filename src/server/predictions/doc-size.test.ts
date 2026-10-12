@@ -4,7 +4,6 @@ import { type Actor, apply, applyReview, type Game, newGame, STAFF } from "@/lib
 import {
   AI_CHECK_MAX_TRIES,
   BET_WINDOWS_MIN,
-  FLAG_WINDOW_MS,
   FRAME_NOTE_MAX,
   MAX_BET,
   MAX_BETTORS,
@@ -59,7 +58,8 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
   // also start while up to MAX_LIVE from the last one are still live (nobody looked for over an
   // hour); they cancel at once and sit in their flag window beside the new stream's results.
   // Open ones also carry an AI check still running with its launch and lock frames at their longest.
-  const openAtOnce = Math.min(MAX_PREDICTIONS_PER_STREAM, (MAX_LIVE * FLAG_WINDOW_MS) / (BET_WINDOWS_MIN[0] * MIN)) + MAX_LIVE;
+  // Worst case: a stream boundary mid-window leaves a full stream's results open while the next stream adds its own.
+  const openAtOnce = 2 * MAX_PREDICTIONS_PER_STREAM;
   const note = (kind: "launch" | "lock") => ({ kind, at: T0, text: "x".repeat(FRAME_NOTE_MAX) });
   const frames = [note("launch"), note("lock")];
   const summary = { ...open, open: null, flags: MAX_BETTORS, ai: { verdict: "disagree" as const, at: T0 } };
