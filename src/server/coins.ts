@@ -135,7 +135,8 @@ async function loadCoin(mint: string): Promise<{ coin: CoinView; venue: TradeVen
  * Coin detail is read by the API route AND by server-rendered pages (coin page, OBS overlay), so
  * the cache and the RPC budget live here, shared by all of them. The coin and its trades are cached
  * per coin, and a wallet's holdings separately, so made-up wallet addresses cost 2 calls, not a
- * full read. Unknown coins are remembered for 30 s so made-up addresses can't force reads; if
+ * full read. Unknown coins (no pool account on our config) are remembered for 30 s so made-up
+ * addresses can't force reads; a known coin whose read fails keeps its last good data, and if
  * trade history briefly fails, the last good trades are kept.
  */
 const DETAIL_CACHE_MS = 4_000;
@@ -159,7 +160,7 @@ const holdingsInFlight = new Map<string, Promise<Holdings | null>>();
 
 /**
  * Coin, recent trades and (optionally) a wallet's holdings, or null if it isn't a memestream coin.
- * Throws BusyError when the RPC budget says no.
+ * With no last good data, throws BusyError when the RPC budget says no, or the read's error.
  */
 export async function getCoinDetail(mint: string, wallet: string | null): Promise<CoinDetail | null> {
   const base = await coinAndTrades(mint);
@@ -177,18 +178,29 @@ async function refreshCoin(mint: string, previous: CoinAndTrades | null | undefi
   const now = Date.now();
 
   // Cheap existence check first (only when we don't already know the coin): unknown or made-up
-  // addresses cost one call and are remembered as misses for 30 s.
+  // addresses cost one call and are remembered as misses for 30 s. Only a pool account that is
+  // absent counts as a miss; a failed check throws and is not remembered.
   if (!previous) {
     const pool = poolForMint(mint);
     if (!pool) return remember(coinCache, mint, null, now);
     if (!(await takeRpcBudget(EXISTS_RPC_CALLS))) throw new BusyError();
     if (!(await getChain().connection.getAccountInfo(pool))) return remember(coinCache, mint, null, now);
   }
-  if (!(await takeRpcBudget(COIN_RPC_CALLS - EXISTS_RPC_CALLS))) throw new BusyError();
 
-  const fetched = await readCoinAndTrades(mint);
-  const value = fetched && fetched.trades.length === 0 && previous?.trades.length ? { ...fetched, trades: previous.trades } : fetched;
-  return remember(coinCache, mint, value, now);
+  // From here the coin is ours (its pool exists), and a DBC pool is never closed, so a failed or
+  // empty read is transient (429, timeout, a lagging RPC node, mid-graduation): serve the last good
+  // data if there is any, and never remember it as a miss.
+  try {
+    if (!(await takeRpcBudget(COIN_RPC_CALLS - EXISTS_RPC_CALLS))) throw new BusyError();
+    const fetched = await readCoinAndTrades(mint);
+    if (!fetched) throw new Error(`coin pool read came back empty: ${mint}`);
+    const value = fetched.trades.length === 0 && previous?.trades.length ? { ...fetched, trades: previous.trades } : fetched;
+    return remember(coinCache, mint, value, now);
+  } catch (error) {
+    if (!previous) throw error;
+    console.warn("coin read failed; serving the last good data:", (error as Error).message);
+    return remember(coinCache, mint, previous, now);
+  }
 }
 
 async function holdingsFor(mint: string, wallet: string, meteoraPool: string | null): Promise<Holdings | null> {
