@@ -43,6 +43,13 @@ export const AI_CHECK_RETRY_MS = 20_000;
 export const AI_CHECK_MAX_TRIES = 3;
 /** Hard deadline: past this long after the result's flag window, an unfinished AI check ends as "couldn't tell", whatever the server's keys. */
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
+/**
+ * On-chain markets (MEMESTREAM_MARKETS): a server step on a market (create, close trading,
+ * resolve) that fails is tried again after this pause. Creating gives up after this many tries
+ * ("Market unavailable"; points bets stay open); closing and resolving keep trying.
+ */
+export const MARKET_RETRY_MS = 45_000;
+export const MARKET_CREATE_MAX_TRIES = 3;
 /** A frame description is cut to this many characters. */
 export const FRAME_NOTE_MAX = 400;
 /** A "Not approved" note shows to its asker for this long. */

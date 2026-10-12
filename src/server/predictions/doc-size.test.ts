@@ -62,10 +62,12 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
   const openAtOnce = 2 * MAX_PREDICTIONS_PER_STREAM;
   const note = (kind: "launch" | "lock") => ({ kind, at: T0, text: "x".repeat(FRAME_NOTE_MAX) });
   const frames = [note("launch"), note("lock")];
-  const summary = { ...open, open: null, flags: MAX_BETTORS, ai: { verdict: "disagree" as const, at: T0 } };
+  // Every prediction also carries its on-chain market at its longest (MEMESTREAM_MARKETS).
+  const market = { step: "resolved" as const, tries: 1_000, at: T0, question: wallet("question", 0) };
+  const summary = { ...open, open: null, flags: MAX_BETTORS, ai: { verdict: "disagree" as const, at: T0 }, market };
   game.resolved = Array.from({ length: Math.max(MAX_HISTORY, openAtOnce) }, (_, i) =>
     i < openAtOnce
-      ? { ...structuredClone(open), id: String(1_000 + i), check: { tries: AI_CHECK_MAX_TRIES, at: T0, frames } }
+      ? { ...structuredClone(open), id: String(1_000 + i), check: { tries: AI_CHECK_MAX_TRIES, at: T0, frames }, market }
       : { ...summary, id: String(1_000 + i) },
   );
   game.suggestions = Array.from({ length: MAX_QUEUE }, (_, i) => ({
@@ -87,6 +89,7 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
     no: 0,
     bettors: MAX_BETTORS,
     frames,
+    market,
   }));
   game.won = Object.fromEntries(Array.from({ length: MAX_WON_ENTRIES }, (_, i) => [wallet("winner", i), -1_000_000]));
   game.nextId = 1_000_000;

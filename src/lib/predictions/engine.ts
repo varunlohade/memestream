@@ -39,6 +39,8 @@ import {
   MAX_UPVOTERS_STORED,
   MAX_UPVOTES,
   MAX_WON_ENTRIES,
+  MARKET_CREATE_MAX_TRIES,
+  MARKET_RETRY_MS,
   MIN_BET,
   MIN_HOLDING_COINS,
   MINUTE_MS,
@@ -81,6 +83,16 @@ export type FrameNote = { kind: FrameKind; at: number; text: string | null };
 export type AiVerdict = "agree" | "disagree" | "unclear";
 /** An AI check waiting for its verdict: runs started so far, when the last one started, the frames grabbed earlier. */
 export type AiCheck = { tries: number; at: number; frames: FrameNote[] };
+/**
+ * A prediction's on-chain market (MEMESTREAM_MARKETS): opening -> open -> closed (trading over) ->
+ * resolved; or failed when it couldn't be created. `tries`/`at` claim the next server step, like an
+ * AI check run. `question` is the market's question address once it exists (every other address
+ * derives from the coin, the prediction id and the oracle).
+ */
+export type MarketStep = "opening" | "open" | "closed" | "resolved" | "failed";
+export type MarketState = { step: MarketStep; tries: number; at: number; question?: string };
+/** How a market pays: one side, or "refund" (cancelled or disputed: every token pays half). */
+export type MarketOutcome = Side | "refund";
 /** A live prediction: open for bets until `lockAt`, then waiting for a result. */
 export type Prediction = {
   id: string;
@@ -97,6 +109,7 @@ export type Prediction = {
   bettors: number;
   /** Frames grabbed for the AI check (only on a coin whose stream has frames, with the check set up). */
   frames?: FrameNote[];
+  market?: MarketState;
 };
 /**
  * A result, kept short: no per-wallet lists. Only while its flag window is open does it keep
@@ -121,6 +134,7 @@ export type Summary = {
   ai?: { verdict: AiVerdict; at: number };
   /** Present while the AI check runs; the result counts only after it ends. */
   check?: AiCheck;
+  market?: MarketState;
 };
 export type FlagWindow = {
   /** Each bettor's [stake, payout, flagged (1) or not (0)]. */
@@ -177,6 +191,8 @@ export type Env = {
   streamStartedAt?: number | null;
   /** The coin's stream has frames and the AI check is set up (keys present). */
   aiCheck?: boolean;
+  /** On-chain markets are on (MEMESTREAM_MARKETS): each prediction that goes live gets one. */
+  markets?: boolean;
 };
 
 /** A balance change: `delta` points, allowed only if the balance is at least `floor` before it. */
@@ -335,6 +351,73 @@ export function applyAiVerdict(state: Game, id: string, verdict: AiVerdict | nul
   });
 }
 
+/** A server step on a prediction's market: create it, close its trading, or resolve it. */
+export type MarketJob = { id: string; kind: "create" } | { id: string; kind: "close" } | { id: string; kind: "resolve"; outcome: MarketOutcome };
+
+const marketRetryDue = (m: MarketState, now: number) => m.tries === 0 || now >= m.at + MARKET_RETRY_MS;
+/** The market still needs a server step (it isn't resolved or given up on). */
+const marketPending = (m: MarketState | undefined) => m !== undefined && m.step !== "resolved" && m.step !== "failed";
+
+/** What a market pays once its result counts: cancelled or disputed refunds everyone. */
+export const marketOutcome = (p: Summary): MarketOutcome => (p.outcome === "cancel" || p.disputed ? "refund" : p.outcome);
+
+/**
+ * The step due on one prediction's market, if any: create while it's live and taking bets; close
+ * trading once betting closes; resolve once the result counts (flag window over, AI check done).
+ */
+function marketJobFor(p: Prediction | Summary, live: boolean, now: number): MarketJob | null {
+  const m = p.market;
+  if (!m || !marketRetryDue(m, now)) return null;
+  if (m.step === "opening") return live && now < (p as Prediction).lockAt && m.tries < MARKET_CREATE_MAX_TRIES ? { id: p.id, kind: "create" } : null;
+  if (m.step === "open") return !live || now >= (p as Prediction).lockAt ? { id: p.id, kind: "close" } : null;
+  if (m.step === "closed" && !live && !(p as Summary).open && !(p as Summary).check) return { id: p.id, kind: "resolve", outcome: marketOutcome(p as Summary) };
+  return null;
+}
+
+function marketJobs(game: Game, now: number): { p: Prediction | Summary; job: MarketJob }[] {
+  const out: { p: Prediction | Summary; job: MarketJob }[] = [];
+  for (const [list, live] of [[game.live, true], [game.resolved, false]] as const) {
+    for (const p of list) {
+      const job = marketJobFor(p, live, now);
+      if (job) out.push({ p, job });
+    }
+  }
+  return out;
+}
+
+/** Whether any market step is due now. */
+export const marketsDue = (game: Game, now: number) => marketJobs(game, now).length > 0;
+
+/** Claims every due market step (counts the try), like startAi: committing this first means no other server starts the same one. */
+export function startMarkets(state: Game, now: number, env: Env = { streamerSeenAt: null }): Result & { jobs: MarketJob[] } {
+  const jobs: MarketJob[] = [];
+  const result = run(state, now, env, ({ game }) => {
+    for (const { p, job } of marketJobs(game, now)) {
+      p.market = { ...p.market!, tries: p.market!.tries + 1, at: now };
+      jobs.push(job);
+    }
+  });
+  return { ...result, jobs };
+}
+
+/** A create that lands after the market was given up on still opens it, so its seed is closed out and redeemed like any other. */
+const MARKET_NEXT_STEP: Record<MarketJob["kind"], { from: MarketStep[]; to: MarketStep }> = {
+  create: { from: ["opening", "failed"], to: "open" },
+  close: { from: ["open"], to: "closed" },
+  resolve: { from: ["closed"], to: "resolved" },
+};
+
+/** A market step that succeeded on-chain. Only moves a market still at that step; a repeat is left alone. */
+export function applyMarketDone(state: Game, job: MarketJob, question: string | null, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, ({ game }) => {
+    const p = [...game.live, ...game.resolved].find((x) => x.id === job.id);
+    const { from, to } = MARKET_NEXT_STEP[job.kind];
+    if (!p?.market || !from.includes(p.market.step)) return;
+    const address = question ?? p.market.question;
+    p.market = { step: to, tries: 0, at: now, ...(address ? { question: address } : {}) };
+  });
+}
+
 /** Runs the clock, then `step`, then the clock again (a step may free the slot for the next suggestion). */
 function run(state: Game, now: number, env: Env, step: (ctx: Ctx) => void): Result {
   const game: Game = structuredClone(state);
@@ -372,6 +455,7 @@ function tick(ctx: Ctx) {
   expireNotices(ctx);
   autoCancelUnresolved(ctx);
   endStaleChecks(ctx);
+  endUnopenedMarkets(ctx);
   closeFlagWindows(ctx);
   launchCrowdPick(ctx);
 }
@@ -448,11 +532,27 @@ function endStaleChecks({ game, now }: Ctx) {
   }
 }
 
+/**
+ * A market that never opened is given up on: every create try failed, or betting closed first.
+ * Its prediction stays a points game.
+ */
+function endUnopenedMarkets({ game, now }: Ctx) {
+  for (const [list, live] of [[game.live, true], [game.resolved, false]] as const) {
+    for (const p of list) {
+      const m = p.market;
+      // Not while a create try may still be running.
+      if (m?.step !== "opening" || !marketRetryDue(m, now)) continue;
+      if (m.tries >= MARKET_CREATE_MAX_TRIES || !live || now >= (p as Prediction).lockAt) p.market = { ...m, step: "failed" };
+    }
+  }
+}
+
 /** Results past their flag window, with no AI check still running, count now (unless disputed); then only the last MAX_HISTORY stay. */
 function closeFlagWindows(ctx: Ctx) {
   const { game, now } = ctx;
   for (const p of game.resolved) if (p.open && !p.check && now >= p.resolvedAt + FLAG_WINDOW_MS) finalize(ctx, p);
-  game.resolved = game.resolved.filter((p, i) => p.open || i < MAX_HISTORY);
+  // A result whose market still needs closing or resolving stays until it's done.
+  game.resolved = game.resolved.filter((p, i) => p.open || i < MAX_HISTORY || marketPending(p.market));
 }
 
 /** The crowd picks, into every free live slot: only while the streamer is here and has crowd picks on. */
@@ -492,6 +592,7 @@ function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: 
     yes: 0,
     no: 0,
     bettors: 0,
+    ...(ctx.env.markets ? { market: { step: "opening" as const, tries: 0, at: now } } : {}),
   });
 }
 
@@ -512,6 +613,7 @@ function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string) {
   const summary: Summary = { id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } };
   // A YES/NO result gets an AI check when the coin's stream has frames; a cancel needs none.
   if (outcome !== "cancel" && ctx.env.aiCheck) summary.check = { tries: 0, at: now, frames: p.frames ?? [] };
+  if (p.market) summary.market = p.market;
   game.resolved.unshift(summary);
 }
 
