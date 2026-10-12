@@ -300,7 +300,7 @@ async function run() {
   check("heartbeat: a viewer's beat does nothing", viewerBeat.status === 200 && viewerBeat.json.accepted === false, JSON.stringify(viewerBeat.json));
 
   // Suggest: costs 10, holders only, never staff.
-  const question = `Will the streamer win the next game? (${symbol})`;
+  const question = `Will the streamer score in the next 2 minutes? (${symbol})`;
   const afterSuggest = await must("suggest: viewer1 suggests a question", () => actOk(v1, { kind: "suggest", text: question }));
   const suggestion = afterSuggest.queue.find((s) => s.mine);
   check("suggest: costs 10 points", afterSuggest.me!.balance === startBalances[0] - SUGGEST_COST, `${startBalances[0]} -> ${afterSuggest.me!.balance}`);
@@ -371,8 +371,9 @@ async function run() {
   // Round 2: the streamer types a question and launches it (1-minute window), then cancels: refunds.
   // Each call reads devnet, so the 4 bets go out together to fit in the minute.
   const preBet2 = await balances([v1, v2, v3, v4]);
-  const text2 = `Will chat say gg first? (${symbol})`;
-  const launched2 = await must("launch: the streamer launches their own question (1 min)", () => actOk(streamer, { kind: "launch", text: text2, windowMin: 1 }));
+  // The AI review picks each betting window from the text: these ask for about a minute.
+  const text2 = `Will chat say gg in the next minute? (${symbol})`;
+  const launched2 = await must("launch: the streamer launches their own question (about 1 min)", () => actOk(streamer, { kind: "launch", text: text2 }));
   check("launch: a typed staff question waits for review first", !launched2.live.some((l) => l.text === text2), launched2.live.map((l) => l.text).join(", ") || "not live yet");
   const live2 = await waitForView(streamer, (v) => v.live.some((l) => l.text === text2));
   check("launch: jev approves it and it goes live", live2 !== null, live2?.live.map((l) => l.text).join(", ") ?? "none");
@@ -398,8 +399,8 @@ async function run() {
   // Round 3: two predictions live at once. Bets on both; one resolves YES, the other is cancelled;
   // each one's payouts are checked on their own.
   const twoLive: { text: string; id: string }[] = [];
-  for (const [i, text] of [`Will the next round go to overtime? (${symbol})`, `Will chat spam emotes next? (${symbol})`].entries()) {
-    await must(`launch: the streamer launches question ${i + 1} of 2 (1 min)`, () => actOk(streamer, { kind: "launch", text, windowMin: 1 }));
+  for (const [i, text] of [`Will he land the next shot? (${symbol})`, `Will chat spam emotes in the next minute? (${symbol})`].entries()) {
+    await must(`launch: the streamer launches question ${i + 1} of 2 (about 1 min)`, () => actOk(streamer, { kind: "launch", text }));
     const live = await waitForView(streamer, (v) => v.live.some((l) => l.text === text));
     check(`launch: question ${i + 1} of 2 goes live`, live !== null, live?.live.map((l) => l.text).join(", ") ?? "none");
     if (!live) throw new Fatal("two live: launch");
@@ -457,7 +458,7 @@ async function run() {
   const beforeJunk = await balance(v2);
   await must("review: viewer2 suggests junk", () => actOk(v2, { kind: "suggest", text: "asdkj qwe zzz banana 77?" }));
   const rejected = await waitForView(v2, (v) => !v.queue.some((s) => s.mine) && Boolean(v.me?.notice));
-  check("review: jev rejects junk and tells only the asker why", rejected !== null && rejected.me!.notice!.startsWith("Not approved"), rejected?.me?.notice ?? "no verdict");
+  check("review: jev rejects junk and tells only the asker why", rejected !== null && rejected.me!.notice!.startsWith("Your question wasn't approved"), rejected?.me?.notice ?? "no verdict");
   check("review: others never see the rejected question", !(await view(v3)).queue.some((s) => s.text.startsWith("asdkj")), "hidden");
   check("review: a rejected question keeps its 10-point cost", (await balance(v2)) === beforeJunk - SUGGEST_COST, `${beforeJunk} -> ${await balance(v2)}`);
   await refused("review: the asker waits before suggesting again", v2, { kind: "suggest", text: "Will he win the next round?" }, "wasn't approved");

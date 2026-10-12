@@ -28,8 +28,8 @@ function ledger() {
 function liveGame(env: Env, l = ledger()) {
   let game = newGame(STREAMER);
   game = l.take(apply(game, { kind: "suggest", text: "Will the streamer jump?" }, actor(ASKER), T0, env));
-  game = l.take(applyReview(game, game.suggestions[0], { approved: true }, T0, env));
-  game = l.take(apply(game, { kind: "launch", id: game.suggestions[0].id, windowMin: 1 }, actor(STREAMER), T0, env));
+  game = l.take(applyReview(game, game.suggestions[0], { approved: true, windowMin: 1 }, T0, env));
+  game = l.take(apply(game, { kind: "launch", id: game.suggestions[0].id }, actor(STREAMER), T0, env));
   for (const [i, b] of BETTORS.entries()) game = l.take(apply(game, { kind: "bet", id: game.live[0].id, side: i % 2 ? "yes" : "no", amount: 100 }, actor(b), T0, env));
   return game;
 }
@@ -59,8 +59,8 @@ test("frames: launch is grabbed at once, lock once betting closes, each claimed 
 
 test("frames and checks are per prediction when several are live", () => {
   let game = liveGame(ON);
-  game = apply(game, { kind: "launch", text: "Will chat win this round?", windowMin: 2 }, actor(STREAMER), T0, ON).game;
-  game = applyReview(game, game.pending!, { approved: true }, T0, ON).game;
+  game = apply(game, { kind: "launch", text: "Will chat win this round?" }, actor(STREAMER), T0, ON).game;
+  game = applyReview(game, game.pending!, { approved: true, windowMin: 2 }, T0, ON).game;
   const [p1, p2] = game.live.map((p) => p.id);
   const launch = startAi(game, T0, ON);
   assert.deepEqual(launch.captures.map((c) => [c.id, c.kind]), [[p1, "launch"], [p2, "launch"]]);

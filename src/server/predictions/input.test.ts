@@ -9,8 +9,9 @@ test("well-formed actions pass through", () => {
   assert.deepEqual(parseAction({ kind: "upvote", id: "12" }), { kind: "upvote", id: "12" });
   assert.deepEqual(parseAction({ kind: "approve", id: "7" }), { kind: "approve", id: "7" });
   assert.deepEqual(parseAction({ kind: "bet", id: "4", side: "no", amount: 50 }), { kind: "bet", id: "4", side: "no", amount: 50 });
-  assert.deepEqual(parseAction({ kind: "launch", id: "3", windowMin: 5 }), { kind: "launch", id: "3", windowMin: 5 });
-  assert.deepEqual(parseAction({ kind: "launch", text: "My own question?" }), { kind: "launch", text: "My own question?", windowMin: undefined });
+  // A client's windowMin is dropped silently: the AI review picks the betting window.
+  assert.deepEqual(parseAction({ kind: "launch", id: "3", windowMin: 5 }), { kind: "launch", id: "3" });
+  assert.deepEqual(parseAction({ kind: "launch", text: "My own question?", windowMin: 60 }), { kind: "launch", text: "My own question?" });
   assert.deepEqual(parseAction({ kind: "resolve", id: "4", outcome: "cancel" }), { kind: "resolve", id: "4", outcome: "cancel" });
   assert.deepEqual(parseAction({ kind: "flag", id: "4" }), { kind: "flag", id: "4" });
   assert.deepEqual(parseAction({ kind: "mod", wallet: WALLET, add: true }), { kind: "mod", wallet: WALLET, add: true });
@@ -54,5 +55,5 @@ test("challenge and decide: ids, a reason, an optional link, and only known outc
   assert.equal(parseAction({ kind: "challenge", id: "x", reason: "He lost" }), null);
   assert.deepEqual(parseAction({ kind: "decide", id: "4", outcome: "refund" }), { kind: "decide", id: "4", outcome: "refund" });
   assert.equal(parseAction({ kind: "decide", id: "4", outcome: "pay me" }), null);
-  assert.deepEqual(parseAction({ kind: "launch", text: "Will it rain?", windowMin: 5, source: "https://weather.example" }), { kind: "launch", text: "Will it rain?", windowMin: 5, source: "https://weather.example" });
+  assert.deepEqual(parseAction({ kind: "launch", text: "Will it rain?", windowMin: 5, source: "https://weather.example" }), { kind: "launch", text: "Will it rain?", source: "https://weather.example" });
 });

@@ -17,8 +17,6 @@ import { fetchJson, postJson } from "@/lib/http";
 import { newNonce, MESSAGE_TTL_MS, sessionMessage, signInInput } from "@/lib/predictions/message";
 import {
   AUTO_LAUNCH_UPVOTES,
-  BET_WINDOWS_MIN,
-  DEFAULT_WINDOW_MIN,
   HEARTBEAT_MS,
   MAX_LIVE,
   MIN_HOLDING_COINS,
@@ -161,7 +159,8 @@ export function Predictions({
   const [question, setQuestion] = useState("");
   /** The streamer's optional official source for a real-world question (markets resolve from it). */
   const [sourceLink, setSourceLink] = useState("");
-  const [windowMin, setWindowMin] = useState<number>(DEFAULT_WINDOW_MIN);
+  /** The "wasn't approved" note the viewer dismissed with OK. */
+  const [dismissedNotice, setDismissedNotice] = useState<string | null>(null);
   const [board, setBoard] = useState<Board>("stream");
   /** The live prediction shown open when several are live (one at a time). */
   const [openId, setOpenId] = useState<string | null>(null);
@@ -267,6 +266,7 @@ export function Predictions({
   const notHolder = viewer && me?.holder === false;
 
   const headline = headlineFor(me);
+  const notice = me?.notice && me.notice !== dismissedNotice ? me.notice : null;
 
   const suggest = async (e: FormEvent) => {
     e.preventDefault();
@@ -274,7 +274,7 @@ export function Predictions({
   };
   const launchOwn = async (e: FormEvent) => {
     e.preventDefault();
-    if (await act({ kind: "launch", text: question, windowMin, ...(sourceLink.trim() ? { source: sourceLink.trim() } : {}) })) {
+    if (await act({ kind: "launch", text: question, ...(sourceLink.trim() ? { source: sourceLink.trim() } : {}) })) {
       setQuestion("");
       setSourceLink("");
     }
@@ -290,6 +290,14 @@ export function Predictions({
         <h2>Predictions</h2>
         <span className="mute num">{headline}</span>
       </div>
+      {notice && (
+        <div className="notice err pm-notice" role="alert">
+          <span>{notice}</span>
+          <button type="button" className="mbtn off" onClick={() => setDismissedNotice(notice)}>
+            OK
+          </button>
+        </div>
+      )}
 
       {address && !session && (
         <div className="pm-signin">
@@ -335,7 +343,6 @@ export function Predictions({
       ) : (
         live.length === 0 && <p className="mute pm-small">Nothing live right now.</p>
       )}
-      {me?.notice && <p className="mute pm-small">{me.notice}</p>}
 
       <div className="pm-subh">
         Up next{" "}
@@ -349,12 +356,6 @@ export function Predictions({
       </div>
       {staff && (
         <div className="pm-window">
-          <span className="mute">Window</span>
-          {BET_WINDOWS_MIN.map((m) => (
-            <button key={m} type="button" className={`slot pm-chip${windowMin === m ? " on" : ""}`} onClick={() => setWindowMin(m)} aria-pressed={windowMin === m}>
-              {m}m
-            </button>
-          ))}
           <button
             type="button"
             className={`slot pm-crowd${view.crowdPicks ? " on" : ""}`}
@@ -376,13 +377,14 @@ export function Predictions({
           ) : (
             <span className="mute num">
               {s.upvotes} upvote{s.upvotes === 1 ? "" : "s"}
+              {s.windowMin !== null && ` · closes in ~${s.windowMin} min`}
             </span>
           )}
           {s.status === "review" ? (
             staff && s.stuck ? <StuckButtons busy={busy} onAct={(kind) => act({ kind, id: s.id })} /> : <span />
           ) : staff ? (
             <div className="pm-qb">
-              <button type="button" className="mbtn buy" disabled={busy || full} onClick={() => act({ kind: "launch", id: s.id, windowMin })}>
+              <button type="button" className="mbtn buy" disabled={busy || full} onClick={() => act({ kind: "launch", id: s.id })}>
                 Launch
               </button>
               <button type="button" className="mbtn off" disabled={busy} onClick={() => act({ kind: "remove", id: s.id })}>

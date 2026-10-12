@@ -62,7 +62,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     domain: "memestream.lol",
     coin: async (mint) => coins.get(mint) ?? null,
     holds: async () => true,
-    review: async () => ({ approved: true }),
+    review: async () => ({ approved: true, windowMin: 1 }),
     ai: withAi ? ai : null,
     defer: (task) => void deferred.push(task),
     attempts: 200,
@@ -81,7 +81,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
   let liveId = "";
   const playToLock = async () => {
     for (const v of BETTORS) await fund(v);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Is there a person on screen?", windowMin: 1 });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Is there a person on screen?" });
     await settle(); // review approves, the question goes live
     await service.view(COIN, null);
     await settle(); // the launch frame

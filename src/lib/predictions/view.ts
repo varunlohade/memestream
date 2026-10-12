@@ -45,7 +45,7 @@ export type PredictionsView = {
     hasSuggestion: boolean;
     /** Holds at least 1 whole coin (needed to suggest and upvote); null if unknown or staff. */
     holder: boolean | null;
-    /** A short "Not approved: ..." note about this wallet's question (staff: about a typed question), shown for a few minutes. */
+    /** A short "Your question wasn't approved: ..." note about this wallet's question (staff: about a typed question), shown for a few minutes. */
     notice: string | null;
     /** A memestream admin (MEMESTREAM_ADMIN_WALLETS): settles market challenges. */
     admin: boolean;
@@ -72,8 +72,9 @@ export type PredictionsView = {
   /**
    * "review": the AI review hasn't approved it yet. Only its asker sees it, and staff once `stuck`
    * (every check failed: staff approve or remove it by hand). It can't be upvoted or launched.
+   * `windowMin`: the betting window it gets when it goes live (the AI review's, else the default); null under review.
    */
-  queue: { id: string; text: string; upvotes: number; expiresAt: number; mine: boolean; upvoted: boolean; status: "review" | "ok"; stuck: boolean }[];
+  queue: { id: string; text: string; upvotes: number; expiresAt: number; mine: boolean; upvoted: boolean; status: "review" | "ok"; stuck: boolean; windowMin: number | null }[];
   resolved: {
     id: string;
     text: string;

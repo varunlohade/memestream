@@ -9,7 +9,7 @@
  * Run:  BASE_URL=http://127.0.0.1:3000 MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<run>: \
  *       KV_REST_API_URL=... KV_REST_API_TOKEN=... npx tsx --conditions=react-server scripts/markets-e2e.mts
  * Optional: MARKET_E2E_MINT=<a devnet memestream coin by .keys/devnet-creator.json> (else one is
- * launched), MARKET_E2E_WINDOW_MIN (1, 2, 5 or 10; default 5), SHOT_CMD (run as `SHOT_CMD <state>
+ * launched), SHOT_CMD (run as `SHOT_CMD <state>
  * <mint> <wallet>` at each card state: open, position, closed, proposed, resolved).
  *
  * Wallets: streamer .keys/devnet-creator.json, viewer .keys/e2e-viewer-1.json, oracle
@@ -36,7 +36,6 @@ const BASE_URL = (process.env.BASE_URL ?? "").replace(/\/$/, "");
 const PREFIX = process.env.MEMESTREAM_PREDICTIONS_PREFIX ?? "";
 const REDIS_URL = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
 const REDIS_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;
-const WINDOW_MIN = Number(process.env.MARKET_E2E_WINDOW_MIN ?? 5);
 const BET_SOL = "0.005";
 const API_GAP_MS = 1_100;
 
@@ -155,10 +154,11 @@ async function run() {
   const adminSession = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(adminKey) });
   check("points: the viewer's first sign-in grants points at once", viewerSession.granted === GRANT_POINTS, `+${viewerSession.granted} points`);
   const view = () => ok<PredictionsView>("GET", coinPath, { token: session.token });
-  const text = `Will chat say gg before the round ends? (${Date.now().toString(36).slice(-4)})`;
+  // The AI review picks the betting window from the text: this one asks for about 5 minutes.
+  const text = `Will chat say gg in the next 5 minutes? (${Date.now().toString(36).slice(-4)})`;
   const SOURCE = "https://liquipedia.net/counterstrike/Main_Page";
-  await ok("POST", coinPath, { token: session.token, body: { kind: "launch", text, windowMin: WINDOW_MIN, source: SOURCE } });
-  log(`launch: "${text}" (${WINDOW_MIN} min)`);
+  await ok("POST", coinPath, { token: session.token, body: { kind: "launch", text, source: SOURCE } });
+  log(`launch: "${text}"`);
 
   /** Polls the streamer's view (each poll also runs the server's due market steps) until `done`. */
   async function waitFor<T>(what: string, done: (v: PredictionsView) => T | undefined, ms: number): Promise<T> {
@@ -171,7 +171,7 @@ async function run() {
     }
   }
   const opened = await waitFor("the market to open", (v) => v.live.find((l) => l.text === text && (l.market === "open" || l.market === "failed")), 4 * 60_000);
-  check("market: the server opened it after the review", opened.market === "open", `market ${opened.market}`);
+  check("market: the server opened it after the review", opened.market === "open", `market ${opened.market}, window ${Math.round((opened.lockAt - opened.launchedAt) / 60_000)} min`);
   if (opened.market !== "open") throw new Error("market failed to open");
   const id = opened.id;
   const record = JSON.parse((await redisStore(redis, PREFIX).read([`market:${mint}:${id}`]))[0].json ?? "null") as MarketRecord | null;

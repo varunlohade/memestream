@@ -53,6 +53,8 @@ const ADMIN = "admin1";
 
 function setup(markets: MarketDeps | null, closeWaitMs = 0) {
   const clock = { t: T0 };
+  /** The betting window the fake review picks. */
+  let aiWindow = 1;
   const store = memoryStore(() => clock.t);
   const deferred: (() => Promise<void>)[] = [];
   const service = predictionsService({
@@ -62,7 +64,7 @@ function setup(markets: MarketDeps | null, closeWaitMs = 0) {
     domain: "memestream.lol",
     coin: async () => ({ creator: STREAMER, status: "trading", symbol: "MIRA" }),
     holds: async () => true,
-    review: async () => ({ approved: true }),
+    review: async () => ({ approved: true, windowMin: aiWindow }),
     defer: (task) => void deferred.push(task),
     markets,
     closeWaitMs,
@@ -71,10 +73,11 @@ function setup(markets: MarketDeps | null, closeWaitMs = 0) {
   const settle = async () => {
     while (deferred.length) await Promise.all(deferred.splice(0).map((task) => task()));
   };
-  /** The streamer is here (a heartbeat) and launches a typed question (1-minute window unless given); the review approves it. */
+  /** The streamer is here (a heartbeat) and launches a typed question; the review approves it with a 1-minute window unless given. */
   const launch = async (windowMin = 1) => {
+    aiWindow = windowMin;
     await service.beat(STREAMER, COIN);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will he win this round?", windowMin });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will he win this round?" });
     await settle();
     const view = await service.view(COIN, STREAMER);
     await settle();
