@@ -13,6 +13,7 @@
  */
 import {
   AI_CHECK_MAX_TRIES,
+  AI_CHECK_MAX_WAIT_MS,
   AI_CHECK_RETRY_MS,
   ASKER_REWARD,
   ASKER_REWARD_MIN_BETTORS,
@@ -432,10 +433,14 @@ function autoCancelUnresolved(ctx: Ctx) {
   if (ctx.game.live && ctx.now >= autoCancelAt(ctx.game.live)) settle(ctx, "cancel", AUTO);
 }
 
-/** An AI check whose every run failed (or never reported back) ends as "couldn't tell". */
+/** An AI check whose every run failed, or that passed its hard deadline, ends as "couldn't tell". */
 function endStaleChecks({ game, now }: Ctx) {
   for (const p of game.resolved) {
-    if (!p.check || p.check.tries < AI_CHECK_MAX_TRIES || now < p.check.at + AI_CHECK_RETRY_MS) continue;
+    if (!p.check) continue;
+    const triedOut = p.check.tries >= AI_CHECK_MAX_TRIES && now >= p.check.at + AI_CHECK_RETRY_MS;
+    // Also ends when no run will ever come (keys removed, AI off): a result can never wait forever.
+    const pastDeadline = now >= p.resolvedAt + FLAG_WINDOW_MS + AI_CHECK_MAX_WAIT_MS;
+    if (!triedOut && !pastDeadline) continue;
     delete p.check;
     p.ai = { verdict: "unclear", at: now };
   }

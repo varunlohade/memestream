@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, type Env, type Game, newGame, type Result, startAi } from "./engine";
-import { AI_CHECK_MAX_TRIES, AI_CHECK_RETRY_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_NOTE_MAX } from "./rules";
+import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_NOTE_MAX } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -140,4 +140,17 @@ test("failed runs retry after a pause, at most twice; then the result shows coul
   assert.equal(startAi(game, t, ON).checks.length, 0, "no fourth run");
   game = apply(game, { kind: "tick" }, null, t).game;
   assert.deepEqual([game.resolved[0].check, game.resolved[0].ai?.verdict, game.resolved[0].disputed], [undefined, "unclear", false]);
+});
+
+test("a check that never runs (keys removed, AI off) ends as couldn't tell at its hard deadline, and the result counts", () => {
+  let game = resolveYes(liveGame(ON), ON);
+  assert.ok(game.resolved[0].check, "a check is waiting");
+  const deadline = game.resolved[0].resolvedAt + FLAG_WINDOW_MS + AI_CHECK_MAX_WAIT_MS;
+  game = apply(game, { kind: "tick" }, null, deadline - 1, OFF).game;
+  assert.ok(game.resolved[0].check, "still waiting just before the deadline");
+  game = apply(game, { kind: "tick" }, null, deadline, OFF).game;
+  assert.equal(game.resolved[0].check, undefined);
+  assert.equal(game.resolved[0].ai?.verdict, "unclear");
+  game = apply(game, { kind: "tick" }, null, deadline + 1, OFF).game;
+  assert.equal(game.resolved[0].open, null, "the result counts once its check ended");
 });

@@ -12,7 +12,7 @@
     "dev:chain": "tsx scripts/dev-chain.ts",
     "test:clock": "tsx --test 'test/integration/*.slow.ts'",
     "typecheck": "tsc --noEmit",
-    "check:bundle": "test -d .next-check/static && ! grep -rliE 'typesafe|openrouter' .next-check/static",
+    "check:bundle": "test -d .next-check/static && ! grep -rliE 'typesafe|openrouter|sk-or-' .next-check/static",
     "e2e:predictions:local": "tsx scripts/predictions-e2e-local.mts",
     "check": "npm run typecheck && npm run lint && npm test && npm run test:surfpool && NEXT_DIST_DIR=.next-check npm run build && npm run check:bundle"
   },
