@@ -8,8 +8,12 @@ export const ok = (body: unknown) => Response.json(body, { headers: { "cache-con
 export const jsonError = (message: string, status: number) => Response.json({ error: message }, { status });
 
 /** User errors become 400 with their message; anything else is a logged 500 with a generic message. */
+/** The RPC provider rate-limited us (web3.js throws "429 Too Many Requests"): a moment of busy, not a failure. */
+const isRpcRateLimit = (error: unknown) => error instanceof Error && /\b429\b|Too Many Requests|rate limit/i.test(error.message);
+
 export function fail(error: unknown) {
   if (error instanceof UserError) return jsonError(error.message, 400);
+  if (isRpcRateLimit(error)) return busy();
   console.error(error);
   return jsonError("Something went wrong. Try again.", 500);
 }

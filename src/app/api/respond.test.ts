@@ -30,3 +30,9 @@ test("only a JSON object body is read; anything else is empty", async () => {
   assert.deepEqual(await jsonBody(post('{"wallet":"W"}')), { wallet: "W" });
   for (const body of ["[1,2]", "not json", "null", "\"text\""]) assert.deepEqual(await jsonBody(post(body)), {}, body);
 });
+
+test("an RPC rate limit (429 from the provider) answers busy (503), not a generic 500", async () => {
+  const rpc429 = new Error('429 Too Many Requests:  {"jsonrpc":"2.0","error":{"code": 429, "message":"Connection rate limits exceeded"}}');
+  assert.deepEqual(await answer(fail(rpc429)), [503, { error: "Busy, try again" }]);
+  assert.deepEqual(await answer(failOrBusy(rpc429)), [503, { error: "Busy, try again" }]);
+});
