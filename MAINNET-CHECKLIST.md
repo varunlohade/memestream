@@ -1,31 +1,31 @@
 # Mainnet checklist
 
-Every item needs Boss man's explicit go. The DBC config is fixed once created on mainnet:
+Every item needs the owner's explicit go. The DBC config is fixed once created on mainnet:
 none of its parameters can change later, so all of them must be right first.
 
-## Process (steve, 2026-10-08)
+## Process (2026-10-08)
 - From mainnet onward, a money change (tx builders, presets, fees, tx-flow) deploys only AFTER a fresh
   auditor reports it clean. On devnet, deploy-then-audit is acceptable.
 
-## Decisions (Boss man)
-- [x] **Launch fee: 0.05 SOL** (Boss man, 2026-10-08, via steve). `COIN_PRESETS["mainnet-beta"].launchFeeSol`,
+## Decisions (the owner)
+- [x] **Launch fee: 0.05 SOL** (the owner, 2026-10-08). `COIN_PRESETS["mainnet-beta"].launchFeeSol`,
       pinned in `config.test.ts`; `mainnet-config.surfpool.ts` proves a launch costs exactly 0.05 SOL
       more on the real program. It collects in each pool: the partner claims it with
       `claimPartnerPoolCreationFee` (a claim script is still to write). Go live shows
       "Launch costs 0.05 SOL" (read from the on-chain config). Devnet stays free.
-- [x] **Graduated liquidity: 100% to the streamer, 0% to the partner** (Boss man, 2026-10-09, via
-      steve). `COIN_PRESETS["mainnet-beta"].lockedLpPercent`, pinned in `config.test.ts`;
+- [x] **Graduated liquidity: 100% to the streamer, 0% to the partner** (the owner, 2026-10-09).
+      `COIN_PRESETS["mainnet-beta"].lockedLpPercent`, pinned in `config.test.ts`;
       `mainnet-config.surfpool.ts` graduates a coin on the mainnet preset and proves exactly one
       position NFT exists, held by the streamer. The partner earns the 0.05 SOL launch fee and its
       20% share of curve fees. Devnet stays 50/50 (its config is fixed).
 - [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). On mainnet the partner
       gets no LP position, so there are no partner LP fees to claim (on devnet, claim through the
       app, or for a multisig through Squads: audit #3, INFO-3).
-- [x] **Graduation threshold: 3 SOL** (Boss man, 2026-10-11, via steve; was 10 SOL). Set in
+- [x] **Graduation threshold: 3 SOL** (the owner, 2026-10-11; was 10 SOL). Set in
       `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
       programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).
 - [ ] **Partner wallet.** `feeClaimer` (receives memestream's 20% fee share) and
-      `leftoverReceiver` (receives unsold tokens after graduation) must be Boss man's real wallet,
+      `leftoverReceiver` (receives unsold tokens after graduation) must be the owner's real wallet,
       not a local key. `scripts/dev-chain.ts` uses `.keys/local-partner.json`: never use it on mainnet.
 - [ ] **Fee settings.** Confirm: 50% launch fee falling to a 1% base over 60 s, plus a small
       volatility fee (`dynamicFeeEnabled: true`); 80% of fees to the streamer; graduated pool fee 1%
@@ -44,7 +44,7 @@ none of its parameters can change later, so all of them must be right first.
       getProgramAccounts, which public RPCs rate-limit.
 - [ ] `MEMESTREAM_WALLET_CHAIN=solana:mainnet` and `MEMESTREAM_NETWORK_LABEL=Mainnet`.
 - [ ] Priority fees on transactions (busy mainnet drops unprioritized ones).
-- [ ] Dry run: simulate the createConfig transaction and review it with Boss man.
+- [ ] Dry run: simulate the createConfig transaction and review it with the owner.
 - [ ] Production build has **no** `MEMESTREAM_DEV_WALLET_KEY` set (the test wallet must not exist).
 
 - [x] Shared rate limits (2026-10-08): per-client limits per route and the site-wide RPC budget live in

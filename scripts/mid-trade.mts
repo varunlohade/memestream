@@ -4,7 +4,7 @@
  *   MEMESTREAM_DEV_SEND_DELAY_MS=20000 npm run dev
  *   npx tsx scripts/mid-trade.mts
  * Checks: a reload mid-trade ends in exactly one trade; a second tab is locked mid-trade and
- * unlocks after; a triple click makes one trade. Based on the tester's qa/2026-10-07-final/breaks.mts.
+ * unlocks after; a triple click makes one trade.
  */
 import puppeteer, { type Browser, type Page } from "puppeteer-core";
 import { sleep } from "../src/lib/poll";

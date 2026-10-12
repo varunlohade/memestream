@@ -1,7 +1,7 @@
 "use client";
 /**
  * The OBS overlay: a coin's ticker, market cap, change and XP graduation bar, drawn over the stream.
- * Read-only (no wallet, no transactions). Three layouts from design/boards/MS-overlay.png.
+ * Read-only (no wallet, no transactions). Three layouts (a, b, c).
  * `preview` paints a stand-in stream behind it so it can be checked outside OBS.
  */
 import { type CoinDetail, useCoin, usePriceTrend } from "@/components/hooks";

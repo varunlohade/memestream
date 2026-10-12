@@ -44,10 +44,10 @@ export const COIN_PRESETS: Record<Network, CoinPreset> = {
   // Free: the devnet config already exists with 0, and config params are fixed once created.
   // Split 50/50 between platform and streamer (the devnet config already exists with that).
   devnet: { graduationThresholdSol: "0.1", launchFeeSol: 0, lockedLpPercent: { partner: 50, creator: 50 } },
-  // Boss man's picks (2026-10-08). Config params are fixed once the mainnet config is created.
+  // the owner's picks (2026-10-08). Config params are fixed once the mainnet config is created.
   // The launch fee makes squatting a famous streamer's ticker cost something (audit M2).
   // All graduated liquidity to the streamer: after graduation, 100% of pool fees go to them
-  // (Boss man, 2026-10-09). The platform earns the launch fee and its curve fee share.
+  // (the owner, 2026-10-09). The platform earns the launch fee and its curve fee share.
   "mainnet-beta": { graduationThresholdSol: "3", launchFeeSol: 0.05, lockedLpPercent: { partner: 0, creator: 100 } },
 };
 

@@ -1,9 +1,0 @@
-PASS  home lists the seeded coins
-PASS  connect the localhost test wallet
-PASS  streamer launches a coin from Go live  (http://127.0.0.1:3000/coin/95Rv9qtGpi5wEKUS34kvRCkuC4y2vRLfGFoxzPWYPhMq)
-PASS  streamer can't buy their own coin
-PASS  viewer buys 0.5 SOL of $MIRA
-PASS  viewer sells half their $MIRA with the 50% chip
-PASS  an oversized buy is shown as a partial fill, then fills the curve
-PASS  anyone graduates the coin to Meteora
-PASS  streamer claims earnings on their own coin

@@ -123,7 +123,7 @@ _[Mainnet numbers: coins launched, trades, SOL volume, graduations, streamer ear
 - `src/components/`: the UI. It never builds transactions; the wallet signs what the server returns.
 - AI calls (jev review, the vision check) run on the server only. `npm run check` fails if the
   client bundle mentions them or holds anything that looks like a key.
-- `design/`: design spec, mocks and screenshots. `qa/`: dated test screenshots.
+- `design/`: design spec and the HTML mock the styles come from.
 
 Money safety: the server builds each transaction, the wallet signs and sends it, and the app
 polls until it lands, fails or expires. A trade never fills worse than the price you saw: a moved

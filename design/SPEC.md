@@ -1,12 +1,12 @@
 # memestream: design spec (FINAL: option B, Deepslate night)
 
-2026-10-07, updated 2026-10-08. Owner: art_design. Status: FINAL. Boss man picked B as-is (2026-10-07, via varun-14). Overlay A and wordmark 1 are FINAL (2026-10-08). Boss man delegated both picks to varun-14 ("figure out which is best", "any wordmark that you prefer").
+2026-10-07, updated 2026-10-08. Status: FINAL. Look B picked as-is (2026-10-07). Overlay A and wordmark 1 are FINAL (2026-10-08).
 
 **Name:** the product is "memestream", always lowercase (domain memestream.lol). It replaces "Chat Coins" (and the short-lived long name). Body copy may still say "stream coins". In the B mock, the logo is the coin sprite plus the word.
 
 **Build B only.** Source of truth: `design/mock/mc.html?opt=B` (all screens) and the B column below. Stills: `design/mock/mc/B-{coin,home,golive}.png`. Columns A and C stay for the record only. Do not build them.
 
-## Direction (Boss man, 2026-10-07)
+## Direction (the owner, 2026-10-07)
 The whole site has a Minecraft feel: pixel fonts, blocky panels, inventory-slot buttons,
 an XP-bar graduation bar, a dirt/stone/grass palette.
 
@@ -57,7 +57,7 @@ Shared rules (apply to B):
 - Left: the live stream plays in a 16:9 slot, muted, with the Live tag on top (YouTube or Twitch player), then a panel with coin image slot, `$TICKER`, "<stream name> by <streamer>", and Recent trades (Buy/Sell, SOL, coins, wallet, time ago).
 - Right, panel 1: Market cap (hero number), change, pixel step chart (one connected line: flat steps joined by vertical segments, never loose dots, even with few trades), Graduation label + "52.7 of 85 SOL", XP bar with %, then the heart row **"80% of fees go to the streamer"** (must stay visible).
 - Right, panel 2: Buy/Sell tabs, amount slot in SOL, chips 0.1 / 0.5 / 1 / Max, "You get about N TICKER", primary "Buy TICKER".
-- Launch fee line (first 60 s, anti-sniper window; steve, 2026-10-09): "Launch fee now 45.9%, drops to 1% in 55s", VT323 22px, muted, tabular numbers, directly above "You get about". The fee number itself uses the sell red `#FF5A4E` while it is above 10%, then muted. The line disappears after the window. Signed off on design/build/e2e/04.png.
+- Launch fee line (first 60 s, anti-sniper window; 2026-10-09): "Launch fee now 45.9%, drops to 1% in 55s", VT323 22px, muted, tabular numbers, directly above "You get about". The fee number itself uses the sell red `#FF5A4E` while it is above 10%, then muted. The line disappears after the window. Signed off on design/build/e2e/04.png.
 - Empty chart (no trades yet): show the muted line "The chart starts with the first trade." in the chart area, not an empty gap.
 - Streamer's own coin: the disabled button reads "Can't buy your own coin" (one line). The longer reason stays in the fair-rule copy.
 
@@ -74,7 +74,7 @@ Shared rules (apply to B):
 ## Copy rules
 Sentence case. No ellipses. No arrows on buttons. Ticker always has `$` in titles, no `$` in buttons ("Buy MIRA").
 
-## Stream pictures (2026-10-08, Boss man: real stream video, not pixel art)
+## Stream pictures (2026-10-08, the owner: real stream video, not pixel art)
 - Home tile: the stream's live picture from YouTube or Twitch.
 - Coin icon (header slot, overlay slot): a square center crop of the stream picture, else the pixel scene. Later, when image upload exists, the uploaded image comes first.
 - Coin page: the stream plays muted. People unmute it in the player.
@@ -93,30 +93,30 @@ Board: `design/boards/MS-overlay.png`. Mock: `mc.html?opt=B&screen=overlay&v=A|B
 - The real overlay page has a transparent body. The game picture in the mocks is a stand-in. Text sizes are for a 1920×1080 canvas; the XP number has an 8px black stroke for busy backgrounds.
 
 ## Unverified badge (2026-10-08): FINAL = A, Gray tag
-Boss man picked A ("a makes sense"). Build A only; B and C stay for the record. Built and signed off on stills in qa/2026-10-08-unverified/, with one tweak: the tag has the same height as the LIVE/GRADUATED tag next to it.
+The owner picked A ("a makes sense"). Build A only; B and C stay for the record. One tweak: the tag has the same height as the LIVE/GRADUATED tag next to it.
 - Behavior: on the coin page a tap opens the note (phones have no hover) and a tap outside closes it; hover also shows it. On tiles, hover only (the tile is a link).
-Why: anyone can launch a coin with any YouTube/Twitch link, and there's no channel check until channel OAuth (week 3). Audit M2; steve approved an honest label. Not on the OBS overlay.
+Why: anyone can launch a coin with any YouTube/Twitch link, and there's no channel check until channel OAuth (week 3). Audit M2; the team approved an honest label. Not on the OBS overlay.
 Board: `design/boards/MS-unverified.png`. Mock: `mc.html?opt=B&screen=home|coin&unv=A|B|C`.
 - A Gray tag: "Unverified" tag next to Live on the tile picture (`#3E3E44`, `#D8D8DC` text, VT323 22px, 3px black border). On the coin page, the same tag after $TICKER, with a hover/tap note.
 - B Quiet word: muted "Unverified" at the right of tile row 2. On the coin page, a muted line under "by <wallet>": "Unverified. We haven't checked that this streamer owns the channel." No hover needed.
 - C Icon: small gray "?" block after $TICKER on tiles and the coin page, with the hover/tap note.
 - Note text (all): "We haven't checked that this streamer owns the channel."
-- (art_design had recommended B; Boss man chose A.)
+- (Design had recommended B; the owner chose A.)
 
 ## Ticker tape (2026-10-08): FINAL = B, Live trades
-Boss man picked B (2026-10-08, in this session: "b"). Build B only; A and C stay for the record.
+The owner picked B (2026-10-08, in this session: "b"). Build B only; A and C stay for the record.
 - Thin data rule: B shows the latest trades the app already has, newest first (max ~20). If there are fewer than 5 trades from the last 30 minutes, fill the rest with C-style items ("$TICKER, mini XP bar, %") from the cached coin list, so the tape is never empty or stuck on old trades. If there are no coins at all, hide the strip.
 - Repeats: merge back-to-back trades with the same wallet, side and coin into one item with the summed SOL ("CEmpNR bought 0.015 SOL of $SYNTH"), so the tape never shows the same line three times in a row.
-- Signed off 2026-10-08 on qa/2026-10-08-tickertape/ and design/build/e2e/05.png, with the repeat merge as the one tweak.
+- Signed off 2026-10-08, with the repeat merge as the one tweak.
 A strip under the top bar, on every page except the OBS overlay. Board: `design/boards/MS-tickertape.png`. Mock: `mc.html?opt=B&screen=home&tape=A|B|C`.
 - Strip: 48px tall (40px on phones), `#111113`, 4px black bottom border, VT323 26px (22px on phones). Items are separated by a 6px gray square `#5A5A62`, not "·". No emoji: a graduation uses the coin sprite and XP green `#80FF20`.
 - A Market cap: stream thumbnail (32×18), $TICKER, market cap. No change % (that costs ~25 RPC calls per coin).
 - B Live trades: "<wallet> bought|sold <SOL> of $TICKER" (bought green, sold red), with graduation events in green.
 - C Graduation race: $TICKER, a mini XP bar (90px, 60px on phones), % in green. A graduation event appears in green when a coin graduates.
 - Motion (all): slow scroll (~40 px/s). Pause on hover and focus. No motion under prefers-reduced-motion: the strip sits still and scrolls by hand. Each item links to its coin.
-- (art_design had recommended C: it uses data the coin list already has, it repeats the product's one hook (the XP bar), and it stays quiet. B is the liveliest, but its trades come only from coin pages people opened, so it goes stale or empty when traffic is low. Boss man chose B; the thin data rule above covers that.)
+- (Design had recommended C: it uses data the coin list already has, it repeats the product's one hook (the XP bar), and it stays quiet. B is the liveliest, but its trades come only from coin pages people opened, so it goes stale or empty when traffic is low. the owner chose B; the thin data rule above covers that.)
 
 ## Open
-- Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.
-- Overlay on the deployed site signed off 2026-10-08 (672c701, qa/.../overlay-deployed.png), with one tweak: the link row in `#EDEDED`.
-- USD or SOL as the big price number: Boss man decides before the demo video.
+- Signed off 2026-10-08 on stills from commit d37aa1b: home, coin, go-live, overlay A live + graduated.
+- Overlay on the deployed site signed off 2026-10-08 (672c701), with one tweak: the link row in `#EDEDED`.
+- USD or SOL as the big price number: the owner decides before the demo video.

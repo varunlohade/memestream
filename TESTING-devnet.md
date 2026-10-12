@@ -1,4 +1,4 @@
-# memestream: devnet test list for Boss man
+# memestream: devnet test list
 
 Site: https://memestream-iota.vercel.app (devnet, test money only)
 Test journeys with pictures (private): https://claude.ai/artifact/597JtzSejT5K5J3FVCvNjG
@@ -7,7 +7,7 @@ Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 ## 0. Set up (5 min)
 - [ ] In Phantom: Settings → Developer Settings → Testnet Mode on → Solana Devnet.
 - [ ] Make 2 wallets in Phantom: **Streamer** and **Viewer**. (A streamer can't buy their own coin.)
-- [ ] Get devnet SOL into both: ~0.3 SOL each. Use faucet.solana.com, or ask steve to send some from the test partner wallet.
+- [ ] Get devnet SOL into both: ~0.3 SOL each. Use faucet.solana.com, or ask the team to send some from the test partner wallet.
 
 ## 1. Launch a coin (Streamer wallet)
 - [ ] Open the site, connect the **Streamer** wallet.
@@ -52,7 +52,7 @@ Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 - [ ] Reject a trade in Phantom: nothing is spent, and you can trade again at once.
 - [ ] Open /coin/ with a random address: you get "Not found".
 
-If anything looks wrong, note the step number and what you saw, and send it to steve.
+If anything looks wrong, note the step number and what you saw, and send it to the team.
 
 ## 9. Test predictions (free points, no money)
 

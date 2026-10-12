@@ -56,3 +56,6 @@ next-env.d.ts
 .agents/
 .claude/skills/
 skills-lock.json
+
+# e2e screenshots
+design/build/
