@@ -8,15 +8,25 @@ import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, newGame, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
+import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
-import { FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
+import { frameUrls } from "./frames";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
 import { REAL_WAITS, type Waits } from "./test-settings";
 
-export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated" };
+export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated"; streamUrl?: string | null };
+
+/** The AI check's two steps; each throws if its model fails (timeout, error, malformed answer). */
+export type AiCheckDeps = {
+  /** Grabs the stream's frame now and describes what it shows about the question; null if the stream has no frame. */
+  describe: (question: string, streamUrl: string) => Promise<string | null>;
+  /** What happened, from the question and the frame notes only (never the streamer's outcome). */
+  decide: (question: string, notes: FrameNote[]) => Promise<"yes" | "no" | "unclear">;
+};
 
 export type ServiceDeps = {
   store: PredictionStore;
@@ -30,6 +40,8 @@ export type ServiceDeps = {
   holds: (mint: string, wallet: string) => Promise<boolean>;
   /** The AI review of a typed question; throws if it fails (timeout, error, no key, malformed answer). */
   review: (question: string) => Promise<ReviewVerdict>;
+  /** The AI check of results; null or absent when it isn't set up (no keys). */
+  ai?: AiCheckDeps | null;
   /** Runs a task after the response is sent (Next's `after`). */
   defer: (task: () => Promise<void>) => void;
   /** Commit attempts before answering "busy", and the pause between them. */
@@ -182,13 +194,14 @@ type ResolvedView = PredictionsView["resolved"][number];
 const resolverOf = (game: Game, by: string | null, staff: boolean): ResolvedView["resolvedBy"] =>
   by === AUTO || by === null ? { role: "auto", wallet: null } : { role: by === game.creator ? "streamer" : "mod", wallet: staff ? by : null };
 
-function myResult(p: Summary, wallet: string | null): ResolvedView["my"] {
+function myResult(p: Summary, wallet: string | null, now: number): ResolvedView["my"] {
   if (!wallet || !p.open || !Object.hasOwn(p.open.results, wallet)) return null;
   const [bet, payout, flagged] = p.open.results[wallet];
-  return { bet, payout, flagged: flagged === 1, canFlag: true };
+  // A result held open past its window for its AI check takes no flags.
+  return { bet, payout, flagged: flagged === 1, canFlag: now < p.resolvedAt + FLAG_WINDOW_MS };
 }
 
-function resolvedView(game: Game, wallet: string | null, staff: boolean): PredictionsView["resolved"] {
+function resolvedView(game: Game, wallet: string | null, staff: boolean, now: number): PredictionsView["resolved"] {
   return game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
     id: p.id,
     text: p.text,
@@ -196,8 +209,9 @@ function resolvedView(game: Game, wallet: string | null, staff: boolean): Predic
     resolvedAt: p.resolvedAt,
     resolvedBy: resolverOf(game, p.resolvedBy, staff),
     disputed: p.disputed,
+    ai: p.check ? "checking" : (p.ai?.verdict ?? null),
     flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,
-    my: myResult(p, wallet),
+    my: myResult(p, wallet, now),
   }));
 }
 
@@ -271,7 +285,9 @@ export function predictionsService(deps: ServiceDeps) {
    * was saved but the view could not be read just then (the next poll shows it).
    */
   async function act(mint: string, wallet: string, action: Action): Promise<PredictionsView | null> {
-    const { creator } = await facts(mint);
+    const coin = await facts(mint);
+    const { creator } = coin;
+    const aiCheck = aiOn(coin);
     // Holding the coin is checked only where it matters (one cached read), not on every bet.
     const holder = action.kind === "suggest" || action.kind === "upvote" ? await deps.holds(mint, wallet) : false;
     // One id per request: if a commit lands but its reply is lost and the store client re-sends it,
@@ -282,24 +298,28 @@ export function predictionsService(deps: ServiceDeps) {
       const [balance] = await store.balances([wallet]);
       const game = parseGame(coinDoc.json, creator);
       const eligible = isEligible(parseProfile(watchDoc.json), waits.eligibleAfterMs);
-      const result = apply(game, action, { wallet, eligible, holder, balance }, now(), parseEnv(presenceDoc.json));
+      const result = apply(game, action, { wallet, eligible, holder, balance }, now(), { ...parseEnv(presenceDoc.json), aiCheck });
       const status = await store.commit({ docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
       return RETRY;
     });
+    // A launch needs its first frame and a result its check, even if the view below fails to load.
+    if (aiCheck && (action.kind === "launch" || action.kind === "resolve")) startAiRun(mint, coin);
     // The action is saved; a failed read now must not turn it into an error the user retries.
     return view(mint, wallet).catch(() => null);
   }
 
   /** Runs the clock (expiry, auto-cancel, results counting, auto-launch), saving it if anything was due. */
-  async function ticked(mint: string, creator: string): Promise<{ game: Game; env: Env }> {
+  async function ticked(mint: string, coin: CoinFacts): Promise<{ game: Game; env: Env }> {
+    const { creator } = coin;
     for (let i = 0; i < TICK_COMMIT_ATTEMPTS; i++) {
       const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
-      const env = parseEnv(presenceDoc.json);
+      const env = { ...parseEnv(presenceDoc.json), aiCheck: aiOn(coin) };
       const game = parseGame(doc.json, creator);
       const result = apply(game, { kind: "tick" }, null, now(), env);
       if (reviewsDue(result.game, now())) startReviewing(mint, creator);
+      if (aiDue(result.game, now(), env)) startAiRun(mint, coin);
       if (!result.changed) return { game, env };
       const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
       if (status === "ok") return { game: result.game, env };
@@ -352,6 +372,83 @@ export function predictionsService(deps: ServiceDeps) {
       const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
+  }
+
+  /** The coin's stream has preview frames and the AI check is set up. */
+  const aiOn = (coin: CoinFacts) => Boolean(deps.ai && frameUrls(coin.streamUrl).length > 0);
+  /** Coins with an AI run in flight in this process (another process is held off by the claim). */
+  const aiRunning = new Set<string>();
+
+  /** Grabs due frames and checks due results after the response is sent; one run per coin at a time. */
+  function startAiRun(mint: string, coin: CoinFacts) {
+    if (aiRunning.has(mint)) return;
+    aiRunning.add(mint);
+    deps.defer(() =>
+      aiRun(mint, coin)
+        .catch(() => console.warn("predictions: an AI check run failed; the next view retries it"))
+        .finally(() => aiRunning.delete(mint)),
+    );
+  }
+
+  /** Commits `step`'s result to the coin's game, re-reading on a conflict; nothing to save is fine. */
+  const commitGame = (mint: string, creator: string, step: (game: Game, env: Env) => ReturnType<typeof apply>) =>
+    retryOnConflict(async () => {
+      const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+      const result = step(parseGame(doc.json, creator), parseEnv(presenceDoc.json));
+      if (!result.changed) return true;
+      const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
+      return status === "ok" ? true : RETRY;
+    });
+
+  /** Claims every due frame grab and check run (so no other server starts them), then runs them. */
+  async function aiRun(mint: string, coin: CoinFacts) {
+    const ai = deps.ai;
+    const streamUrl = coin.streamUrl;
+    if (!ai || !streamUrl || !aiOn(coin)) return;
+    const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+    const claim = startAi(parseGame(doc.json, coin.creator), now(), { ...parseEnv(presenceDoc.json), aiCheck: true });
+    if (claim.captures.length === 0 && claim.checks.length === 0) return;
+    const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(claim.game) }], ...ledgerChanges(claim) });
+    if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
+    await Promise.all([
+      ...claim.captures.map((target) => captureOne(ai, mint, coin.creator, streamUrl, target)),
+      ...claim.checks.map((target) => checkOne(ai, mint, coin.creator, streamUrl, target)),
+    ]);
+  }
+
+  /** A frame at launch or lock: its description is saved; a failed grab leaves the note empty. */
+  async function captureOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CaptureTarget) {
+    let text: string | null;
+    try {
+      text = await ai.describe(target.text, streamUrl);
+    } catch (error) {
+      console.warn(`predictions: frame description failed (${error instanceof Error ? error.message : "unknown error"})`);
+      return;
+    }
+    if (text) await commitGame(mint, creator, (game, env) => applyFrame(game, target, text, now(), env));
+  }
+
+  /**
+   * One check run: the frame at resolve, then jev's unbiased answer, compared with the streamer's
+   * outcome. No frame at all: no check. A failed run is tried again later; the last failed run
+   * ends as "couldn't tell". A failure is never a disagree.
+   */
+  async function checkOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CheckTarget) {
+    let verdict: AiVerdict | null;
+    try {
+      const atResolve = await ai.describe(target.text, streamUrl);
+      const notes = [...target.frames.filter((f) => f.text), ...(atResolve ? [{ kind: "resolve" as const, at: now(), text: atResolve }] : [])];
+      if (notes.length === 0) verdict = null;
+      else {
+        const happened = await ai.decide(target.text, notes);
+        verdict = happened === "unclear" ? "unclear" : happened === target.outcome ? "agree" : "disagree";
+      }
+    } catch (error) {
+      console.warn(`predictions: AI check failed (${error instanceof Error ? error.message : "unknown error"})`);
+      if (target.tries < AI_CHECK_MAX_TRIES) return;
+      verdict = "unclear";
+    }
+    await commitGame(mint, creator, (game, env) => applyAiVerdict(game, target.id, verdict, now(), env));
   }
 
   /** Only wallets with 30+ minutes watched appear on leaderboards. */
@@ -413,8 +510,8 @@ export function predictionsService(deps: ServiceDeps) {
   }
 
   async function build(mint: string, wallet: string | null): Promise<PredictionsView> {
-    const { creator } = await facts(mint);
-    const { game, env } = await ticked(mint, creator);
+    const coin = await facts(mint);
+    const { game, env } = await ticked(mint, coin);
     const t = now();
     const [streamBoard, allTimeBoard] = await leaderboards(mint, game);
     const me = wallet ? await viewer(mint, wallet, game) : null;
@@ -431,7 +528,7 @@ export function predictionsService(deps: ServiceDeps) {
       pending: staff ? pendingView(game) : null,
       queueSize: visibleSuggestions(game, wallet, staff).length,
       queue: queueView(game, wallet, staff),
-      resolved: resolvedView(game, wallet, staff),
+      resolved: resolvedView(game, wallet, staff, t),
       mods: staff ? game.mods : [],
       leaderboard: {
         stream: topWinners(streamBoard),
@@ -447,7 +544,7 @@ export function predictionsService(deps: ServiceDeps) {
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf, reviewDue };
+  return { session, beat, act, view, walletOf, reviewDue, aiRun };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;

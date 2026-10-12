@@ -55,6 +55,8 @@ export type PredictionsView = {
     /** `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto"). */
     resolvedBy: { role: "streamer" | "mod" | "auto"; wallet: string | null };
     disputed: boolean;
+    /** The AI check's second opinion: "checking" while it runs; null if no check ran. */
+    ai: "checking" | "agree" | "disagree" | "unclear" | null;
     /** Flags are taken until then (ms); null once the result counts. */
     flagUntil: number | null;
     my: { bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
