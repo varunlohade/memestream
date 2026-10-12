@@ -105,3 +105,53 @@ Needs `MEMESTREAM_MARKETS=1` on the server and an admin wallet in `MEMESTREAM_AD
 - [ ] **Admin:** open the coin. Pick Final YES, Final NO or Void.
 - [ ] **Viewer:** press Redeem. A winning share pays 1 SOL; a void pays 0.5 SOL per share.
 - [ ] Every market trade shows a Solscan link.
+
+## D. Prediction markets: exact steps (live site, devnet)
+
+Browser 1 = **Streamer** (the wallet that launched the coin). Browser 2 = **Viewer** (`BxfZ…6Enf`, also
+the admin). For the fast path to Redeem you need a third wallet, **Viewer 2** (any new Phantom account):
+the admin can't decide a challenge it made itself. Ask Claude for devnet SOL for it.
+
+Both browsers: open the coin page → **predictions** tab → **Sign in to play** → approve the message.
+You see "Your points: 1,000". A viewer must hold at least 1 of the coin to suggest or upvote.
+
+### D1. Streamer asks
+
+1. Streamer: type in **Ask your own yes/no question**.
+2. Streamer (optional): paste a link in **Official source link for a real-world question (optional)**.
+3. Streamer: pick **Window** 1, 2, 5 or 10 minutes (use 1 for a quick demo).
+4. Streamer: press **Launch**. It shows **Under review** for about a second (jev).
+5. Both: the card shows **Opening market…** for about 20 s, then **Live · closes in M:SS**.
+
+### D2. Viewer asks
+
+1. Viewer: type in **Suggest a yes/no question**.
+2. Viewer: press **Suggest, 10 points**. Your points drop by 10.
+3. Viewer: your question shows **Under review** (only you see it), then appears in **Up next** for everyone.
+   Junk is refused with "Not approved: …"; the 10 points stay spent and you wait 5 minutes.
+4. Others (holders, not you, not the streamer): press **Upvote**. It changes to **Upvoted**.
+5. Crowd pick: at 3 upvotes it goes live by itself, but only while the streamer has the page open
+   and crowd picks are on.
+6. Or the Streamer presses **Launch** on it in **Up next** (or **Remove** to drop it).
+7. When it goes live, the asker gets the 10 points back.
+8. Not picked within 20 minutes: it expires and the 10 points stay spent.
+
+### D3. Trade, close, resolve, redeem
+
+1. Viewer: press **BUY YES 0.50 SOL** (or **BUY NO**). A box opens with **Buy** / **Sell** tabs.
+2. Viewer: pick **0.05**, **0.1** or **max**; check **You get ≈ N YES shares**; press **Confirm**; approve in Phantom.
+3. Both: the YES/NO bar and the % move. The viewer sees "Your position: N YES shares · pays N SOL if Yes".
+4. Viewer: **Sell** tab → amount → **Confirm** to sell some back for SOL.
+5. Streamer: trying to buy is refused (streamers can't bet on their own coin).
+6. When the window ends: the card says **Betting closed** and the buttons go away.
+7. Streamer: press **Resolve Yes** (or **Resolve No**, or **Cancel** for a refund proposal).
+8. Both: the card shows **Proposed: YES · final in 1:59:xx** and **Resolves from: …**. After a few
+   seconds an **AI check** tag may appear.
+9. Normal path: wait 2 hours, then it shows **Final: YES**. There is no shortcut on the live site.
+10. Fast path, for the demo:
+    - Viewer 2 (holds a share): press **Challenge** → type in **Why is the result wrong?** → **Challenge, 100 points**.
+    - The card shows **Disputed: under review** and "A holder challenged it".
+    - Viewer (admin `BxfZ…`): press **Final YES** (or **Final NO**, or **Void** for a 50/50 refund).
+11. Both: the card shows **Final: YES**.
+12. Winner: press **Redeem #N** → approve. It turns to **Redeemed**; each winning share paid 1 SOL.
+    On **Void**, every share pays 0.5 SOL.
