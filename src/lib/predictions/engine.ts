@@ -21,13 +21,13 @@ import {
   AUTO_CANCEL_CROWD_MS,
   AUTO_CANCEL_MS,
   AUTO_LAUNCH_UPVOTES,
-  BET_WINDOWS_MIN,
   byPoints,
   cleanQuestion,
   DEFAULT_WINDOW_MIN,
   DISPUTE_PERCENT,
   FLAG_WINDOW_MS,
   FRAME_NOTE_MAX,
+  isBetWindow,
   MAX_BET,
   MAX_BETTORS,
   MAX_HISTORY,
@@ -74,11 +74,13 @@ export type Suggestion = {
   upvotes: number;
   /** Present while the AI review hasn't approved it: only its asker sees it (staff too, once stuck). */
   review?: Review;
+  /** The AI review's betting window, if it gave one. */
+  windowMin?: number;
 };
 /** An AI review in progress: checks started so far, and when the last one started. */
 export type Review = { tries: number; at: number };
-/** A question the streamer or a mod typed, waiting for its review before it goes live. */
-export type PendingLaunch = { id: string; text: string; by: string; windowMin: number; at: number; review: Review; source?: string };
+/** A question the streamer or a mod typed, waiting for its review before it goes live (in the AI review's betting window). */
+export type PendingLaunch = { id: string; text: string; by: string; at: number; review: Review; source?: string };
 /** A short note for one wallet (or every staff wallet, `to: STAFF`) until `until`. */
 export type Notice = { to: string; text: string; until: number };
 export type BetRecord = { side: Side; amount: number; eligible: boolean };
@@ -185,7 +187,7 @@ export type Game = {
   won: Record<string, number>;
   /** A staff question under review (at most one; nothing else launches meanwhile). */
   pending: PendingLaunch | null;
-  /** "Not approved" notes, newest last. */
+  /** "Your question wasn't approved" notes, newest last. */
   notices: Notice[];
 };
 
@@ -194,7 +196,7 @@ export type Action =
   | { kind: "suggest"; text: string }
   | { kind: "upvote"; id: string }
   | { kind: "bet"; id: string; side: Side; amount: number }
-  | { kind: "launch"; id?: string; text?: string; windowMin?: number; source?: string }
+  | { kind: "launch"; id?: string; text?: string; source?: string }
   | { kind: "remove"; id: string }
   | { kind: "approve"; id: string }
   | { kind: "resolve"; id: string; outcome: Outcome }
@@ -279,7 +281,8 @@ export const reviewsDue = (game: Game, now: number) =>
   [...game.suggestions, ...(game.pending ? [game.pending] : [])].some((item) => item.review && reviewDue(item.review, now));
 /** The question a verdict is about: a suggestion or the staff launch, by id. */
 export type ReviewTarget = { id: string; text: string };
-export type ReviewVerdict = { approved: true } | { approved: false; text: string };
+/** `windowMin`: the AI's betting window, if it gave one (one not in BET_WINDOWS_MIN is ignored). */
+export type ReviewVerdict = { approved: true; windowMin?: number | null } | { approved: false; text: string };
 
 export const hasUpvoted = (suggestion: Suggestion, wallet: string) =>
   suggestion.upvoters.includes(wallet) || suggestion.extra.includes(upvoteFingerprint(wallet));
@@ -325,7 +328,7 @@ export function startReviews(state: Game, now: number, env: Env = { streamerSeen
  */
 export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVerdict, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, (ctx) => {
-    if (verdict.approved) approveReview(ctx, target);
+    if (verdict.approved) approveReview(ctx, target, isBetWindow(verdict.windowMin) ? verdict.windowMin : undefined);
     else rejectReview(ctx, target, verdict.text, false);
   });
 }
@@ -582,18 +585,20 @@ function notify({ game, now }: Ctx, to: string, text: string) {
   game.notices = [...game.notices.filter((n) => n.to !== to), { to, text, until: now + NOTICE_MS }].slice(-MAX_NOTICES);
 }
 
-function approveReview(ctx: Ctx, target: ReviewTarget) {
+/** `aiWindowMin`: the AI review's betting window; without one, the question gets DEFAULT_WINDOW_MIN. */
+function approveReview(ctx: Ctx, target: ReviewTarget, aiWindowMin?: number) {
   const { game } = ctx;
   const s = game.suggestions.find((x) => x.id === target.id && x.text === target.text && x.review);
   if (s) {
     delete s.review;
+    if (aiWindowMin !== undefined) s.windowMin = aiWindowMin;
     return;
   }
   const p = game.pending;
   if (!p || p.id !== target.id || p.text !== target.text) return;
   game.pending = null;
   if (game.live.length >= MAX_LIVE || game.launched >= MAX_PREDICTIONS_PER_STREAM) return notify(ctx, STAFF, "Not launched: no slot was free");
-  launch(ctx, { id: p.id, text: p.text, source: p.source }, p.by, p.windowMin);
+  launch(ctx, { id: p.id, text: p.text, source: p.source }, p.by, aiWindowMin ?? DEFAULT_WINDOW_MIN);
 }
 
 /** `refund`: only when no review could decide (stuck, removed by hand); a question jev rejected keeps its cost, so rejected spam is never free. */
@@ -676,7 +681,7 @@ function launchCrowdPick(ctx: Ctx) {
       .filter((s) => !s.review && s.upvotes >= AUTO_LAUNCH_UPVOTES)
       .sort((a, b) => b.upvotes - a.upvotes || a.at - b.at || Number(a.id) - Number(b.id))[0];
     if (!top) return;
-    launch(ctx, top, CROWD, DEFAULT_WINDOW_MIN);
+    launch(ctx, top, CROWD, top.windowMin ?? DEFAULT_WINDOW_MIN);
   }
 }
 
@@ -873,16 +878,25 @@ function launchByStaff(ctx: Ctx, actor: Actor, action: ActionOf<"launch">) {
   if (game.live.length >= MAX_LIVE) throw new GameError(`${MAX_LIVE} predictions are already live`);
   if (game.pending) throw new GameError("A question is under review");
   requireLaunchesLeft(game);
-  const windowMin = action.windowMin ?? DEFAULT_WINDOW_MIN;
-  if (!(BET_WINDOWS_MIN as readonly number[]).includes(windowMin)) throw new GameError("Pick 1, 2, 5 or 10 minutes");
-  if (action.id !== undefined) return launch(ctx, findSuggestion(game, action.id), actor.wallet, windowMin);
+  // The betting window is always the AI review's (else the default), never the client's.
+  if (action.id !== undefined) {
+    const s = findSuggestion(game, action.id);
+    return launch(ctx, s, actor.wallet, s.windowMin ?? DEFAULT_WINDOW_MIN);
+  }
   // A typed question goes live only once its review approves it.
   let source: string | undefined;
   if (action.source !== undefined && action.source !== "") {
     source = cleanLink(action.source) ?? undefined;
     if (!source) throw new GameError("The source must be an http(s) link");
   }
-  game.pending = { id: String(game.nextId++), text: cleanedOrThrow(action.text), by: actor.wallet, windowMin, at: ctx.now, review: { tries: 0, at: ctx.now }, ...(source ? { source } : {}) };
+  game.pending = {
+    id: String(game.nextId++),
+    text: cleanedOrThrow(action.text),
+    by: actor.wallet,
+    at: ctx.now,
+    review: { tries: 0, at: ctx.now },
+    ...(source ? { source } : {}),
+  };
 }
 
 /** A question staff may decide by hand: one whose every review check failed. */
@@ -896,7 +910,7 @@ function removeSuggestion(ctx: Ctx, actor: Actor, id: string) {
   const { game } = ctx;
   requireStaff(game, actor);
   const stuck = stuckItem(game, id);
-  if (stuck) return rejectReview(ctx, stuck, "Not approved by the streamer", true);
+  if (stuck) return rejectReview(ctx, stuck, "Your question wasn't approved: the streamer removed it.", true);
   const s = findSuggestion(game, id);
   game.suggestions = game.suggestions.filter((x) => x !== s); // its 10 points are spent, as on expiry
 }

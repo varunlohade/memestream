@@ -31,13 +31,14 @@ const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringif
 
 /**
  * A fake jev behind a fake fetch (no test reaches the real API). `answer` makes each response;
- * `key` is the configured TYPESAFE_API_KEY.
+ * by default it approves with betting window `window`. `key` is the configured TYPESAFE_API_KEY.
  */
 function fakeJev() {
   const jev = {
     calls: 0,
     key: "test-key" as string | undefined,
-    answer: ((() => jsonResponse(jevAnswer("APPROVE"))) as (signal: AbortSignal) => Response | Promise<Response>),
+    window: "W1",
+    answer: ((() => jsonResponse(jevAnswer("APPROVE", 0.9, "OK", { choice: jev.window }))) as (signal: AbortSignal) => Response | Promise<Response>),
   };
   const fetch: typeof globalThis.fetch = async (_url, init) => {
     jev.calls += 1;
@@ -229,9 +230,10 @@ for (const [name, make] of STORES) {
   });
 
   test(`${name}: a commit whose reply is lost and is re-sent (Upstash SDK retry) counts the bet once`, async () => {
-    const { store, service, fund, balance, liveId } = setup(make);
+    const { jev, store, service, fund, balance, liveId } = setup(make);
     await fund("V", 1_000);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will it rain today?", windowMin: 2 });
+    jev.window = "W2";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will it rain today?" });
     const id = await liveId();
     // The first commit lands, its reply is lost, and the client re-sends the same eval.
     const commit = store.commit.bind(store);
@@ -251,9 +253,10 @@ for (const [name, make] of STORES) {
   });
 
   test(`${name}: an action saved before its view fails to load still succeeds (null view)`, async () => {
-    const { store, service, fund, balance, liveId } = setup(make);
+    const { jev, store, service, fund, balance, liveId } = setup(make);
     await fund("V", 1_000);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will it rain today?", windowMin: 2 });
+    jev.window = "W2";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will it rain today?" });
     const id = await liveId();
     const commit = store.commit.bind(store);
     const read = store.read.bind(store);
@@ -272,10 +275,11 @@ for (const [name, make] of STORES) {
   });
 
   test(`${name}: many viewers betting at once: every accepted bet is debited once and counted in the pool`, async () => {
-    const { service, fund, balance, liveId } = setup(make);
+    const { jev, service, fund, balance, liveId } = setup(make);
     const viewers = Array.from({ length: 30 }, (_, i) => `w${String(i).padStart(2, "0")}`);
     for (const v of viewers) await fund(v, 200);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 5 });
+    jev.window = "W5";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
     const id = await liveId();
     const results = await Promise.allSettled(viewers.map((v, i) => service.act(COIN, v, { kind: "bet", id, side: i % 2 ? "yes" : "no", amount: 50 })));
     const accepted = viewers.filter((_, i) => results[i].status === "fulfilled");
@@ -287,9 +291,10 @@ for (const [name, make] of STORES) {
   });
 
   test(`${name}: one wallet betting in parallel never breaks "at most half your points"`, async () => {
-    const { service, fund, balance, liveId } = setup(make);
+    const { jev, service, fund, balance, liveId } = setup(make);
     await fund("w", 100);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 5 });
+    jev.window = "W5";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
     const id = await liveId();
     const results = await Promise.allSettled(Array.from({ length: 20 }, () => service.act(COIN, "w", { kind: "bet", id, side: "yes", amount: 10 })));
     const ok = results.filter((r) => r.status === "fulfilled").length;
@@ -300,10 +305,12 @@ for (const [name, make] of STORES) {
   });
 
   test(`${name}: one wallet betting in parallel on two live predictions never breaks "at most half your points"`, async () => {
-    const { service, fund, balance } = setup(make);
+    const { jev, service, fund, balance } = setup(make);
     await fund("w", 100);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 5 });
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will the streamer jump?", windowMin: 5 });
+    jev.window = "W5";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
+    jev.window = "W5";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will the streamer jump?" });
     const ids = (await service.view(COIN, STREAMER)).live.map((p) => p.id);
     assert.equal(ids.length, 2);
     const results = await Promise.allSettled(Array.from({ length: 20 }, (_, i) => service.act(COIN, "w", { kind: "bet", id: ids[i % 2], side: "yes", amount: 10 })));
@@ -318,7 +325,7 @@ for (const [name, make] of STORES) {
     const { service, clock, fund, balance, store } = setup(make);
     await fund("a", 10_000);
     await fund("b", 10_000);
-    for (let i = 0; i < MAX_LIVE; i++) await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?`, windowMin: 1 });
+    for (let i = 0; i < MAX_LIVE; i++) await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?` });
     await assert.rejects(service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }), /already live/);
     const ids = (await service.view(COIN, STREAMER)).live.map((p) => p.id);
     assert.equal(ids.length, MAX_LIVE);
@@ -371,7 +378,7 @@ for (const [name, make] of STORES) {
     const { service, clock, fund, balance, liveId } = setup(make);
     await fund("a", 500);
     await fund("b", 500);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
     const id = await liveId();
     await service.act(COIN, "a", { kind: "bet", id, side: "yes", amount: 200 });
     await service.act(COIN, "b", { kind: "bet", id, side: "no", amount: 100 });
@@ -386,7 +393,7 @@ for (const [name, make] of STORES) {
     await fund("watcher", 500, true);
     await fund("drive-by", 500, false);
     await fund("loser", 500, true);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
     const id = await liveId();
     await service.act(COIN, "watcher", { kind: "bet", id, side: "yes", amount: 100 });
     await service.act(COIN, "drive-by", { kind: "bet", id, side: "yes", amount: 200 });
@@ -405,7 +412,7 @@ for (const [name, make] of STORES) {
     const { service, clock, fund } = setup(make);
     await fund("a", 500);
     const before = await service.view(COIN, null);
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?" });
     clock.t += 1_000;
     const cached = await service.view(COIN, null);
     assert.deepEqual([cached.live, cached.now], [[], before.now + 1_000], "same data, current server time");
@@ -418,7 +425,7 @@ for (const [name, make] of STORES) {
     const { service, clock, streamerHere, liveId } = setup(make);
     await streamerHere();
     for (let i = 0; i < 20; i++) {
-      await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?`, windowMin: 1 });
+      await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?` });
       clock.t += MIN;
       await service.act(COIN, STREAMER, { kind: "resolve", id: await liveId(), outcome: "cancel" });
       await streamerHere();
@@ -436,7 +443,7 @@ for (const [name, make] of STORES) {
   test(`${name}: viewers see who resolved a prediction by role only; staff see the wallet`, async () => {
     const { service, clock, liveId } = setup(make);
     await service.act(COIN, STREAMER, { kind: "mod", wallet: "modwallet", add: true });
-    await service.act(COIN, "modwallet", { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    await service.act(COIN, "modwallet", { kind: "launch", text: "Will chat win this round?" });
     clock.t += MIN;
     await service.act(COIN, "modwallet", { kind: "resolve", id: await liveId(), outcome: "cancel" });
     for (const who of [null, "viewer"]) {
@@ -453,7 +460,7 @@ for (const [name, make] of STORES) {
     for (const a of askers) await fund(a, 100);
     for (const a of askers) await service.act(COIN, a, { kind: "suggest", text: `A question from ${a}?` });
     for (let i = 0; i < 6; i++) {
-      await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?`, windowMin: 1 });
+      await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?` });
       clock.t += MIN;
       await service.act(COIN, STREAMER, { kind: "resolve", id: await liveId(), outcome: "cancel" });
     }
@@ -499,7 +506,7 @@ for (const [name, make] of STORES) {
     await settle();
     assert.equal(await balance("asker"), 90);
     const view = await service.view(COIN, "asker");
-    assert.deepEqual([view.queue, view.me?.notice], [[], "Not approved: harassment"]);
+    assert.deepEqual([view.queue, view.me?.notice], [[], "Your question wasn't approved: harassment."]);
     assert.equal((await service.view(COIN, "other")).me?.notice, null);
   });
 
@@ -543,13 +550,14 @@ for (const [name, make] of STORES) {
     await assert.rejects(service.act(COIN, "asker", { kind: "approve", id: staff.queue[0].id }), /Only the streamer/);
     await service.act(COIN, STREAMER, { kind: "remove", id: staff.queue[0].id });
     assert.equal(await balance("asker"), 100, "removed by hand: refunded");
-    assert.equal((await service.view(COIN, "asker")).me?.notice, "Not approved by the streamer");
+    assert.equal((await service.view(COIN, "asker")).me?.notice, "Your question wasn't approved: the streamer removed it.");
   });
 
   test(`${name}: review: a staff typed question waits under review (no bets), goes live on approval; a rejection uses no launch`, async () => {
-    const { service, fund, settle } = setup(make, { autoReview: false });
+    const { jev, service, fund, settle } = setup(make, { autoReview: false });
     await fund("V", 1_000);
-    const staff = (await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat hit 100?", windowMin: 2 }))!;
+    jev.window = "W2";
+    const staff = (await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat hit 100?" }))!;
     assert.deepEqual([staff.live, staff.pending?.text, staff.pending?.stuck], [[], "Will chat hit 100?", false]);
     assert.equal((await service.view(COIN, "V")).pending, null, "viewers don't see it");
     await assert.rejects(service.act(COIN, "V", { kind: "bet", id: staff.pending!.id, side: "yes", amount: 10 }), /Betting is closed/);
@@ -562,9 +570,10 @@ for (const [name, make] of STORES) {
   test(`${name}: review: a rejected staff question shows the reason to staff and leaves the launch count alone`, async () => {
     const { service, settle, jev } = setup(make, { autoReview: false });
     jev.answer = () => jsonResponse(jevAnswer("REJECT", 0.9, "VIOLENCE"));
-    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat fight someone?", windowMin: 2 });
+    jev.window = "W2";
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat fight someone?" });
     await settle();
     const staff = await service.view(COIN, STREAMER);
-    assert.deepEqual([staff.live, staff.pending, staff.launched, staff.me?.notice], [[], null, 0, "Not approved: violent"]);
+    assert.deepEqual([staff.live, staff.pending, staff.launched, staff.me?.notice], [[], null, 0, "Your question wasn't approved: violent."]);
   });
 }

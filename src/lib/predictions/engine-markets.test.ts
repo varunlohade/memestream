@@ -18,10 +18,10 @@ const off = (now: number): Env => ({ streamerSeenAt: now - MIN });
 /** The net points change for `wallet` in a result. */
 const delta = (r: Result, wallet: string) => r.moves.get(wallet)?.delta ?? 0;
 
-/** The streamer launches a typed question (1-minute window unless given); the review approves it at T0. */
+/** The streamer launches a typed question; the review approves it at T0 with a 1-minute window unless given. */
 function launched(env: (now: number) => Env = on, windowMin = 1): Game {
-  const typed = apply(newGame(STREAMER), { kind: "launch", text: "Will he win this round?", windowMin }, streamer, T0, env(T0)).game;
-  return applyReview(typed, typed.pending!, { approved: true }, T0, env(T0)).game;
+  const typed = apply(newGame(STREAMER), { kind: "launch", text: "Will he win this round?" }, streamer, T0, env(T0)).game;
+  return applyReview(typed, typed.pending!, { approved: true, windowMin }, T0, env(T0)).game;
 }
 
 const claim = (game: Game, now: number, env = on(now)) => startMarkets(game, now, env);

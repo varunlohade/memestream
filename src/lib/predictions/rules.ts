@@ -66,7 +66,7 @@ export const CHALLENGE_REASON_MIN = 5;
 export const LINK_MAX = 200;
 /** A frame description is cut to this many characters. */
 export const FRAME_NOTE_MAX = 400;
-/** A "Not approved" note shows to its asker for this long. */
+/** A "wasn't approved" note shows to its asker for this long. */
 export const NOTICE_MS = 5 * MINUTE_MS;
 /** A suggestion goes live by itself with this many eligible upvotes, while a live slot is free. */
 export const AUTO_LAUNCH_UPVOTES = 3;
@@ -74,8 +74,10 @@ export const AUTO_LAUNCH_UPVOTES = 3;
 /** Up to MAX_LIVE live predictions at a time per coin, at most 20 over a stream's life. */
 export const MAX_LIVE = 10;
 export const MAX_PREDICTIONS_PER_STREAM = 20;
-export const BET_WINDOWS_MIN = [1, 2, 5, 10] as const;
+/** Betting windows the AI review picks from; without its pick, DEFAULT_WINDOW_MIN. */
+export const BET_WINDOWS_MIN = [1, 2, 5, 10, 30, 60] as const;
 export const DEFAULT_WINDOW_MIN = 2;
+export const isBetWindow = (minutes: unknown): minutes is number => (BET_WINDOWS_MIN as readonly unknown[]).includes(minutes);
 /** Bets: 10 to 1,000 points, and never more than half the wallet's balance. */
 export const MIN_BET = 10;
 export const MAX_BET = 1_000;
@@ -103,7 +105,7 @@ export const FLAG_WINDOW_MS = 10 * MINUTE_MS;
  * Waiting suggestions per coin.
  */
 export const MAX_QUEUE = 25;
-/** "Not approved" notes kept per coin (the oldest goes first). */
+/** "Wasn't approved" notes kept per coin (the oldest goes first). */
 export const MAX_NOTICES = 30;
 /** Bettors per prediction. */
 export const MAX_BETTORS = 200;

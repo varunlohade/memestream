@@ -356,8 +356,7 @@ button.pm-pool:disabled { cursor: wait; }
 .mbtn.pm-no:disabled { background: #3A3A3A; }
 .pm-subh { font-size: 24px; margin: 18px 0 4px; }
 .pm-window { display: flex; align-items: center; gap: 6px; font-size: 22px; margin: 6px 0; }
-.pm-chip { width: 52px; height: 52px; border: 0; font-size: 22px; color: #ccc; }
-.pm-chip.on { color: var(--xp); }
+.pm-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .pm-window { flex-wrap: wrap; }
 .pm-crowd { height: 52px; padding: 0 12px; border: 0; font-size: 20px; color: #ccc; margin-left: auto; }
 .pm-crowd.on { color: var(--xp); }

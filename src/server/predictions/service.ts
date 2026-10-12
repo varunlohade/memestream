@@ -12,7 +12,7 @@ import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, 
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
-import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import { AI_CHECK_MAX_TRIES, DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, MarketStepView, PredictionsView, Standing } from "@/lib/predictions/view";
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
@@ -213,13 +213,14 @@ function queueView(game: Game, wallet: string | null, staff: boolean): Predictio
       upvoted: wallet !== null && hasUpvoted(s, wallet),
       status: s.review ? "review" : "ok",
       stuck: s.review ? reviewStuck(s.review) : false,
+      windowMin: s.review ? null : (s.windowMin ?? DEFAULT_WINDOW_MIN),
     }));
 }
 
 const pendingView = (game: Game): PredictionsView["pending"] =>
   game.pending ? { id: game.pending.id, text: game.pending.text, stuck: reviewStuck(game.pending.review) } : null;
 
-/** The wallet's own "Not approved" note; staff also see notes about typed staff questions. */
+/** The wallet's own "wasn't approved" note; staff also see notes about typed staff questions. */
 const noticeFor = (game: Game, wallet: string, staff: boolean) =>
   [...game.notices].reverse().find((n) => n.to === wallet || (staff && n.to === STAFF))?.text ?? null;
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Action, type Actor, apply, applyReview, type Game, GameError, newGame, type Result, STAFF, startReviews } from "./engine";
-import { FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_LIVE, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED, NOTICE_MS, payouts, REVIEW_MAX_TRIES, REVIEW_RETRY_MS } from "./rules";
+import { DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_LIVE, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED, NOTICE_MS, payouts, REVIEW_MAX_TRIES, REVIEW_RETRY_MS } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -34,13 +34,17 @@ function world(balances: Record<string, number> = {}, eligible: string[] = [], n
     const item = [...game.suggestions, ...(game.pending ? [game.pending] : [])].find((x) => x.id === id)!;
     return settle(applyReview(game, { id, text: item.text }, verdict, now, env(now)));
   };
-  /** Runs an action; unless `reviewed` is off, a typed question is approved at once, as if the review said yes. */
-  const run = (action: Action, wallet: string | null, now: number) => {
-    const result = settle(apply(game, action, wallet ? actor(wallet) : null, now, env(now)));
+  /**
+   * Runs an action; unless `reviewed` is off, a typed question is approved at once, as if the
+   * review said yes, with `aiWindowMin` as the AI's betting window.
+   */
+  const run = (action: Action & { aiWindowMin?: number }, wallet: string | null, now: number) => {
+    const { aiWindowMin, ...rest } = action;
+    const result = settle(apply(game, rest as Action, wallet ? actor(wallet) : null, now, env(now)));
     const typed = action.kind === "suggest" || (action.kind === "launch" && action.text !== undefined);
     if (!reviewed || !typed) return result;
     const id = action.kind === "suggest" ? game.suggestions.find((x) => x.asker === wallet && x.review)?.id : game.pending?.id;
-    return id ? review(id, { approved: true }, now) : result;
+    return id ? review(id, { approved: true, windowMin: aiWindowMin }, now) : result;
   };
   return {
     run,
@@ -187,13 +191,12 @@ test("caps: 20 predictions per stream; then no launches and no suggestions", () 
   const w = world({ a: 100 });
   for (let i = 0; i < 20; i++) {
     const t = T0 + i * 10 * MIN;
-    w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
+    w.run({ kind: "launch", text: `Question number ${i}?`, aiWindowMin: 1 }, STREAMER, t);
     w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, STREAMER, t + MIN);
   }
   assert.equal(w.game.launched, 20);
   refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0 + 300 * MIN), /20 predictions/);
   refused(() => w.run({ kind: "suggest", text: "One more question?" }, "a", T0 + 300 * MIN), /20 predictions/);
-  refused(() => world().run({ kind: "launch", text: "Bad window here?", windowMin: 3 }, STREAMER, T0), /1, 2, 5 or 10/);
 });
 
 test("a new stream (the streamer back after 2+ hours away) resets the 20 and the stream leaderboard, not past results", () => {
@@ -201,7 +204,7 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
   w.game.stream = T0; // this stream started at T0
   let t = T0;
   for (let i = 0; i < MAX_PREDICTIONS_PER_STREAM; i++) {
-    w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
+    w.run({ kind: "launch", text: `Question number ${i}?`, aiWindowMin: 1 }, STREAMER, t);
     w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "a", t);
     w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", t);
     t += MIN;
@@ -225,7 +228,7 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
 
 test("a wallet with a stake can't resolve it, and can't be made a mod while its bet is live", () => {
   const w = world({ a: 1_000, b: 1_000 });
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 100 }, "b", T0);
   refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on a live prediction/);
@@ -241,7 +244,7 @@ test("a wallet with a stake can't resolve it, and can't be made a mod while its 
 
 test("bets: 10 to 1,000 points, at most half the balance, add to your side but never switch", () => {
   const w = world({ a: 3_000, b: 50 });
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 5 }, STREAMER, T0);
   refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 9 }, "a", T0), /10 to 1000/);
   refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 1_001 }, "a", T0), /10 to 1000/);
   refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10.5 }, "a", T0), /10 to 1000/);
@@ -259,7 +262,7 @@ test("bets: 10 to 1,000 points, at most half the balance, add to your side but n
 
 test("bets: at most MAX_BETTORS bettors per prediction; those in can still add", () => {
   const w = world({ late: 100, first: 100 });
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 5 }, STREAMER, T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "first", T0);
   // Fill the rest straight into the state (that many real wallets would only slow the test down).
   const full = structuredClone(w.game);
@@ -273,7 +276,7 @@ test("bets: at most MAX_BETTORS bettors per prediction; those in can still add",
 test("resolve: after lock only, by the streamer or a mod; winners split the pool; points conserved", () => {
   const w = world({ a: 1_000, b: 1_000, c: 1_000 });
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 300 }, "b", T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 400 }, "c", T0);
@@ -295,7 +298,7 @@ test("resolve: after lock only, by the streamer or a mod; winners split the pool
 test("resolve: an empty side or a cancel refunds every bet", () => {
   for (const [bets, outcome] of [[["yes", "yes"], "no"], [["yes", "no"], "cancel"]] as const) {
     const w = world({ a: 1_000, b: 1_000 });
-    w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+    w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
     w.run({ kind: "bet", id: w.game.live[0].id, side: bets[0], amount: 100 }, "a", T0);
     w.run({ kind: "bet", id: w.game.live[0].id, side: bets[1], amount: 200 }, "b", T0);
     w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, STREAMER, T0 + MIN);
@@ -307,8 +310,8 @@ test("resolve: an empty side or a cancel refunds every bet", () => {
 
 test("several live at once: each bet names its prediction; each resolves on its own with exact payouts", () => {
   const w = world({ a: 2_000, b: 2_000, c: 2_000 });
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-  w.run({ kind: "launch", text: "Will chat win this round?", windowMin: 2 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat win this round?", aiWindowMin: 2 }, STREAMER, T0);
   const [p1, p2] = w.game.live.map((p) => p.id);
   refused(() => w.run({ kind: "bet", id: "999", side: "yes", amount: 10 }, "a", T0), /Betting is closed/);
   const bets1 = [{ wallet: "a", side: "yes", amount: 100 }, { wallet: "b", side: "yes", amount: 300 }, { wallet: "c", side: "no", amount: 401 }] as const;
@@ -338,7 +341,7 @@ test("several live at once: each bet names its prediction; each resolves on its 
 
 test("launch: at most MAX_LIVE live at once; a slot frees when one resolves", () => {
   const w = world();
-  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, T0);
+  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Question number ${i}?`, aiWindowMin: 1 }, STREAMER, T0);
   assert.equal(w.game.live.length, MAX_LIVE);
   refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0), /already live/);
   w.run({ kind: "resolve", id: w.game.live[3].id, outcome: "cancel" }, STREAMER, T0 + MIN);
@@ -349,8 +352,8 @@ test("launch: at most MAX_LIVE live at once; a slot frees when one resolves", ()
 
 test("bets on several live predictions: at most half the balance at bet time, across all of them", () => {
   const w = world({ a: 400 });
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
-  w.run({ kind: "launch", text: "Will chat win this round?", windowMin: 5 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 5 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat win this round?", aiWindowMin: 5 }, STREAMER, T0);
   const [p1, p2] = w.game.live.map((p) => p.id);
   w.run({ kind: "bet", id: p1, side: "yes", amount: 200 }, "a", T0);
   refused(() => w.run({ kind: "bet", id: p2, side: "no", amount: 101 }, "a", T0), /half your points/);
@@ -364,8 +367,8 @@ test("bets on several live predictions: at most half the balance at bet time, ac
 test("stake checks are per prediction: a bettor-mod can't resolve that one only; a bet on any live one blocks becoming a mod", () => {
   const w = world({ a: 1_000 });
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-  w.run({ kind: "launch", text: "Will chat win this round?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat win this round?", aiWindowMin: 1 }, STREAMER, T0);
   const [p1, p2] = w.game.live.map((p) => p.id);
   w.run({ kind: "bet", id: p2, side: "yes", amount: 100 }, "a", T0);
   refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on a live prediction/);
@@ -377,7 +380,7 @@ test("stake checks are per prediction: a bettor-mod can't resolve that one only;
 
 test("auto-cancel: the streamer's own unresolved 60 minutes after lock; full refunds; then the next one goes live", () => {
   const w = world({ a: 1_000, asker: 100 }, ["v0", "v1", "v2"]);
-  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Will I eat banana ${i}?`, windowMin: 1 }, STREAMER, T0); // every slot busy
+  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Will I eat banana ${i}?`, aiWindowMin: 1 }, STREAMER, T0); // every slot busy
   const first = w.game.live[0].id;
   w.run({ kind: "bet", id: first, side: "yes", amount: 100 }, "a", T0);
   w.run({ kind: "suggest", text: "Is the next round a win?" }, "asker", T0 + 50 * MIN);
@@ -413,7 +416,7 @@ test("streamer and mods can't suggest, upvote or bet on their own coin; only the
     refused(() => w.run({ kind: "suggest", text: "My own question here?" }, wallet, T0), /can't suggest/);
     refused(() => w.run({ kind: "upvote", id: "1" }, wallet, T0), /can't upvote/);
   }
-  w.run({ kind: "launch", id: "1", windowMin: 10 }, MOD, T0);
+  w.run({ kind: "launch", id: "1" }, MOD, T0);
   assert.equal(w.game.live[0]?.launchedBy, MOD);
   for (const wallet of [STREAMER, MOD]) refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, wallet, T0), /can't bet/);
   refused(() => w.run({ kind: "remove", id: "1" }, "a", T0), /streamer or a mod/);
@@ -462,7 +465,7 @@ test("disputed results: no asker reward and no leaderboard winnings; bettors kee
 test("flags: bettors only, once each, within the flag window; disputed at 30% of bettors", () => {
   const bettors = Array.from({ length: 10 }, (_, i) => `b${i}`);
   const w = world(Object.fromEntries(bettors.map((b) => [b, 1_000])));
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
   for (const [i, b] of bettors.entries()) w.run({ kind: "bet", id: w.game.live[0].id, side: i < 5 ? "yes" : "no", amount: 10 }, b, T0);
   w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, T0 + MIN);
   refused(() => w.run({ kind: "flag", id: "1" }, "outsider", T0 + MIN), /Only its bettors/);
@@ -481,7 +484,7 @@ test("results fold into summaries once their flag window closes; only the last 2
   w.away();
   let t = T0;
   for (let i = 0; i < MAX_PREDICTIONS_PER_STREAM; i++) {
-    w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
+    w.run({ kind: "launch", text: `Question number ${i}?`, aiWindowMin: 1 }, STREAMER, t);
     w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "a", t);
     w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", t);
     t += MIN;
@@ -555,9 +558,31 @@ test("review: a rejected suggestion leaves, its 10 points stay spent, and its as
   assert.equal(applyReview(w.game, { id: "1", text: "Will I eat a banana?" }, { approved: false, text: "x" }, T0 + 3 * SEC).changed, false);
 });
 
+test("AI window: the review's window is stored on a suggestion and used by the crowd and the streamer; none or a bad one means the default", () => {
+  const w = world({ a: 100, b: 100, c: 100 }, ["v0", "v1", "v2"], [], { reviewed: false });
+  w.run({ kind: "suggest", text: "Will she win this round?" }, "a", T0);
+  w.review("1", { approved: true, windowMin: 30 }, T0);
+  assert.equal(w.game.suggestions[0].windowMin, 30);
+  for (const v of ["v0", "v1", "v2"]) w.run({ kind: "upvote", id: "1" }, v, T0);
+  assert.equal(w.game.live[0].lockAt, T0 + 30 * MIN, "the crowd launch uses the AI window");
+
+  w.run({ kind: "suggest", text: "Will chat hit 100 messages?" }, "b", T0);
+  w.review(w.game.suggestions[0].id, { approved: true, windowMin: 7 }, T0);
+  assert.equal(w.game.suggestions[0].windowMin, undefined, "a window outside BET_WINDOWS_MIN is ignored");
+  w.run({ kind: "launch", id: w.game.suggestions[0].id }, STREAMER, T0);
+  assert.equal(w.game.live[1].lockAt, T0 + DEFAULT_WINDOW_MIN * MIN, "the streamer's launch falls back to the default");
+
+  w.run({ kind: "launch", text: "Will he reach the gate in 10 minutes?" }, STREAMER, T0);
+  w.review(w.game.pending!.id, { approved: true, windowMin: 10 }, T0 + SEC);
+  assert.equal(w.game.live[2].lockAt, T0 + SEC + 10 * MIN, "a typed staff question uses the AI window");
+  w.run({ kind: "launch", text: "Will he land this jump?" }, STREAMER, T0);
+  w.review(w.game.pending!.id, { approved: true, windowMin: null }, T0 + SEC);
+  assert.equal(w.game.live[3].lockAt, T0 + SEC + DEFAULT_WINDOW_MIN * MIN, "no AI window: the default");
+});
+
 test("review: a typed staff question goes live only on approval (its window starts then); a rejection uses no launch", () => {
   const w = world({ a: 100 }, [], [], { reviewed: false });
-  w.run({ kind: "launch", text: "Will chat hit 100?", windowMin: 2 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat hit 100?" }, STREAMER, T0);
   assert.deepEqual(w.game.live, [], "not live yet");
   assert.equal(w.game.pending?.text, "Will chat hit 100?");
   refused(() => w.run({ kind: "bet", id: w.game.pending!.id, side: "yes", amount: 10 }, "a", T0), /Betting is closed/);
@@ -565,7 +590,7 @@ test("review: a typed staff question goes live only on approval (its window star
   w.review(w.game.pending!.id, { approved: false, text: "Not approved: violent" }, T0 + SEC);
   assert.deepEqual([w.game.pending, w.game.launched, w.game.notices[0].to], [null, 0, STAFF]);
 
-  w.run({ kind: "launch", text: "Will chat hit 200?", windowMin: 2 }, STREAMER, T0 + 2 * SEC);
+  w.run({ kind: "launch", text: "Will chat hit 200?" }, STREAMER, T0 + 2 * SEC);
   w.review(w.game.pending!.id, { approved: true }, T0 + 5 * SEC);
   const live = (w.game as Game).live[0]; // (deepEqual above narrowed it to an empty list)
   const launched = w.game.launched;

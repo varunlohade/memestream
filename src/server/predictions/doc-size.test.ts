@@ -43,8 +43,8 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
   for (let i = 0; i < MAX_MODS; i++) game = step(game, { kind: "mod", wallet: wallet("mod", i), add: true }, STREAMER, T0);
 
   // One full result in its flag window, built by the engine: every bettor bet the most and flagged it.
-  game = step(game, { kind: "launch", text: question(0), windowMin: BET_WINDOWS_MIN[0] }, STREAMER, T0);
-  game = applyReview(game, game.pending!, { approved: true }, T0).game;
+  game = step(game, { kind: "launch", text: question(0) }, STREAMER, T0);
+  game = applyReview(game, game.pending!, { approved: true, windowMin: BET_WINDOWS_MIN[0] }, T0).game;
   for (const [i, b] of bettors.entries()) game = step(game, { kind: "bet", id: game.live[0].id, side: i % 2 ? "yes" : "no", amount: MAX_BET }, b, T0);
   game = step(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, STREAMER, T0 + MIN);
   for (const b of bettors) game = step(game, { kind: "flag", id: game.resolved[0].id }, b, T0 + MIN);
@@ -52,7 +52,7 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
 
   // One full suggestion, built by the engine.
   game = step(game, { kind: "suggest", text: question(1) }, wallet("asker", 0), T0 + MIN);
-  game = applyReview(game, game.suggestions[0], { approved: true }, T0 + MIN).game;
+  game = applyReview(game, game.suggestions[0], { approved: true, windowMin: BET_WINDOWS_MIN.at(-1) }, T0 + MIN).game;
   for (let i = 0; i < MAX_UPVOTES; i++) game = step(game, { kind: "upvote", id: game.suggestions[0].id }, wallet("voter", i), T0 + MIN);
   const suggestion = game.suggestions[0];
 
@@ -107,9 +107,9 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
   }));
   game.won = Object.fromEntries(Array.from({ length: MAX_WON_ENTRIES }, (_, i) => [wallet("winner", i), -1_000_000]));
   game.nextId = 1_000_000;
-  // A staff question under review, and every "Not approved" note at its longest.
-  game.pending = { id: "999999", text: question(3), by: wallet("mod", 0), windowMin: 10, at: T0 + 10 * MIN, review: { tries: REVIEW_MAX_TRIES, at: T0 + 10 * MIN }, source };
-  const longNote = "Not approved: " + "x".repeat(40);
+  // A staff question under review, and every "wasn't approved" note at its longest.
+  game.pending = { id: "999999", text: question(3), by: wallet("mod", 0), at: T0 + 10 * MIN, review: { tries: REVIEW_MAX_TRIES, at: T0 + 10 * MIN }, source };
+  const longNote = "Your question wasn't approved: " + "x".repeat(40);
   game.notices = Array.from({ length: MAX_NOTICES }, (_, i) => ({ to: i === 0 ? STAFF : wallet("asker", i), text: longNote, until: T0 + 10 * MIN + NOTICE_MS }));
 
   assert.equal(Object.keys(open.open!.results).length, MAX_BETTORS);
