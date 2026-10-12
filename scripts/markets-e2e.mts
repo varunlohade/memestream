@@ -30,7 +30,6 @@ import { sleep } from "../src/lib/poll";
 import { redisStore } from "../src/server/predictions/store";
 import { connectToDevnet } from "./devnet";
 import { readKeypair } from "./keys";
-import { sendAndConfirm } from "./local-chain/send-and-confirm";
 
 const BASE_URL = (process.env.BASE_URL ?? "").replace(/\/$/, "");
 const PREFIX = process.env.MEMESTREAM_PREDICTIONS_PREFIX ?? "";
@@ -109,10 +108,13 @@ async function topUp(from: Keypair, wallets: { keypair: Keypair; min: number; ta
   return `top-ups ${await connection.sendTransaction(tx, [from])}`;
 }
 
-function shot(state: string, mint: string, wallet: string) {
+type SessionReply = { wallet: string; token: string; expiresAt: number };
+
+/** Screenshots of the card as `wallet` sees it; with `session`, signed in to predictions too (the page reads it from localStorage). */
+function shot(state: string, mint: string, wallet: string, session?: SessionReply) {
   if (!process.env.SHOT_CMD) return;
   log(`screenshots: ${state}`);
-  execSync(`${process.env.SHOT_CMD} ${state} ${mint} ${wallet}`, { stdio: "inherit" });
+  execSync(`${process.env.SHOT_CMD} ${state} ${mint} ${wallet}`, { stdio: "inherit", env: { ...process.env, SHOT_SESSION: session ? JSON.stringify(session) : "" } });
 }
 
 async function cleanup() {
@@ -131,6 +133,8 @@ async function run() {
   const oracle = readKeypair(".keys/partner.json");
   const creator = readKeypair(".keys/devnet-creator.json");
   const viewer = readKeypair(".keys/e2e-viewer-1.json");
+  // A memestream admin locally (MEMESTREAM_ADMIN_WALLETS): settles the challenge.
+  const adminKey = readKeypair(".keys/e2e-viewer-2.json");
   const oracleStart = await connection.getBalance(oracle.publicKey);
   log(`fund: ${await topUp(oracle, [{ keypair: creator, min: 0.06, target: 0.1 }, { keypair: viewer, min: 0.03, target: 0.05 }])}`);
 
@@ -143,11 +147,17 @@ async function run() {
   }
   const coinPath = `/api/predictions/coin/${mint}`;
 
-  const session = await ok<{ token: string }>("POST", "/api/predictions/session", { body: signIn(creator) });
+  const session = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(creator) });
   await http("POST", "/api/predictions/heartbeat", { token: session.token, body: { mint } });
+  // The viewer signs in and watches a minute (MEMESTREAM_PREDICTIONS_FAST): starter points for a challenge bond.
+  const viewerSession = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(viewer) });
+  const adminSession = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(adminKey) });
+  const beat = await http("POST", "/api/predictions/heartbeat", { token: viewerSession.token, body: { mint } });
+  check("points: the viewer's first minute watched earns the starter points", beat.status === 200 && Number(beat.json.points) > 100, `+${String(beat.json.points)} points`);
   const view = () => ok<PredictionsView>("GET", coinPath, { token: session.token });
   const text = `Will chat say gg before the round ends? (${Date.now().toString(36).slice(-4)})`;
-  await ok("POST", coinPath, { token: session.token, body: { kind: "launch", text, windowMin: WINDOW_MIN } });
+  const SOURCE = "https://liquipedia.net/counterstrike/Main_Page";
+  await ok("POST", coinPath, { token: session.token, body: { kind: "launch", text, windowMin: WINDOW_MIN, source: SOURCE } });
   log(`launch: "${text}" (${WINDOW_MIN} min)`);
 
   /** Polls the streamer's view (each poll also runs the server's due market steps) until `done`. */
@@ -165,13 +175,13 @@ async function run() {
   if (opened.market !== "open") throw new Error("market failed to open");
   const id = opened.id;
   const record = JSON.parse((await redisStore(redis, PREFIX).read([`market:${mint}:${id}`]))[0].json ?? "null") as MarketRecord | null;
-  check("market: registered with its addresses and lockAt", record?.lockAt === opened.lockAt && Boolean(record?.question), `question ${record?.question}, create ${record?.signature}`);
+  check("market: registered with its addresses, lockAt and source", record?.lockAt === opened.lockAt && Boolean(record?.question) && record?.source === SOURCE, `question ${record?.question}, create ${record?.signature}, source ${record?.source}`);
   if (!record) throw new Error("no registry entry");
 
   const odds = (wallet: Keypair | null) => ok<MarketView>("POST", "/api/markets/odds", { body: { mint, predictionId: id, wallet: wallet?.publicKey.toBase58() } });
   const before = await odds(viewer);
   check("odds: a fresh market is 50/50 and taking bets", before.trading && Math.abs(before.probability.yes - 0.5) < 1e-6, `yes ${before.probability.yes}`);
-  shot("open", mint, viewer.publicKey.toBase58());
+  shot("open", mint, viewer.publicKey.toBase58(), viewerSession);
 
   const streamerBet = await http("POST", "/api/tx/market", { body: { wallet: creator.publicKey.toBase58(), mint, predictionId: id, side: "no", action: "buy", amount: BET_SOL } });
   check("bet: the streamer can't bet on their own market", streamerBet.status === 400, `${streamerBet.status} "${String(streamerBet.json.error)}"`);
@@ -193,7 +203,7 @@ async function run() {
   const soldFor = (await connection.getBalance(viewer.publicKey)) - solBeforeSell;
   log(`sell: viewer sold ${half} YES for ${sellPreview.received} SOL  ${sold.sig}`);
   check("sell: half the YES sold back for SOL", soldFor > 0, `+${soldFor / LAMPORTS_PER_SOL} SOL after network fees`);
-  shot("position", mint, viewer.publicKey.toBase58());
+  shot("position", mint, viewer.publicKey.toBase58(), viewerSession);
 
   const wait = record.lockAt - Date.now() + 2_000;
   log(`waiting ${Math.ceil(wait / 1000)} s for the lock`);
@@ -202,21 +212,32 @@ async function run() {
   check("lock: bets are refused once betting closes", late.status === 400 && /closed/.test(String(late.json.error)), `${late.status} "${String(late.json.error)}"`);
   await waitFor("trading to close on chain", (v) => (v.live.find((l) => l.id === id)?.market === "closed" ? true : undefined), 4 * 60_000);
   check("lock: the server closed trading", true, "market closed");
-  shot("closed", mint, viewer.publicKey.toBase58());
+  shot("closed", mint, viewer.publicKey.toBase58(), viewerSession);
 
   await ok("POST", coinPath, { token: session.token, body: { kind: "resolve", id, outcome: "yes" } });
   log("resolve: the streamer proposed YES; the challenge window runs");
   const proposed = await waitFor("the proposal", (v) => v.resolved.find((x) => x.id === id && x.verdict?.status === "proposed"), 60_000);
   check("challenge window: the result is proposed, final at the window's end", proposed.verdict?.finalAt !== null, `final at ${new Date(proposed.verdict!.finalAt!).toISOString()}`);
-  shot("proposed", mint, viewer.publicKey.toBase58());
+  shot("proposed", mint, viewer.publicKey.toBase58(), viewerSession);
+
+  // The viewer (a holder) challenges with the points bond; an admin settles it.
+  const challenge = await http("POST", coinPath, { token: viewerSession.token, body: { kind: "challenge", id, reason: "The streamer typed gg first, not chat", link: "https://clips.example/gg" } });
+  const disputed = (challenge.json.resolved as PredictionsView["resolved"] | undefined)?.find((x) => x.id === id);
+  check("challenge: a holder challenges, posting the 100-point bond", challenge.status === 200 && disputed?.verdict?.status === "disputed", `${challenge.status} ${String(challenge.json.error ?? disputed?.verdict?.status)}`);
+  const asAdmin = await ok<PredictionsView>("GET", coinPath, { token: adminSession.token });
+  const adminSees = asAdmin.resolved.find((x) => x.id === id)?.verdict;
+  check("challenge: the admin sees the reason and the evidence", asAdmin.me?.admin === true && adminSees?.challenge?.reason === "The streamer typed gg first, not chat", `admin ${asAdmin.me?.admin}, why ${adminSees?.why}`);
+  shot("disputed", mint, adminKey.publicKey.toBase58(), adminSession);
+  await ok("POST", coinPath, { token: adminSession.token, body: { kind: "decide", id, outcome: "yes" } });
+  log("decide: the admin upheld YES");
   const result = await waitFor("the market to resolve", (v) => {
     const r = v.resolved.find((x) => x.id === id);
     return r?.market === "resolved" ? r : undefined;
-  }, 25 * 60_000);
-  check("resolve: the server resolved the market once the window ended", Date.now() >= proposed.verdict!.finalAt!, `final ${result.verdict?.final}, ai ${result.ai}`);
+  }, 10 * 60_000);
+  check("resolve: the server resolved the market as the admin decided", result.verdict?.final === "yes", `final ${result.verdict?.final}`);
   const settled = await odds(viewer);
   check("resolve: YES pays [1,0]", JSON.stringify(settled.payoutNumerators) === "[1,0]", JSON.stringify(settled.payoutNumerators));
-  shot("resolved", mint, viewer.publicKey.toBase58());
+  shot("resolved", mint, viewer.publicKey.toBase58(), viewerSession);
 
   const solBefore = await connection.getBalance(viewer.publicKey);
   const redeemed = await sendViaApp("market-redeem", viewer, { mint, predictionId: id });
@@ -224,8 +245,13 @@ async function run() {
   log(`redeem: viewer  ${redeemed.sig}`);
   check("redeem: the viewer's YES paid out", gained > 0, `+${gained / LAMPORTS_PER_SOL} SOL`);
 
+  // The server redeems the oracle's seed by itself once the market is closed and resolved.
   const keys = marketKeysFromId(connection, Uint8Array.from(Buffer.from(record.questionId, "hex")), oracle.publicKey);
-  log(`redeem: oracle  ${await sendAndConfirm(connection, await buildRedeemTx(connection, keys, oracle.publicKey), [oracle])}`);
+  const leftover = await buildRedeemTx(connection, keys, oracle.publicKey).then(
+    () => true,
+    (error: Error) => (/holds no YES or NO/.test(error.message) ? false : Promise.reject(error)),
+  );
+  check("redeem: the server already redeemed the oracle's seed", !leftover, leftover ? "the oracle still holds shares" : "nothing left to redeem");
   log(`oracle spent ${((oracleStart - (await connection.getBalance(oracle.publicKey))) / LAMPORTS_PER_SOL).toFixed(6)} SOL this run (incl. top-ups)`);
 }
 
