@@ -18,7 +18,8 @@ function routeFiles(dir: string): string[] {
 test("every route handler that touches the chain uses withRpcGuard on every exported handler", () => {
   // All of src/app, not just /api: the /<ticker> short link is a route handler too.
   const routes = routeFiles("src/app");
-  assert.ok(routes.length >= 8, "found the route handlers (API routes and the /<ticker> short link)");
+  assert.ok(routes.length >= 9, "found the route handlers (API routes, the holders list and the /<ticker> short link)");
+  assert.ok(routes.some((f) => f.endsWith("holders/route.ts")), "found the holders route");
   for (const file of routes) {
     const source = readFileSync(file, "utf8");
     if (!CHAIN_IMPORTS.some((name) => source.includes(`from "${name}`))) continue;

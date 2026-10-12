@@ -1,9 +1,10 @@
 "use client";
-import { useState } from "react";
-import { type CoinDetail, type CoinView, type Holdings, type TradeView, useCoin, usePriceTrend } from "@/components/hooks";
+import { useState, useSyncExternalStore } from "react";
+import { type CoinDetail, type CoinView, type HolderView, type Holdings, type TradeView, useCoin, useHolders, usePriceTrend } from "@/components/hooks";
 import { useTx } from "@/components/tx";
+import { noSubscription } from "@/components/no-subscription";
 import { useHostname } from "@/components/use-hostname";
-import { Scene, Sprite, StepChart, XpBar } from "@/components/pixel/Pixel";
+import { Scene, StepChart, useTexture, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { LiveBadge } from "@/components/ui/LiveBadge";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
@@ -58,6 +59,8 @@ function MeteoraNote({ coin }: { coin: CoinView }) {
 
 function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) {
   const { chain } = useWallet();
+  // "3d ago" depends on the clock: render it after hydration, so server and browser HTML match.
+  const hydrated = useSyncExternalStore(noSubscription, () => true, () => false);
   if (trades.length === 0) return <p className="mute" style={{ fontSize: 24 }}>No trades yet.</p>;
   return (
     <ul className="trade-list">
@@ -73,8 +76,13 @@ function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) 
             {t.byStreamer && <b className="tag">streamer</b>}
           </span>
           <a className="r mute" href={solscanTx(t.signature, chain)} target="_blank" rel="noopener noreferrer" title="View on Solscan">
-            {ago(t.time)}
-            <span className="ago"> ago</span> ↗
+            {hydrated && (
+              <>
+                {ago(t.time)}
+                <span className="ago"> ago</span>
+              </>
+            )}{" "}
+            ↗
           </a>
         </li>
       ))}
@@ -153,6 +161,57 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
   );
 }
 
+type CoinTab = "trades" | "predictions" | "holders";
+
+const HOLDER_ROLE_LABEL = { curve: "bonding curve", pool: "Meteora pool", streamer: "streamer" } as const;
+
+/** Who holds the coin: owners linked to Solscan, with the curve or pool vault and the streamer named. */
+function HolderList({ holders, limit }: { holders: HolderView[] | null; limit?: number }) {
+  const { chain } = useWallet();
+  if (!holders) return <p className="mute holders-empty">Loading holders</p>;
+  if (holders.length === 0) return <p className="mute holders-empty">No holders yet.</p>;
+  return (
+    <ol className="holder-list num">
+      {holders.slice(0, limit).map((h, i) => (
+        <li key={h.owner}>
+          <span>
+            {i + 1}.{" "}
+            <a href={solscanAccount(h.owner, chain)} target="_blank" rel="noopener noreferrer">
+              {h.role === "curve" || h.role === "pool" ? HOLDER_ROLE_LABEL[h.role] : shortAddress(h.owner)}
+            </a>
+            {h.role === "streamer" && <span className="mute"> (streamer)</span>}
+          </span>
+          <span>{h.percent.toFixed(1)}%</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** How far the curve is, what's left to raise; after graduation, where the coin trades now. */
+function CurveProgress({ coin }: { coin: CoinView }) {
+  const graduated = coin.status === "graduated";
+  const percent = Math.floor(Math.min(Math.max(coin.progress, 0), 1) * 100);
+  const left = Math.max(0, Number(coin.thresholdSol) - Number(coin.raisedSol));
+  return (
+    <section className="p curve" aria-label="Bonding curve progress">
+      <div className="curve-head">
+        <h2>bonding curve progress</h2>
+        <span className="num up">{graduated ? "Graduated" : `${percent}%`}</span>
+      </div>
+      <XpBar progress={coin.progress} small />
+      {graduated ? (
+        <MeteoraNote coin={coin} />
+      ) : (
+        <p className="mute curve-note">
+          {coin.status === "graduating" ? "The curve is full." : `${formatSol(left)} SOL left until this coin graduates to a Meteora pool.`} 80% of
+          fees go to the streamer.
+        </p>
+      )}
+    </section>
+  );
+}
+
 /**
  * `initial` is rendered by the server; polling keeps it fresh and adds the wallet's holdings.
  * `predictions`: the server's MEMESTREAM_PREDICTIONS flag (free-points panel); off by default.
@@ -162,73 +221,94 @@ export function CoinPageView({ mint, initial, predictions = false }: { mint: str
   const { data, refresh } = useCoin(mint, address, initial);
   const detail = data ?? initial;
   const { prices, change } = usePriceTrend(detail);
+  const { data: holderData } = useHolders(mint);
+  const holders = holderData?.holders ?? null;
+  const [tab, setTab] = useState<CoinTab>("trades");
+  const stone = useTexture("stone", 6);
 
   const { coin, trades, holdings } = detail;
-  const graduated = coin.status === "graduated";
+  const tabs: CoinTab[] = predictions ? ["trades", "predictions", "holders"] : ["trades", "holders"];
 
   return (
-    <div className="coin">
-      <div>
-        <StreamEmbed coin={coin} />
-        <div className="p" style={{ marginTop: 24 }}>
-          <div className="ident">
-            <div className="slot" style={{ overflow: "hidden" }}>
-              <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="84px" />
-            </div>
-            <div>
-              <div className="ticker-row">
-                <h1>${coin.symbol}</h1>
-                <UnverifiedTag tappable />
-              </div>
-              <p>
-                {coin.name} by {shortAddress(coin.creator)}
-              </p>
-            </div>
-          </div>
-          <div className="trades">
-            <h2>Recent trades</h2>
-            <TradeList trades={trades} symbol={coin.symbol} />
-          </div>
+    <div className="cp">
+      <header className="cp-head">
+        <div className="slot cp-thumb">
+          <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="72px" />
         </div>
-        {predictions && <Predictions mint={coin.mint} symbol={coin.symbol} />}
-      </div>
-      <div className="side">
-        <section className="p" aria-label="Price and graduation">
-          <div className="lbl mute">Market cap</div>
-          <div className="cap num">{formatSol(coin.marketCapSol)} SOL</div>
-          {change !== null && (
-            <div className={`chg num ${change >= 0 ? "up" : "down"}`}>{signedPercent(change)} over recent trades</div>
-          )}
-          <div className="chart">
-            {prices.length >= 2 ? <StepChart values={prices} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
-          </div>
-          <div className="gradlbl">
-            <span>Graduation</span>
-            <span className="mute num">
-              {formatSol(coin.raisedSol)} of {formatSol(coin.thresholdSol)} SOL
+        <div className="cp-id">
+          <div className="ticker-row">
+            <h1>${coin.symbol}</h1>
+            <span className="cp-by">
+              {coin.name} · by {shortAddress(coin.creator)}
             </span>
+            <UnverifiedTag tappable />
           </div>
-          <XpBar progress={coin.progress} label={graduated ? "Graduated" : undefined} />
-          <div className="fees">
-            <Sprite name="heart" />
-            <span>80% of fees go to the streamer</span>
-          </div>
+          <p className="cp-cap num">
+            market cap {formatSol(coin.marketCapSol)} SOL
+            {change !== null && <span className={change >= 0 ? "up" : "down"}> · {signedPercent(change)}</span>}
+          </p>
+        </div>
+      </header>
+      <div className="cp-main">
+        <div className="cp-stream">
+          <StreamEmbed coin={coin} />
+        </div>
+        <section className="p cp-chart" aria-label="Price chart">
+          {prices.length >= 2 ? <StepChart values={prices} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
         </section>
-        {graduated ? (
-          <>
-            <TradeBox key={coin.mint} coin={coin} holdings={holdings} onTraded={refresh} />
-            <MeteoraNote coin={coin} />
-          </>
-        ) : coin.status === "graduating" ? (
-          <div className="p">
-            <p style={{ fontSize: 26 }}>The curve is full. Graduate the coin to open its Meteora pool.</p>
+        <div className="cp-tabs">
+          <div className="sort" role="group" aria-label="Trades, predictions and holders">
+            {tabs.map((key) => (
+              <button
+                type="button"
+                key={key}
+                aria-pressed={tab === key}
+                className={`mbtn${tab === key ? "" : " off"}`}
+                style={tab === key ? stone : undefined}
+                onClick={() => setTab(key)}
+              >
+                {key}
+              </button>
+            ))}
           </div>
-        ) : (
-          // key: a fresh trade box per coin, so typed state never carries over between coins.
-          <TradeBox key={coin.mint} coin={coin} holdings={holdings} onTraded={refresh} />
-        )}
-        <CoinActions coin={coin} holdings={holdings} onDone={refresh} />
+          {tab === "trades" && (
+            <section className="p" aria-label="Recent trades">
+              <TradeList trades={trades} symbol={coin.symbol} />
+            </section>
+          )}
+          {/* Kept mounted while hidden, so its sign-in and open prediction survive a tab switch. */}
+          {predictions && (
+            <div hidden={tab !== "predictions"}>
+              <Predictions mint={coin.mint} symbol={coin.symbol} />
+            </div>
+          )}
+          {tab === "holders" && (
+            <section className="p" aria-label="Holders">
+              <HolderList holders={holders} />
+            </section>
+          )}
+        </div>
       </div>
+      <aside className="cp-side">
+        <div className="cp-trade">
+          {coin.status === "graduating" ? (
+            <div className="p">
+              <p style={{ fontSize: 26 }}>The curve is full. Graduate the coin to open its Meteora pool.</p>
+            </div>
+          ) : (
+            // key: a fresh trade box per coin, so typed state never carries over between coins.
+            <TradeBox key={coin.mint} coin={coin} holdings={holdings} onTraded={refresh} />
+          )}
+          <CoinActions coin={coin} holdings={holdings} onDone={refresh} />
+        </div>
+        <div className="cp-curve">
+          <CurveProgress coin={coin} />
+        </div>
+        <section className="p cp-holders" aria-label="Holder distribution">
+          <h2>holder distribution</h2>
+          <HolderList holders={holders} limit={10} />
+        </section>
+      </aside>
     </div>
   );
 }
