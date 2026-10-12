@@ -55,7 +55,7 @@ canvas { image-rendering: pixelated; }
   color: #fff; font-family: var(--hf); font-size: 20px; text-shadow: 3px 3px 0 rgba(0,0,0,.5);
 }
 .mbtn.buy { background: var(--buy); }
-.mbtn.sell { background: #b8372e; }
+.mbtn.sell { background: #e5484d; }
 .mbtn.off { background: #3a3a3a; color: #aaa; text-shadow: none; }
 .mbtn:disabled { background: #3A3A3A; color: #c8c8c8; text-shadow: none; cursor: not-allowed; }
 .mbtn:focus-visible, .slot:focus-visible, input:focus-visible { outline: 4px solid var(--xp); outline-offset: 2px; }
@@ -142,14 +142,25 @@ button.unv { cursor: help; }
 .chg { font-size: 26px; margin-top: 4px; }
 .chart { margin-top: 14px; height: 120px; }
 .gradlbl { display: flex; justify-content: space-between; font-size: 24px; margin-top: 20px; }
-.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 16px; }
-.tabs .mbtn { height: 52px; }
-.amt { display: flex; align-items: center; justify-content: space-between; gap: 12px; height: 68px; padding: 0 20px; font-size: 40px; color: #fff; }
-.amt input { width: 100%; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 40px; text-shadow: 3px 3px 0 #3f3f3f; outline: none; }
-.amt small { font-size: 26px; color: #ddd; }
-.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0 14px; }
-.chips button { height: 52px; border: 0; font-size: 28px; color: #fff; text-shadow: 2px 2px 0 #3f3f3f; }
-.get { display: flex; justify-content: space-between; font-size: 26px; margin-bottom: 14px; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tabs .mbtn { height: 52px; font-size: 16px; }
+/* Trade box (pump.fun layout, mock A): link row, amount, chips, receive line, place trade, holdings. */
+.tb-links { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 12px 0 8px; }
+.tb-link { border: 3px solid #000; background: #2b2b31; color: #cfcfd6; font-size: 22px; padding: 2px 8px; }
+.tb-link:focus-visible { outline: 4px solid var(--xp); outline-offset: 2px; }
+.tb-link:last-child { margin-left: auto; } /* stays on the right when a long ticker wraps the row */
+.amt { display: flex; align-items: center; gap: 12px; height: 62px; padding: 0 12px; background: #111; border: 3px solid #000; color: #fff; }
+.amt:focus-within { outline: 4px solid var(--xp); outline-offset: 2px; }
+.amt input { flex: 1; width: 100%; min-width: 0; background: transparent; border: 0; color: #fff; font-size: 32px; outline: none; }
+.amt input::placeholder { color: #5a5a62; }
+.amt small { flex: none; font-size: 22px; color: var(--mute); max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; gap: 6px; margin: 10px 0; }
+.chips button { flex: 1; min-width: 0; height: 40px; padding: 0; background: #1d1d22; border: 3px solid #000; font-size: 20px; color: #ddd; white-space: nowrap; }
+.chips button[aria-pressed="true"] { outline: 3px solid #7dff8f; outline-offset: 0; }
+.get { display: flex; justify-content: space-between; gap: 12px; font-size: 22px; margin: 8px 0; }
+.get > :last-child { text-align: right; overflow-wrap: anywhere; }
+.tb-place { width: 100%; height: 64px; font-size: 20px; margin-top: 6px; }
+.tb-own { border-top: 4px solid rgba(255,255,255,.07); margin-top: 12px; padding-top: 10px; }
 .trades { margin-top: 28px; }
 .trades h2 { font-size: 22px; margin-bottom: 12px; }
 .trade-list { list-style: none; margin: 0; padding: 0; }
@@ -181,7 +192,6 @@ button.unv { cursor: help; }
 @media (max-width: 640px) {
   .form { margin-top: 20px; }
 }
-.chips.four { grid-template-columns: repeat(4, 1fr); }
 .chips button:disabled { opacity: .45; cursor: not-allowed; }
 .wallet-panel { position: absolute; right: 0; top: 60px; z-index: 10; width: min(320px, calc(100vw - 32px)); display: grid; gap: 8px; }
 .wallet-panel .mbtn { height: 52px; font-size: 16px; }

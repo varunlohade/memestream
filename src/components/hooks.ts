@@ -78,16 +78,16 @@ const QUOTE_DEBOUNCE_MS = 300;
  * `curveState` is anything that changes when the pool does (the coin's raised SOL): after any trade
  * lands, the old quote no longer counts and a fresh one is fetched.
  */
-export function useQuote(mint: string, side: "buy" | "sell", amount: string, curveState: string) {
+export function useQuote(mint: string, side: "buy" | "sell", amount: string, curveState: string, slippageBps: number) {
   const [quote, setQuote] = useState<{ key: string; preview: TradePreview | null; error: string | null } | null>(null);
-  const key = `${mint}|${side}|${amount}|${curveState}`;
+  const key = `${mint}|${side}|${amount}|${curveState}|${slippageBps}`;
 
   useEffect(() => {
     if (!amount.trim()) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const preview = await fetchJson<TradePreview>(`/api/quote?${new URLSearchParams({ mint, side, amount })}`, {
+        const preview = await fetchJson<TradePreview>(`/api/quote?${new URLSearchParams({ mint, side, amount, slippageBps: String(slippageBps) })}`, {
           signal: controller.signal,
         });
         setQuote({ key, preview, error: null });
@@ -99,7 +99,7 @@ export function useQuote(mint: string, side: "buy" | "sell", amount: string, cur
       controller.abort();
       clearTimeout(timer);
     };
-  }, [key, mint, side, amount]);
+  }, [key, mint, side, amount, slippageBps]);
 
   const fresh = quote?.key === key;
   return {
