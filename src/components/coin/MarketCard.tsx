@@ -12,6 +12,7 @@ import { useWallet } from "@/components/wallet/WalletProvider";
 import { DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
 import { compact, fractionOf, minusReserve } from "@/lib/format";
 import { postJson } from "@/lib/http";
+import { profitText, resultLine, winPayout } from "@/lib/markets/payout";
 import type { MarketPreview, MarketView } from "@/lib/markets/record";
 import { CHALLENGE_BOND, CHALLENGE_REASON_MAX, LINK_MAX, OVERTURN_REWARD } from "@/lib/predictions/rules";
 import type { MarketVerdictView } from "@/lib/predictions/view";
@@ -84,17 +85,6 @@ function positionLine(market: MarketView): string | null {
   return parts.length ? `Your position: ${parts.join(" and ")}` : null;
 }
 
-/** What the wallet's shares pay now that the market is resolved, and whether there's anything to redeem. */
-function payout(market: MarketView): { text: string; redeem: boolean } {
-  const [yes, no] = market.payoutNumerators ?? [0, 0];
-  const total = yes + no || 1;
-  const p = market.position;
-  const sol = p ? (Number(p.yes) * yes + Number(p.no) * no) / total : 0;
-  if (!p || (!held(p.yes) && !held(p.no))) return { text: "You held no shares", redeem: false };
-  if (sol <= 0) return { text: "Your shares pay nothing", redeem: false };
-  return { text: `Your shares pay ${compact(sol)} SOL`, redeem: true };
-}
-
 function resultTag(market: MarketView) {
   const [yes, no] = market.payoutNumerators ?? [];
   if (yes && no) return <span className="pm-otag pm-oc">Refund</span>;
@@ -149,7 +139,7 @@ export function MarketCard(props: CardProps) {
   const { yes, no } = market.probability;
   const trading = market.trading && (now === null || now < market.lockAt);
   const line = positionLine(market);
-  const result = market.resolved ? payout(market) : null;
+  const result = market.resolved ? resultLine(market.payoutNumerators, market.position) : null;
 
   const redeem = async () => {
     if (!address) return;
@@ -194,6 +184,7 @@ export function MarketCard(props: CardProps) {
         <span className="mute">{Number(market.volumeSol) > 0 ? `Vol ${compact(Number(market.volumeSol))} SOL` : ""}</span>
         <span className="down">{percent(no)} No</span>
       </div>
+      {trading && <p className="mute pm-small">Fee 0.3% per trade: 80% to the market&apos;s starting liquidity (memestream), 20% to Meteora. The streamer earns on the coin, not on markets.</p>}
       {trading && canBet && (
         <div className="mk-big">
           {(["yes", "no"] as const).map((side) => (
@@ -235,7 +226,7 @@ export function MarketCard(props: CardProps) {
           </span>
           {result.redeem && (
             <button type="button" className="mbtn buy" disabled={busy || locked} onClick={redeem}>
-              {busy ? (status ?? "Preparing") : "Redeem"}
+              {busy ? (status ?? "Preparing") : `Redeem #${predictionId}`}
             </button>
           )}
         </div>
@@ -345,6 +336,7 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
           {preview ? (action === "buy" ? `${shares(preview.received)} ${side.toUpperCase()} shares` : `${compact(Number(preview.received))} SOL`) : "–"}
         </span>
       </div>
+      {preview && action === "buy" && <WinLine side={side} preview={preview} />}
       {preview && (
         <div className="mk-kv num mute pm-small">
           <span>Avg price {solPrice(preview.averagePrice, 3)}</span>
@@ -367,6 +359,16 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
         {stage ?? (locked ? "Paused: checking your last trade" : "Confirm")}
       </button>
     </div>
+  );
+}
+
+/** "If YES wins, you get ≈ 0.00954 SOL (+91%)": each winning share pays 1 SOL. */
+function WinLine({ side, preview }: { side: Side; preview: MarketPreview }) {
+  const win = winPayout(Number(preview.spent), Number(preview.received));
+  return (
+    <p className="mute pm-small num">
+      If {side.toUpperCase()} wins, you get ≈ {compact(win.sol)} SOL ({profitText(win.profit)})
+    </p>
   );
 }
 
