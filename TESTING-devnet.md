@@ -138,8 +138,8 @@ You see "Your points: 1,000". A viewer must hold at least 1 of the coin to sugge
 
 ### D3. Trade, close, resolve, redeem
 
-1. Viewer: press **BUY YES 0.50 SOL** (or **BUY NO**). A box opens with **Buy** / **Sell** tabs.
-2. Viewer: pick **0.05**, **0.1** or **max**; check **You get ≈ N YES shares**; press **Confirm**; approve in Phantom.
+1. Viewer: press **BUY YES · 50%** (or **BUY NO · 50%**). A box opens with **Buy** / **Sell** tabs.
+2. Viewer: pick **0.01**, **0.05**, **0.1** or **max**; check **You get ≈ N YES shares**; press **Confirm**; approve in Phantom.
 3. Both: the YES/NO bar and the % move. The viewer sees "Your position: N YES shares · pays N SOL if Yes".
 4. Viewer: **Sell** tab → amount → **Confirm** to sell some back for SOL.
 5. Streamer: trying to buy is refused (streamers can't bet on their own coin).

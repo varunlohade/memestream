@@ -26,7 +26,7 @@ const PREVIEW_DELAY_MS = 400;
 const SHOW_IMPACT_ABOVE = 0.05;
 /** SOL kept back on "max" buys for network fees and the new token accounts' rent. */
 const SOL_RESERVE = "0.01";
-const BUY_CHIPS = ["0.05", "0.1"];
+const BUY_CHIPS = ["0.01", "0.05", "0.1"];
 const LABEL: Record<Side, string> = { yes: "Yes", no: "No" };
 
 /** A share pays 1 SOL if it wins, so its price is in SOL: "0.62 SOL". */
@@ -196,9 +196,7 @@ export function MarketCard(props: CardProps) {
               disabled={busy || locked}
               onClick={() => setTicket(ticket === side ? null : side)}
             >
-              BUY {side.toUpperCase()}
-              <br />
-              {solPrice(market.probability[side])}
+              BUY {side.toUpperCase()} · {percent(market.probability[side])}
             </button>
           ))}
         </div>
@@ -339,7 +337,7 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
       {preview && action === "buy" && <WinLine side={side} preview={preview} />}
       {preview && (
         <div className="mk-kv num mute pm-small">
-          <span>Avg price {solPrice(preview.averagePrice, 3)}</span>
+          <span>Price per share {solPrice(preview.averagePrice, 3)} (pays 1 SOL if it wins)</span>
           <span>
             {LABEL[side]} {percent(preview.probabilityAfter)} after
           </span>
