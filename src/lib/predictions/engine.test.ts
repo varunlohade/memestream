@@ -450,15 +450,17 @@ test("review: a suggestion under review can't be upvoted, launched or crowd-pick
   assert.equal(w.game.live?.text, "Will I eat a banana?", "approved, upvoted, crowd-launched");
 });
 
-test("review: a rejected suggestion leaves, its 10 points come back, and its asker sees why for 5 minutes", () => {
+test("review: a rejected suggestion leaves, its 10 points stay spent, and its asker sees why and waits 5 minutes", () => {
   const w = world({ asker: 100 }, [], [], { reviewed: false });
   w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
   w.review("1", { approved: false, text: "Not approved: spam or ads" }, T0 + SEC);
-  assert.deepEqual([w.game.suggestions.length, w.bal.get("asker")], [0, 100]);
+  assert.deepEqual([w.game.suggestions.length, w.bal.get("asker")], [0, 90], "rejected spam is never free");
   assert.deepEqual(w.game.notices, [{ to: "asker", text: "Not approved: spam or ads", until: T0 + SEC + NOTICE_MS }]);
-  w.run({ kind: "suggest", text: "Will I eat an apple?" }, "asker", T0 + 2 * SEC);
+  refused(() => w.run({ kind: "suggest", text: "Will I eat an apple?" }, "asker", T0 + 2 * SEC), /wasn't approved/);
   w.run({ kind: "tick" }, null, T0 + SEC + NOTICE_MS);
   assert.deepEqual(w.game.notices, []);
+  w.run({ kind: "suggest", text: "Will I eat an apple?" }, "asker", T0 + SEC + NOTICE_MS);
+  assert.equal(w.game.suggestions.length, 1, "after the wait the asker can suggest again");
   // A verdict on a question that changed or left meanwhile does nothing.
   assert.equal(applyReview(w.game, { id: "1", text: "Will I eat a banana?" }, { approved: false, text: "x" }, T0 + 3 * SEC).changed, false);
 });

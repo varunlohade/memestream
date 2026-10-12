@@ -238,14 +238,14 @@ export function startReviews(state: Game, now: number, env: Env = { streamerSeen
 
 /**
  * A review's verdict. Approved: a suggestion joins the queue, a staff question goes live (its bet
- * window starts now). Not approved: a suggestion leaves and its asker gets the 10 points back, a
+ * window starts now). Not approved: a suggestion leaves (its 10 points stay spent), a
  * staff question is dropped (no launch used); either way the asker sees the note. A question no
  * longer under review (decided by hand, expired, changed) is left alone.
  */
 export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVerdict, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, (ctx) => {
     if (verdict.approved) approveReview(ctx, target);
-    else rejectReview(ctx, target, verdict.text);
+    else rejectReview(ctx, target, verdict.text, false);
   });
 }
 
@@ -328,12 +328,13 @@ function approveReview(ctx: Ctx, target: ReviewTarget) {
   launch(ctx, { id: p.id, text: p.text }, p.by, p.windowMin);
 }
 
-function rejectReview(ctx: Ctx, target: ReviewTarget, text: string) {
+/** `refund`: only when no review could decide (stuck, removed by hand); a question jev rejected keeps its cost, so rejected spam is never free. */
+function rejectReview(ctx: Ctx, target: ReviewTarget, text: string, refund: boolean) {
   const { game } = ctx;
   const s = game.suggestions.find((x) => x.id === target.id && x.text === target.text && x.review);
   if (s) {
     game.suggestions = game.suggestions.filter((x) => x !== s);
-    ctx.credit(s.asker, SUGGEST_COST);
+    if (refund) ctx.credit(s.asker, SUGGEST_COST);
     return notify(ctx, s.asker, text);
   }
   const p = game.pending;
@@ -495,6 +496,8 @@ function suggest(ctx: Ctx, actor: Actor, text: string) {
   if (!actor.holder) throw new GameError(`Hold at least ${MIN_HOLDING_COINS} of this coin to suggest`);
   requireLaunchesLeft(game);
   if (game.suggestions.some((s) => s.asker === actor.wallet)) throw new GameError("You already have a suggestion waiting");
+  // A wallet whose question was just not approved waits until its note expires (NOTICE_MS): no review spam.
+  if (game.notices.some((n) => n.to === actor.wallet)) throw new GameError("Your last question wasn't approved. Try again in a few minutes.");
   if (game.suggestions.length >= MAX_QUEUE) throw new GameError("The queue is full. Try again soon.");
   const question = cleanedOrThrow(text);
   if (actor.balance < SUGGEST_COST) throw new GameError(`Suggesting costs ${SUGGEST_COST} points`);
@@ -557,7 +560,7 @@ function removeSuggestion(ctx: Ctx, actor: Actor, id: string) {
   const { game } = ctx;
   requireStaff(game, actor);
   const stuck = stuckItem(game, id);
-  if (stuck) return rejectReview(ctx, stuck, "Not approved by the streamer");
+  if (stuck) return rejectReview(ctx, stuck, "Not approved by the streamer", true);
   const s = findSuggestion(game, id);
   game.suggestions = game.suggestions.filter((x) => x !== s); // its 10 points are spent, as on expiry
 }

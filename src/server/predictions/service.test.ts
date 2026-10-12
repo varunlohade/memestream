@@ -420,14 +420,14 @@ for (const [name, make] of STORES) {
     await service.act(COIN, "other", { kind: "upvote", id: after.queue[0].id });
   });
 
-  test(`${name}: review: a rejected suggestion leaves, its 10 points come back, and its asker sees why`, async () => {
+  test(`${name}: review: a rejected suggestion leaves, its 10 points stay spent, and its asker sees why`, async () => {
     const { service, fund, settle, balance, jev } = setup(make, { autoReview: false });
     await fund("asker", 100);
     jev.answer = () => jsonResponse(jevAnswer("REJECT", 0.95, "HARASSMENT"));
     await service.act(COIN, "asker", { kind: "suggest", text: Q });
     assert.equal(await balance("asker"), 90);
     await settle();
-    assert.equal(await balance("asker"), 100);
+    assert.equal(await balance("asker"), 90);
     const view = await service.view(COIN, "asker");
     assert.deepEqual([view.queue, view.me?.notice], [[], "Not approved: harassment"]);
     assert.equal((await service.view(COIN, "other")).me?.notice, null);

@@ -90,7 +90,13 @@ export function parseVerdict(body: unknown): Verdict {
   const verdict = validChoice(answers?.verdict, Object.keys(VERDICTS) as (keyof typeof VERDICTS)[]);
   const reason = validChoice(answers?.reason, Object.keys(REASONS) as ReasonId[]);
   if (!verdict || !reason) throw new ReviewFailed("Malformed review answer");
-  if (verdict.choice === "APPROVE" && verdict.confidence >= APPROVE_MIN_CONFIDENCE) return { approved: true };
+  // Approve only when both answers agree and the APPROVE probability itself is high, not just the stated confidence.
+  const approve =
+    verdict.choice === "APPROVE" &&
+    verdict.confidence >= APPROVE_MIN_CONFIDENCE &&
+    (verdict.probabilities.APPROVE ?? 0) >= APPROVE_MIN_CONFIDENCE &&
+    reason.choice === "OK";
+  if (approve) return { approved: true };
   return { approved: false, reason: reason.choice, text: rejectionText(reason.choice) };
 }
 

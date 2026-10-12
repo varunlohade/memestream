@@ -13,6 +13,13 @@ test("parseVerdict: APPROVE at enough confidence approves; low confidence or REJ
   assert.deepEqual(parseVerdict(jevAnswer("REJECT", 0.9, "HATE")), { approved: false, reason: "HATE", text: "Not approved: hateful" });
 });
 
+test("parseVerdict: APPROVE needs a high APPROVE probability and an OK reason, not just a stated confidence", () => {
+  const coinFlip = jevAnswer("APPROVE", 0.99);
+  coinFlip.answers.verdict.probabilities = { APPROVE: 0.5, REJECT: 0.5 };
+  assert.equal(parseVerdict(coinFlip).approved, false, "0.5/0.5 with confidence 0.99 does not approve");
+  assert.deepEqual(parseVerdict(jevAnswer("APPROVE", 0.95, "HATE")), { approved: false, reason: "HATE", text: "Not approved: hateful" });
+});
+
 test("parseVerdict: anything malformed throws, never approves", () => {
   const good = jevAnswer("APPROVE");
   const broken: [string, (a: ReturnType<typeof jevAnswer>) => unknown][] = [
