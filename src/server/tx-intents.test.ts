@@ -72,6 +72,32 @@ test("a client that never reports lets the hold lapse after the build hold", asy
   assert.notEqual(await intents.remember(key, HASH, clock.t), null);
 });
 
+test("a popup open longer than the build hold: a late signature report blocks an identical rebuild again", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  const token = (await intents.remember(key, HASH, T0)) as string;
+  clock.t = T0 + BUILD_HOLD_MS + 5_000; // the hold lapsed while the popup stayed open
+  assert.equal(await intents.pending(key, clock.t), null);
+  await intents.report(token, HASH, SIG, "pending", clock.t);
+  assert.deepEqual(await intents.pending(key, clock.t + 1_000), { signature: SIG });
+  assert.equal(await intents.remember(key, HASH, clock.t + 1_000), null);
+  clock.t = T0 + BUILD_HOLD_MS + 5_000 + SIGNED_HOLD_MS - BUILD_HOLD_MS;
+  assert.equal(await intents.pending(key, clock.t), null, "it lapses at most SIGNED_HOLD_MS after the build");
+});
+
+test("a late report never overwrites a newer build's record", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  const old = (await intents.remember(key, HASH, T0)) as string;
+  clock.t = T0 + BUILD_HOLD_MS;
+  const fresh = (await intents.remember(key, HASH, clock.t)) as string;
+  await intents.report(old, HASH, SIG, "pending", clock.t + 1);
+  await intents.release(fresh);
+  assert.equal(await intents.pending(key, clock.t + 2), null, "the newer build's record was the one there; the old report added nothing");
+});
+
 test("a wallet rejection releases the hold: the same trade can be built again at once", async () => {
   const clock = { t: T0 };
   const intents = txIntents(memoryIntentStore(() => clock.t));
