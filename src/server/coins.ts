@@ -1,12 +1,13 @@
 /** Read-side of the app: lists coins, one coin's detail, its recent trades, a wallet's holdings. */
 import "server-only";
-import type { DynamicBondingCurveClient, PoolConfig } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import { deriveDammV2PoolAuthority, deriveDbcPoolAuthority, type DynamicBondingCurveClient, type PoolConfig } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
-import type { CoinDetail, CoinView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
+import type { CoinDetail, CoinView, HolderView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
 import { fetchDammPools, graduatedPoolAddress, isCoinSolPool, withGraduatedPool } from "@/lib/damm/pool";
+import { mintSupply, toHolders } from "@/lib/holders";
 import { lpPositionsOf, unclaimedPoolFees } from "@/lib/damm/positions";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
@@ -217,6 +218,52 @@ async function readCoinAndTrades(mint: string): Promise<CoinAndTrades | null> {
     return [];
   });
   return { coin, trades };
+}
+
+/**
+ * A coin's top holders: one read per coin per 30 s for everyone (the list moves slowly), budgeted
+ * like the detail. If a read fails or the budget says no, the last good list is served.
+ */
+const HOLDERS_CACHE_MS = 30_000;
+/** getTokenLargestAccounts, then one getMultipleAccountsInfo for the mint (supply) and those accounts (owners). */
+const HOLDERS_RPC_CALLS = 2;
+const holderListCache = new Map<string, { at: number; value: HolderView[] }>();
+const holderListInFlight = new Map<string, Promise<HolderView[]>>();
+
+/** Null if it isn't a memestream coin. Throws BusyError when the RPC budget says no and nothing is cached. */
+export async function getHolders(mint: string): Promise<HolderView[] | null> {
+  const base = await coinAndTrades(mint);
+  if (!base) return null;
+  const hit = holderListCache.get(mint);
+  if (hit && Date.now() - hit.at < HOLDERS_CACHE_MS) return hit.value;
+  return shareInFlight(holderListInFlight, mint, async () => {
+    if (!(await takeRpcBudget(HOLDERS_RPC_CALLS))) {
+      if (hit) return hit.value;
+      throw new BusyError();
+    }
+    try {
+      return remember(holderListCache, mint, await readHolders(base.coin), Date.now());
+    } catch (error) {
+      if (!hit) throw error;
+      console.warn("holder read failed; serving the last good list:", (error as Error).message);
+      return hit.value;
+    }
+  });
+}
+
+async function readHolders(coin: CoinView): Promise<HolderView[]> {
+  const { connection } = getChain();
+  const mintKey = new PublicKey(coin.mint);
+  const largest = (await connection.getTokenLargestAccounts(mintKey)).value;
+  const [mintInfo, ...accounts] = await connection.getMultipleAccountsInfo([mintKey, ...largest.map((a) => a.address)]);
+  const supply = mintSupply(mintInfo?.data ?? null);
+  if (supply === null) return [];
+  return toHolders(
+    largest.map((a) => ({ address: a.address.toBase58(), amount: a.amount })),
+    accounts.map((info) => info?.data ?? null),
+    supply,
+    { curve: deriveDbcPoolAuthority().toBase58(), pool: deriveDammV2PoolAuthority().toBase58(), streamer: coin.creator },
+  );
 }
 
 /** Our config's launch fee in SOL ("0" = free). The config is fixed on-chain, so it's read once. */

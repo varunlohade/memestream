@@ -80,3 +80,9 @@ export type TapeItem =
   | { kind: "trade"; mint: string; symbol: string; side: "buy" | "sell"; sol: string; wallet: string; time: number | null }
   | { kind: "graduated"; mint: string; symbol: string }
   | { kind: "race"; mint: string; symbol: string; progress: number };
+
+/**
+ * One holder of a coin: an owner wallet (or program authority), its share of total supply in
+ * percent, and its role: the bonding curve's vault, the Meteora pool's vault, or the streamer.
+ */
+export type HolderView = { owner: string; percent: number; role: "curve" | "pool" | "streamer" | null };
