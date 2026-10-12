@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Action, type Actor, apply, type Game, GameError, newGame } from "./engine";
-import { FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED } from "./rules";
+import { type Action, type Actor, apply, applyReview, type Game, GameError, newGame, type Result, STAFF, startReviews } from "./engine";
+import { FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED, NOTICE_MS, REVIEW_MAX_TRIES, REVIEW_RETRY_MS } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -13,14 +13,14 @@ const MOD = "Mod";
  * movements the engine asks for (the store applies them for real; see store.test.ts).
  * Everyone holds the coin unless listed in `nonHolders`; the streamer is watching unless `away()`.
  */
-function world(balances: Record<string, number> = {}, eligible: string[] = [], nonHolders: string[] = []) {
+function world(balances: Record<string, number> = {}, eligible: string[] = [], nonHolders: string[] = [], { reviewed = true } = {}) {
   let game: Game = newGame(STREAMER);
   const bal = new Map(Object.entries(balances));
   const eligibleSet = new Set(eligible);
   let streamerHere = true;
   const actor = (wallet: string): Actor => ({ wallet, eligible: eligibleSet.has(wallet), holder: !nonHolders.includes(wallet), balance: bal.get(wallet) ?? 0 });
-  const run = (action: Action, wallet: string | null, now: number) => {
-    const result = apply(game, action, wallet ? actor(wallet) : null, now, { streamerSeenAt: streamerHere ? now - MIN : null });
+  const env = (now: number) => ({ streamerSeenAt: streamerHere ? now - MIN : null });
+  const settle = (result: Result) => {
     for (const [w, m] of result.moves) {
       const before = bal.get(w) ?? 0;
       assert.ok(before >= m.floor && before + m.delta >= 0, `${w} can afford the move`);
@@ -29,8 +29,22 @@ function world(balances: Record<string, number> = {}, eligible: string[] = [], n
     game = result.game;
     return result;
   };
+  /** The AI review's verdict on question `id` (a suggestion or the staff launch). */
+  const review = (id: string, verdict: Parameters<typeof applyReview>[2], now: number) => {
+    const item = [...game.suggestions, ...(game.pending ? [game.pending] : [])].find((x) => x.id === id)!;
+    return settle(applyReview(game, { id, text: item.text }, verdict, now, env(now)));
+  };
+  /** Runs an action; unless `reviewed` is off, a typed question is approved at once, as if the review said yes. */
+  const run = (action: Action, wallet: string | null, now: number) => {
+    const result = settle(apply(game, action, wallet ? actor(wallet) : null, now, env(now)));
+    const typed = action.kind === "suggest" || (action.kind === "launch" && action.text !== undefined);
+    if (!reviewed || !typed) return result;
+    const id = action.kind === "suggest" ? game.suggestions.find((x) => x.asker === wallet && x.review)?.id : game.pending?.id;
+    return id ? review(id, { approved: true }, now) : result;
+  };
   return {
     run,
+    review,
     actor,
     bal,
     get game() {
@@ -186,6 +200,7 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
 
   const stream2 = { streamerSeenAt: t + 3 * 60 * MIN, streamStartedAt: t + 3 * 60 * MIN };
   game = apply(game, { kind: "launch", text: "One more question?" }, w.actor(STREAMER), t + 3 * 60 * MIN, stream2).game;
+  game = applyReview(game, game.pending!, { approved: true }, t + 3 * 60 * MIN, stream2).game; // the review says yes
   assert.deepEqual([game.launched, game.won, game.stream], [1, {}, stream2.streamStartedAt]);
   assert.equal(game.resolved.length, MAX_HISTORY, "past results stay");
   assert.equal(apply(game, { kind: "tick" }, null, t + 3 * 60 * MIN + 1, stream2).game.launched, 1, "one reset per stream");
@@ -413,4 +428,100 @@ test("a tick with nothing due changes nothing; actions need a signed-in wallet",
   const w = world();
   assert.equal(w.run({ kind: "tick" }, null, T0).changed, false);
   refused(() => w.run({ kind: "upvote", id: "1" }, null, T0), /Sign in/);
+});
+
+// ---------------------------------------------------------------------------------------------
+// AI review: typed questions wait "under review" until the review approves them.
+// ---------------------------------------------------------------------------------------------
+
+const SEC = 1_000;
+
+test("review: a suggestion under review can't be upvoted, launched or crowd-picked; approval queues it", () => {
+  const w = world({ asker: 100 }, ["v0", "v1", "v2"], [], { reviewed: false });
+  w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
+  assert.deepEqual(w.game.suggestions[0].review, { tries: 0, at: T0 });
+  assert.equal(w.bal.get("asker"), 90);
+  refused(() => w.run({ kind: "upvote", id: "1" }, "v0", T0), /gone/);
+  refused(() => w.run({ kind: "launch", id: "1" }, STREAMER, T0), /gone/);
+  refused(() => w.run({ kind: "suggest", text: "Will I eat two bananas?" }, "asker", T0), /already have a suggestion/);
+  w.review("1", { approved: true }, T0 + SEC);
+  assert.equal(w.game.suggestions[0].review, undefined);
+  for (const v of ["v0", "v1", "v2"]) w.run({ kind: "upvote", id: "1" }, v, T0 + 2 * SEC);
+  assert.equal(w.game.live?.text, "Will I eat a banana?", "approved, upvoted, crowd-launched");
+});
+
+test("review: a rejected suggestion leaves, its 10 points come back, and its asker sees why for 5 minutes", () => {
+  const w = world({ asker: 100 }, [], [], { reviewed: false });
+  w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
+  w.review("1", { approved: false, text: "Not approved: spam or ads" }, T0 + SEC);
+  assert.deepEqual([w.game.suggestions.length, w.bal.get("asker")], [0, 100]);
+  assert.deepEqual(w.game.notices, [{ to: "asker", text: "Not approved: spam or ads", until: T0 + SEC + NOTICE_MS }]);
+  w.run({ kind: "suggest", text: "Will I eat an apple?" }, "asker", T0 + 2 * SEC);
+  w.run({ kind: "tick" }, null, T0 + SEC + NOTICE_MS);
+  assert.deepEqual(w.game.notices, []);
+  // A verdict on a question that changed or left meanwhile does nothing.
+  assert.equal(applyReview(w.game, { id: "1", text: "Will I eat a banana?" }, { approved: false, text: "x" }, T0 + 3 * SEC).changed, false);
+});
+
+test("review: a typed staff question goes live only on approval (its window starts then); a rejection uses no launch", () => {
+  const w = world({ a: 100 }, [], [], { reviewed: false });
+  w.run({ kind: "launch", text: "Will chat hit 100?", windowMin: 2 }, STREAMER, T0);
+  assert.ok(w.game.live === null, "not live yet");
+  assert.equal(w.game.pending?.text, "Will chat hit 100?");
+  refused(() => w.run({ kind: "bet", side: "yes", amount: 10 }, "a", T0), /Betting is closed/);
+  refused(() => w.run({ kind: "launch", text: "Another one here?" }, STREAMER, T0), /under review/);
+  w.review(w.game.pending!.id, { approved: false, text: "Not approved: violent" }, T0 + SEC);
+  assert.deepEqual([w.game.pending, w.game.launched, w.game.notices[0].to], [null, 0, STAFF]);
+
+  w.run({ kind: "launch", text: "Will chat hit 200?", windowMin: 2 }, STREAMER, T0 + 2 * SEC);
+  w.review(w.game.pending!.id, { approved: true }, T0 + 5 * SEC);
+  const live = w.game.live as Game["live"]; // (assert.ok above narrowed it to null)
+  const launched = w.game.launched;
+  assert.deepEqual([live?.text, live?.launchedAt, live?.lockAt, launched], ["Will chat hit 200?", T0 + 5 * SEC, T0 + 5 * SEC + 2 * MIN, 1]);
+});
+
+test("review: checks start at once, then at most every 15 s, at most 5 times; then staff decide by hand", () => {
+  const w = world({ asker: 100 }, [], [], { reviewed: false });
+  w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
+  let t = T0;
+  const start = () => {
+    const r = startReviews(w.game, t);
+    w.run({ kind: "tick" }, null, t);
+    Object.assign(w.game, r.game);
+    return r.due.map((d) => d.id);
+  };
+  assert.deepEqual(start(), ["1"]);
+  assert.deepEqual(start(), [], "already started");
+  t += REVIEW_RETRY_MS - 1;
+  assert.deepEqual(start(), [], "too soon");
+  refused(() => w.run({ kind: "approve", id: "1" }, STREAMER, t), /still being checked/);
+  for (let i = 2; i <= REVIEW_MAX_TRIES; i++) {
+    t += REVIEW_RETRY_MS;
+    assert.deepEqual(start(), ["1"], `try ${i}`);
+  }
+  t += REVIEW_RETRY_MS;
+  assert.deepEqual(start(), [], "no tries left");
+  refused(() => w.run({ kind: "approve", id: "1" }, "asker", t), /Only the streamer/);
+  w.run({ kind: "approve", id: "1" }, STREAMER, t);
+  assert.equal(w.game.suggestions[0].review, undefined);
+});
+
+test("review: staff remove a stuck question by hand: the asker is refunded and told; stuck staff questions too", () => {
+  const w = world({ asker: 100 }, [], [], { reviewed: false });
+  w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
+  w.run({ kind: "launch", text: "Will chat hit 100?" }, STREAMER, T0);
+  w.game.suggestions[0].review = { tries: REVIEW_MAX_TRIES, at: T0 };
+  w.game.pending!.review = { tries: REVIEW_MAX_TRIES, at: T0 };
+  w.run({ kind: "remove", id: "1" }, STREAMER, T0 + SEC);
+  assert.deepEqual([w.game.suggestions.length, w.bal.get("asker"), w.game.notices[0].to], [0, 100, "asker"]);
+  w.run({ kind: "approve", id: w.game.pending!.id }, STREAMER, T0 + 2 * SEC);
+  assert.equal(w.game.live?.text, "Will chat hit 100?");
+});
+
+test("review: a suggestion still under review after 20 minutes expires and its points come back", () => {
+  const w = world({ asker: 100 }, [], [], { reviewed: false });
+  w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
+  w.run({ kind: "launch", text: "Will chat hit 100?" }, STREAMER, T0);
+  w.run({ kind: "tick" }, null, T0 + 20 * MIN);
+  assert.deepEqual([w.game.suggestions.length, w.game.pending, w.bal.get("asker")], [0, null, 100]);
 });

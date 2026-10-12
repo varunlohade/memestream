@@ -5,9 +5,11 @@
  */
 import "server-only";
 import { randomBytes } from "node:crypto";
+import { after } from "next/server";
 import { Redis } from "@upstash/redis";
 import { holdsEnough } from "@/lib/predictions/rules";
 import { getCoinDetail } from "@/server/coins";
+import { reviewFromEnv } from "./review";
 import { predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
 
@@ -71,6 +73,8 @@ export function predictions(): { service: PredictionsService } | { error: string
     now: Date.now,
     secret,
     domain,
+    review: reviewFromEnv(),
+    defer: (task) => after(task),
     coin: async (mint) => {
       const coin = (await getCoinDetail(mint, null))?.coin;
       return coin ? { creator: coin.creator, status: coin.status } : null;

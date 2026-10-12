@@ -6,8 +6,10 @@ import { MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
 import { FLAG_WINDOW_MS } from "@/lib/predictions/rules";
 import { newProfile, utcDay } from "@/lib/predictions/watch";
 import { walletFromToken } from "./identity";
+import { jevAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { type CoinFacts, ContentionError, ipBucket, predictionsService } from "./service";
+import { reviewClient } from "./review";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
@@ -24,22 +26,65 @@ const STORES: [string, (clock: Clock) => PredictionStore][] = [
   ["redis+lua", (clock) => redisStore(luaRedis(fengari, () => clock.t))],
 ];
 
-function setup(make: (clock: Clock) => PredictionStore) {
+const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+
+/**
+ * A fake jev behind a fake fetch (no test reaches the real API). `answer` makes each response;
+ * `key` is the configured TYPESAFE_API_KEY.
+ */
+function fakeJev() {
+  const jev = {
+    calls: 0,
+    key: "test-key" as string | undefined,
+    answer: ((() => jsonResponse(jevAnswer("APPROVE"))) as (signal: AbortSignal) => Response | Promise<Response>),
+  };
+  const fetch: typeof globalThis.fetch = async (_url, init) => {
+    jev.calls += 1;
+    return jev.answer(init!.signal!);
+  };
+  const review = (question: string) => reviewClient({ apiKey: jev.key, fetch, sleep: async () => {}, timeoutMs: 20 })(question);
+  return { jev, review };
+}
+
+/**
+ * The service on a store, with a fake clock and a fake jev. Tasks run "after the response" are
+ * held; `settle()` runs them and waits. With `autoReview` (the default), every action waits for
+ * its reviews before returning, so typed questions are approved at once.
+ */
+function setup(make: (clock: Clock) => PredictionStore, { autoReview = true } = {}) {
   const clock = { t: T0 };
   const store = make(clock);
   const coins = new Map<string, CoinFacts>([[COIN, { creator: STREAMER, status: "trading" }]]);
   /** Wallets that hold the coin (everyone, unless removed). */
   const nonHolders = new Set<string>();
-  const service = predictionsService({
+  const { jev, review } = fakeJev();
+  const deferred: (() => Promise<void>)[] = [];
+  const raw = predictionsService({
     store,
     now: () => clock.t,
     secret: SECRET,
     domain: DOMAIN,
     coin: async (mint) => coins.get(mint) ?? null,
     holds: async (_mint, wallet) => !nonHolders.has(wallet),
+    review,
+    defer: (task) => void deferred.push(task),
     attempts: 200,
     backoffMs: () => Math.random() * 2,
   });
+  const settle = async () => {
+    while (deferred.length) await Promise.all(deferred.splice(0).map((task) => task()));
+  };
+  const service: typeof raw = !autoReview
+    ? raw
+    : {
+        ...raw,
+        act: async (mint, wallet, action) => {
+          const view = await raw.act(mint, wallet, action);
+          if (deferred.length === 0) return view;
+          await settle();
+          return view && raw.view(mint, wallet);
+        },
+      };
   /** Test-only funding: points and watch time, written straight to the store. */
   const fund = async (wallet: string, points: number, watchMinutes = 0) => {
     const profile = { ...newProfile(), watchMs: watchMinutes * MIN, earningMs: watchMinutes * MIN, starter: watchMinutes >= 10 };
@@ -49,7 +94,7 @@ function setup(make: (clock: Clock) => PredictionStore) {
   const balance = async (wallet: string) => (await store.balances([wallet]))[0];
   /** The streamer watching their own coin (needed for crowd auto-launch). */
   const streamerHere = () => service.beat(STREAMER, COIN, "10.0.0.1");
-  return { store, clock, service, fund, balance, coins, nonHolders, streamerHere };
+  return { store, clock, service, fund, balance, coins, nonHolders, streamerHere, jev, settle };
 }
 
 function keypair() {
@@ -346,5 +391,110 @@ for (const [name, make] of STORES) {
     const viewer = await service.view(COIN, "a00");
     assert.deepEqual([viewer.queueSize, viewer.queue.length, viewer.resolved.length, viewer.mods], [25, 20, 5, []]);
     assert.deepEqual((await service.view(COIN, STREAMER)).mods, ["modwallet"]);
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// AI review (a fake jev behind a fake fetch).
+// ---------------------------------------------------------------------------------------------
+
+const SEC = 1_000;
+const Q = "Will the streamer eat a banana?";
+
+for (const [name, make] of STORES) {
+  test(`${name}: review: a suggestion is under review for its asker only (no upvotes); approval shows it to everyone`, async () => {
+    const { service, fund, settle, jev } = setup(make, { autoReview: false });
+    await fund("asker", 100);
+    await fund("other", 100, 30);
+    const mine = (await service.act(COIN, "asker", { kind: "suggest", text: Q }))!;
+    assert.deepEqual(mine.queue.map((s) => [s.text, s.status, s.mine]), [[Q, "review", true]]);
+    const others = await service.view(COIN, "other");
+    assert.deepEqual([others.queue, others.queueSize], [[], 0]);
+    assert.deepEqual((await service.view(COIN, null)).queue, []);
+    assert.deepEqual((await service.view(COIN, STREAMER)).queue, [], "not stuck: staff don't see it either");
+    await assert.rejects(service.act(COIN, "other", { kind: "upvote", id: mine.queue[0].id }), /gone/);
+    await settle();
+    assert.equal(jev.calls, 1);
+    const after = await service.view(COIN, "other");
+    assert.deepEqual(after.queue.map((s) => [s.text, s.status]), [[Q, "ok"]]);
+    await service.act(COIN, "other", { kind: "upvote", id: after.queue[0].id });
+  });
+
+  test(`${name}: review: a rejected suggestion leaves, its 10 points come back, and its asker sees why`, async () => {
+    const { service, fund, settle, balance, jev } = setup(make, { autoReview: false });
+    await fund("asker", 100);
+    jev.answer = () => jsonResponse(jevAnswer("REJECT", 0.95, "HARASSMENT"));
+    await service.act(COIN, "asker", { kind: "suggest", text: Q });
+    assert.equal(await balance("asker"), 90);
+    await settle();
+    assert.equal(await balance("asker"), 100);
+    const view = await service.view(COIN, "asker");
+    assert.deepEqual([view.queue, view.me?.notice], [[], "Not approved: harassment"]);
+    assert.equal((await service.view(COIN, "other")).me?.notice, null);
+  });
+
+  test(`${name}: review: a timeout keeps it under review; the next view after 15 s tries again and approves`, async () => {
+    const { service, fund, settle, clock, jev } = setup(make, { autoReview: false });
+    await fund("asker", 100);
+    jev.answer = (signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
+    await service.act(COIN, "asker", { kind: "suggest", text: Q });
+    await settle();
+    assert.equal((await service.view(COIN, "asker")).queue[0].status, "review");
+    jev.answer = () => jsonResponse(jevAnswer("APPROVE"));
+    clock.t += 10 * SEC;
+    await service.view(COIN, "asker");
+    await settle();
+    assert.equal(jev.calls, 1, "not again within 15 s");
+    clock.t += 5 * SEC;
+    await service.view(COIN, "asker");
+    await settle();
+    assert.equal(jev.calls, 2);
+    assert.equal((await service.view(COIN, "other")).queue[0]?.status, "ok");
+  });
+
+  test(`${name}: review: a malformed answer or a missing key is a failure, never an approval; after 5 tries staff decide`, async () => {
+    const { service, fund, settle, clock, jev, balance } = setup(make, { autoReview: false });
+    await fund("asker", 100);
+    jev.answer = () => jsonResponse({ answers: { verdict: { choice: "APPROVE", probabilities: { APPROVE: 1 }, confidence: 1 } } });
+    await service.act(COIN, "asker", { kind: "suggest", text: Q });
+    await settle();
+    jev.key = undefined; // no TYPESAFE_API_KEY: no request goes out
+    for (let i = 0; i < 6; i++) {
+      clock.t += 15 * SEC;
+      await service.view(COIN, "asker");
+      await settle();
+    }
+    assert.equal(jev.calls, 1, "one malformed answer, then no key: nothing sent");
+    const asker = await service.view(COIN, "asker");
+    assert.deepEqual([asker.queue[0].status, asker.queue[0].stuck], ["review", true]);
+    assert.deepEqual((await service.view(COIN, "other")).queue, [], "still hidden from viewers");
+    const staff = await service.view(COIN, STREAMER);
+    assert.deepEqual(staff.queue.map((s) => [s.status, s.stuck]), [["review", true]], "staff see the stuck one");
+    await assert.rejects(service.act(COIN, "asker", { kind: "approve", id: staff.queue[0].id }), /Only the streamer/);
+    await service.act(COIN, STREAMER, { kind: "remove", id: staff.queue[0].id });
+    assert.equal(await balance("asker"), 100, "removed by hand: refunded");
+    assert.equal((await service.view(COIN, "asker")).me?.notice, "Not approved by the streamer");
+  });
+
+  test(`${name}: review: a staff typed question waits under review (no bets), goes live on approval; a rejection uses no launch`, async () => {
+    const { service, fund, settle } = setup(make, { autoReview: false });
+    await fund("V", 1_000);
+    const staff = (await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat hit 100?", windowMin: 2 }))!;
+    assert.deepEqual([staff.live, staff.pending?.text, staff.pending?.stuck], [null, "Will chat hit 100?", false]);
+    assert.equal((await service.view(COIN, "V")).pending, null, "viewers don't see it");
+    await assert.rejects(service.act(COIN, "V", { kind: "bet", side: "yes", amount: 10 }), /Betting is closed/);
+    await settle();
+    const live = await service.view(COIN, "V");
+    assert.deepEqual([live.live?.text, live.launched], ["Will chat hit 100?", 1]);
+
+  });
+
+  test(`${name}: review: a rejected staff question shows the reason to staff and leaves the launch count alone`, async () => {
+    const { service, settle, jev } = setup(make, { autoReview: false });
+    jev.answer = () => jsonResponse(jevAnswer("REJECT", 0.9, "VIOLENCE"));
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat fight someone?", windowMin: 2 });
+    await settle();
+    const staff = await service.view(COIN, STREAMER);
+    assert.deepEqual([staff.live, staff.pending, staff.launched, staff.me?.notice], [null, null, 0, "Not approved: violent"]);
   });
 }

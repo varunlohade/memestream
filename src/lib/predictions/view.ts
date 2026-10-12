@@ -24,6 +24,8 @@ export type PredictionsView = {
     hasSuggestion: boolean;
     /** Holds at least 1 whole coin (needed to suggest and upvote); null if unknown or staff. */
     holder: boolean | null;
+    /** A short "Not approved: ..." note about this wallet's question (staff: about a typed question), shown for a few minutes. */
+    notice: string | null;
   } | null;
   live: {
     id: string;
@@ -36,9 +38,15 @@ export type PredictionsView = {
     bettors: number;
     myBet: { side: Side; amount: number } | null;
   } | null;
-  /** All waiting suggestions; `queue` lists the top ones only. */
+  /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
+  pending: { id: string; text: string; stuck: boolean } | null;
+  /** Waiting suggestions this viewer can see; `queue` lists the top ones only. */
   queueSize: number;
-  queue: { id: string; text: string; upvotes: number; expiresAt: number; mine: boolean; upvoted: boolean }[];
+  /**
+   * "review": the AI review hasn't approved it yet. Only its asker sees it, and staff once `stuck`
+   * (every check failed: staff approve or remove it by hand). It can't be upvoted or launched.
+   */
+  queue: { id: string; text: string; upvotes: number; expiresAt: number; mine: boolean; upvoted: boolean; status: "review" | "ok"; stuck: boolean }[];
   resolved: {
     id: string;
     text: string;

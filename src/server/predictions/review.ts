@@ -44,9 +44,9 @@ const REASONS = {
 } as const;
 export type ReasonId = keyof typeof REASONS;
 
-export type Verdict = { approved: true } | { approved: false; reason: ReasonId };
-/** The plain words for a rejection, e.g. "Not approved: spam or ads". */
-export const rejectionText = (reason: ReasonId) => `Not approved: ${REASONS[reason][1]}`;
+/** `text` is the short note the asker sees, e.g. "Not approved: spam or ads". */
+export type Verdict = { approved: true } | { approved: false; reason: ReasonId; text: string };
+const rejectionText = (reason: ReasonId) => `Not approved: ${REASONS[reason][1]}`;
 
 /** jev didn't answer in time, answered with an error, or answered something malformed. */
 export class ReviewFailed extends Error {}
@@ -91,10 +91,10 @@ export function parseVerdict(body: unknown): Verdict {
   const reason = validChoice(answers?.reason, Object.keys(REASONS) as ReasonId[]);
   if (!verdict || !reason) throw new ReviewFailed("Malformed review answer");
   if (verdict.choice === "APPROVE" && verdict.confidence >= APPROVE_MIN_CONFIDENCE) return { approved: true };
-  return { approved: false, reason: reason.choice };
+  return { approved: false, reason: reason.choice, text: rejectionText(reason.choice) };
 }
 
-export type ReviewDeps = { apiKey: string | undefined; model?: string; fetch?: typeof fetch; sleep?: (ms: number) => Promise<void> };
+export type ReviewDeps = { apiKey: string | undefined; model?: string; fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>; timeoutMs?: number };
 export type ReviewQuestion = (question: string) => Promise<Verdict>;
 
 /** A reviewer for questions. Every failure throws ReviewFailed with a short message (no key, no response body). */
@@ -110,7 +110,7 @@ export function reviewClient(deps: ReviewDeps): ReviewQuestion {
     };
     for (let attempt = 0; ; attempt++) {
       const abort = new AbortController();
-      const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+      const timer = setTimeout(() => abort.abort(), deps.timeoutMs ?? TIMEOUT_MS);
       let response: Response;
       let body: unknown;
       try {

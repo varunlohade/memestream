@@ -7,6 +7,7 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, newGame, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
+import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STARTER_AFTER_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
@@ -26,6 +27,10 @@ export type ServiceDeps = {
   coin: (mint: string) => Promise<CoinFacts | null>;
   /** Whether `wallet` holds at least 1 whole coin (cached, budgeted read). */
   holds: (mint: string, wallet: string) => Promise<boolean>;
+  /** The AI review of a typed question; throws if it fails (timeout, error, no key, malformed answer). */
+  review: (question: string) => Promise<ReviewVerdict>;
+  /** Runs a task after the response is sent (Next's `after`). */
+  defer: (task: () => Promise<void>) => void;
   /** Commit attempts before answering "busy", and the pause between them. */
   attempts?: number;
   backoffMs?: () => number;
@@ -93,7 +98,7 @@ function nextPresence(last: Presence | null, now: number): Presence {
 }
 
 const parseGame = (json: string | null, streamer: string): Game => {
-  const game: Game = json ? JSON.parse(json) : newGame(streamer);
+  const game: Game = json ? { ...newGame(streamer), ...JSON.parse(json) } : newGame(streamer);
   game.creator = streamer;
   return game;
 };
@@ -141,8 +146,12 @@ function liveView(game: Game, wallet: string | null): PredictionsView["live"] {
   };
 }
 
-function queueView(game: Game, wallet: string | null): PredictionsView["queue"] {
-  return [...game.suggestions]
+/** Waiting suggestions this viewer can see: approved ones, their own under review, and stuck ones for staff. */
+const visibleSuggestions = (game: Game, wallet: string | null, staff: boolean) =>
+  game.suggestions.filter((s) => !s.review || s.asker === wallet || (staff && reviewStuck(s.review)));
+
+function queueView(game: Game, wallet: string | null, staff: boolean): PredictionsView["queue"] {
+  return visibleSuggestions(game, wallet, staff)
     .sort((a, b) => b.upvotes - a.upvotes || a.at - b.at)
     .slice(0, QUEUE_SHOWN)
     .map((s) => ({
@@ -152,8 +161,17 @@ function queueView(game: Game, wallet: string | null): PredictionsView["queue"] 
       expiresAt: s.at + SUGGEST_TTL_MS,
       mine: s.asker === wallet,
       upvoted: wallet !== null && hasUpvoted(s, wallet),
+      status: s.review ? "review" : "ok",
+      stuck: s.review ? reviewStuck(s.review) : false,
     }));
 }
+
+const pendingView = (game: Game): PredictionsView["pending"] =>
+  game.pending ? { id: game.pending.id, text: game.pending.text, stuck: reviewStuck(game.pending.review) } : null;
+
+/** The wallet's own "Not approved" note; staff also see notes about typed staff questions. */
+const noticeFor = (game: Game, wallet: string, staff: boolean) =>
+  [...game.notices].reverse().find((n) => n.to === wallet || (staff && n.to === STAFF))?.text ?? null;
 
 type ResolvedView = PredictionsView["resolved"][number];
 
@@ -277,6 +295,7 @@ export function predictionsService(deps: ServiceDeps) {
       const env = parseEnv(presenceDoc.json);
       const game = parseGame(doc.json, creator);
       const result = apply(game, { kind: "tick" }, null, now(), env);
+      if (reviewsDue(result.game, now())) startReviewing(mint, creator);
       if (!result.changed) return { game, env };
       const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
       if (status === "ok") return { game: result.game, env };
@@ -284,6 +303,51 @@ export function predictionsService(deps: ServiceDeps) {
     // Others are saving the same tick; show what's stored.
     const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
     return { game: parseGame(doc.json, creator), env: parseEnv(presenceDoc.json) };
+  }
+
+  /** Coins with a review run in flight in this process (another process is held off by the claim). */
+  const reviewing = new Set<string>();
+
+  /** Reviews the coin's due questions after the response is sent; one run per coin at a time. */
+  function startReviewing(mint: string, creator: string) {
+    if (reviewing.has(mint)) return;
+    reviewing.add(mint);
+    deps.defer(() =>
+      reviewDue(mint, creator)
+        .catch(() => console.warn("predictions: a review run failed; the next view retries it"))
+        .finally(() => reviewing.delete(mint)),
+    );
+  }
+
+  /**
+   * Claims every due check (counts the try, so no other server starts the same one for 15 s), asks
+   * the review, and saves each verdict. A failed check leaves its question under review for the
+   * next try; it is never approved by default.
+   */
+  async function reviewDue(mint: string, creator: string) {
+    const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+    const claim = startReviews(parseGame(doc.json, creator), now(), parseEnv(presenceDoc.json));
+    if (claim.due.length === 0) return;
+    const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(claim.game) }], ...ledgerChanges(claim) });
+    if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
+    await Promise.all(claim.due.map((target) => reviewOne(mint, creator, target)));
+  }
+
+  async function reviewOne(mint: string, creator: string, target: ReviewTarget) {
+    let verdict: ReviewVerdict;
+    try {
+      verdict = await deps.review(target.text);
+    } catch (error) {
+      console.warn(`predictions: review check failed (${error instanceof Error ? error.message : "unknown error"}); it stays under review`);
+      return;
+    }
+    await retryOnConflict(async () => {
+      const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+      const result = applyReview(parseGame(doc.json, creator), target, verdict, now(), parseEnv(presenceDoc.json));
+      if (!result.changed) return true;
+      const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
+      return status === "ok" ? true : RETRY;
+    });
   }
 
   /** Only wallets with 30+ minutes watched appear on leaderboards. */
@@ -340,6 +404,7 @@ export function predictionsService(deps: ServiceDeps) {
       role: wallet === game.creator ? "streamer" : game.mods.includes(wallet) ? "mod" : null,
       hasSuggestion: game.suggestions.some((s) => s.asker === wallet),
       holder,
+      notice: noticeFor(game, wallet, isStaff(game, wallet)),
     };
   }
 
@@ -359,8 +424,9 @@ export function predictionsService(deps: ServiceDeps) {
       streamerHere: streamerPresent(env, t),
       me,
       live: liveView(game, wallet),
-      queueSize: game.suggestions.length,
-      queue: queueView(game, wallet),
+      pending: staff ? pendingView(game) : null,
+      queueSize: visibleSuggestions(game, wallet, staff).length,
+      queue: queueView(game, wallet, staff),
       resolved: resolvedView(game, wallet, staff),
       mods: staff ? game.mods : [],
       leaderboard: {
@@ -377,7 +443,7 @@ export function predictionsService(deps: ServiceDeps) {
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf };
+  return { session, beat, act, view, walletOf, reviewDue };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;

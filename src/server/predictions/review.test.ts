@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { jevAnswer, REASON_IDS } from "./jev-fake";
-import { APPROVE_MIN_CONFIDENCE, parseVerdict, rejectionText, ReviewFailed, reviewClient, TYPESAFE_URL } from "./review";
+import { APPROVE_MIN_CONFIDENCE, parseVerdict, ReviewFailed, reviewClient, TYPESAFE_URL } from "./review";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const noSleep = async () => {};
@@ -9,9 +9,8 @@ const noSleep = async () => {};
 test("parseVerdict: APPROVE at enough confidence approves; low confidence or REJECT does not", () => {
   assert.deepEqual(parseVerdict(jevAnswer("APPROVE", 0.95)), { approved: true });
   assert.deepEqual(parseVerdict(jevAnswer("APPROVE", APPROVE_MIN_CONFIDENCE)), { approved: true });
-  assert.deepEqual(parseVerdict(jevAnswer("APPROVE", 0.55, "NOT_YES_NO")), { approved: false, reason: "NOT_YES_NO" });
-  assert.deepEqual(parseVerdict(jevAnswer("REJECT", 0.9, "HATE")), { approved: false, reason: "HATE" });
-  assert.equal(rejectionText("SPAM"), "Not approved: spam or ads");
+  assert.deepEqual(parseVerdict(jevAnswer("APPROVE", 0.55, "NOT_YES_NO")), { approved: false, reason: "NOT_YES_NO", text: "Not approved: not a clear yes/no question" });
+  assert.deepEqual(parseVerdict(jevAnswer("REJECT", 0.9, "HATE")), { approved: false, reason: "HATE", text: "Not approved: hateful" });
 });
 
 test("parseVerdict: anything malformed throws, never approves", () => {
@@ -49,7 +48,7 @@ test("reviewClient: posts the question as data with the key, and reads the verdi
 test("reviewClient: retries 429/503/529 twice, then fails; other errors fail at once", async () => {
   let n = 0;
   const busyThenOk = reviewClient({ apiKey: "k", sleep: noSleep, fetch: async () => (++n < 3 ? json({}, [429, 529][n - 1]) : json(jevAnswer("REJECT"))) });
-  assert.deepEqual(await busyThenOk("Will it rain?"), { approved: false, reason: "SPAM" });
+  assert.deepEqual(await busyThenOk("Will it rain?"), { approved: false, reason: "SPAM", text: "Not approved: spam or ads" });
   assert.equal(n, 3);
   n = 0;
   const alwaysBusy = reviewClient({ apiKey: "k", sleep: noSleep, fetch: async () => (n++, json({}, 503)) });
@@ -68,7 +67,5 @@ test("reviewClient: no key, a dropped connection or a timeout is a failure", asy
   await assert.rejects(reviewClient({ apiKey: "k", fetch: async () => Promise.reject(new TypeError("fetch failed")) })("Will it rain?"), /connection failed/);
   const hang: typeof fetch = (_url, init) =>
     new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
-  const started = Date.now();
-  await assert.rejects(reviewClient({ apiKey: "k", fetch: hang })("Will it rain?"), /timed out/);
-  assert.ok(Date.now() - started < 5_000);
+  await assert.rejects(reviewClient({ apiKey: "k", fetch: hang, timeoutMs: 20 })("Will it rain?"), /timed out/);
 });
