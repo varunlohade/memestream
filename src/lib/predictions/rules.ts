@@ -34,6 +34,15 @@ export const QUESTION_MAX = 80;
  */
 export const REVIEW_RETRY_MS = 5_000;
 export const REVIEW_MAX_TRIES = 5;
+/**
+ * AI check of a YES/NO result: a vision model describes stream frames, jev decides what happened.
+ * It never changes payouts. A run that fails is tried again after this pause, at most this many
+ * runs in all (the first plus two retries); then the result shows "couldn't tell".
+ */
+export const AI_CHECK_RETRY_MS = 20_000;
+export const AI_CHECK_MAX_TRIES = 3;
+/** A frame description is cut to this many characters. */
+export const FRAME_NOTE_MAX = 400;
 /** A "Not approved" note shows to its asker for this long. */
 export const NOTICE_MS = 5 * MINUTE_MS;
 /** A suggestion goes live by itself with this many eligible upvotes, when nothing is live. */
