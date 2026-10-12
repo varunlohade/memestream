@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ParsedTx } from "./requests";
-import { DUPLICATE_MESSAGE, duplicateResponse, INTENT_WINDOW_MS, intentKey, isIntentToken, memoryIntentStore, txIntents } from "./tx-intents";
+import { BUILD_HOLD_MS, DUPLICATE_MESSAGE, duplicateResponse, intentKey, isIntentToken, memoryIntentStore, SIGNED_HOLD_MS, txIntents } from "./tx-intents";
 
 const T0 = 1_000_000;
 const HASH = "h".repeat(43);
@@ -18,14 +18,15 @@ async function setup() {
   const clock = { t: T0 };
   const intents = txIntents(memoryIntentStore(() => clock.t));
   const key = intentKey(trade());
-  const token = await intents.remember(key, HASH, T0);
-  await intents.report(token, HASH, SIG, "pending", T0 + 1_000);
+  const token = (await intents.remember(key, HASH, T0)) as string;
+  clock.t = T0 + 1_000;
+  await intents.report(token, HASH, SIG, "pending", clock.t);
   return { clock, intents, key, token };
 }
 
 test("an identical trade while the first is signed and pending is refused with 409", async () => {
   const { intents, key } = await setup();
-  assert.equal(await intents.pending(key, T0 + 5_000), SIG);
+  assert.deepEqual(await intents.pending(key, T0 + 5_000), { signature: SIG });
   const response = duplicateResponse(SIG);
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { error: DUPLICATE_MESSAGE, duplicate: true, pendingSignature: SIG });
@@ -34,6 +35,68 @@ test("an identical trade while the first is signed and pending is refused with 4
 
 test("slippage and the quoted minimum don't make a trade different", () => {
   assert.equal(intentKey(trade({ slippageBps: 500, minReceived: "4" })), intentKey(trade()));
+});
+
+test("amounts compare in base units: 0.1, 0.10, .1 and ' 0.100 ' are one trade", () => {
+  for (const amount of ["0.10", ".1", " 0.100 ", "0.100000000"]) assert.equal(intentKey(trade({ amount })), intentKey(trade()), amount);
+  assert.notEqual(intentKey(trade({ amount: "0.1000000001" })), intentKey(trade()), "past SOL's 9 decimals stays as typed (the build refuses it)");
+  assert.equal(intentKey(trade({ side: "sell", amount: "5" })), intentKey(trade({ side: "sell", amount: "5.000000" })));
+  const bet = (amount: string): ParsedTx => ({
+    action: "market",
+    req: { wallet: "walletA", mint: "mintA", predictionId: "1", side: "yes", action: "buy", amount, slippageBps: 100 },
+  });
+  assert.equal(intentKey(bet(".5")), intentKey(bet("0.50")));
+  assert.notEqual(intentKey(bet("0.5")), intentKey(bet("0.6")));
+});
+
+test("a second identical build within the hold is refused even before any status poll", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  assert.match((await intents.remember(key, HASH, T0)) ?? "", /^[0-9a-f]{32}\./);
+  clock.t = T0 + 5_000;
+  assert.deepEqual(await intents.pending(key, clock.t), { signature: null }, "the popup is still open: held");
+  assert.equal(await intents.remember(key, HASH, clock.t), null, "a racing build is never handed out, and never overwrites");
+  assert.equal(await intents.pending(intentKey(trade({ amount: "0.2" })), clock.t), null, "a different amount still goes through");
+});
+
+test("a client that never reports lets the hold lapse after the build hold", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  await intents.remember(key, HASH, T0);
+  clock.t = T0 + BUILD_HOLD_MS - 1;
+  assert.notEqual(await intents.pending(key, clock.t), null);
+  clock.t = T0 + BUILD_HOLD_MS;
+  assert.equal(await intents.pending(key, clock.t), null);
+  assert.notEqual(await intents.remember(key, HASH, clock.t), null);
+});
+
+test("a wallet rejection releases the hold: the same trade can be built again at once", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  const token = (await intents.remember(key, HASH, T0)) as string;
+  await intents.release(token);
+  assert.equal(await intents.pending(key, T0 + 1), null);
+  assert.notEqual(await intents.remember(key, HASH, T0 + 1), null);
+});
+
+test("a rejection can't release a signed intent, another build's intent, or another wallet's", async () => {
+  const { intents, key, token } = await setup();
+  await intents.release(token); // signed already: a late "rejected" is ignored
+  assert.deepEqual(await intents.pending(key, T0 + 2_000), { signature: SIG });
+
+  const clock = { t: T0 };
+  const fresh = txIntents(memoryIntentStore(() => clock.t));
+  const keyA = intentKey(trade());
+  const keyB = intentKey(trade({ wallet: "walletB" }));
+  await fresh.remember(keyA, HASH, T0);
+  const tokenB = (await fresh.remember(keyB, HASH, T0)) as string;
+  await fresh.release(tokenB);
+  await fresh.release(`${keyA}.00000000-0000-4000-8000-000000000000`);
+  assert.notEqual(await fresh.pending(keyA, T0 + 1), null, "wallet A is still held");
+  assert.equal(await fresh.pending(keyB, T0 + 1), null);
 });
 
 test("a different amount, side, coin or action goes through", async () => {
@@ -50,13 +113,6 @@ test("it's per wallet: another wallet's identical trade goes through", async () 
   assert.equal(await intents.pending(intentKey(trade({ wallet: "walletB" })), T0 + 5_000), null);
 });
 
-test("built but never signed (rejected in the wallet) doesn't block a retry", async () => {
-  const intents = txIntents(memoryIntentStore(() => T0));
-  const key = intentKey(trade());
-  await intents.remember(key, HASH, T0);
-  assert.equal(await intents.pending(key, T0 + 1_000), null);
-});
-
 for (const status of ["confirmed", "failed", "expired"] as const) {
   test(`once the first is ${status}, the same trade goes through`, async () => {
     const { intents, key, token } = await setup();
@@ -65,10 +121,14 @@ for (const status of ["confirmed", "failed", "expired"] as const) {
   });
 }
 
-test("after the window (the blockhash's life) the same trade goes through", async () => {
-  const { intents, key } = await setup();
-  assert.equal(await intents.pending(key, T0 + INTENT_WINDOW_MS - 1), SIG);
-  assert.equal(await intents.pending(key, T0 + INTENT_WINDOW_MS), null);
+test("signed, it stays held past the build hold until the signed hold ends", async () => {
+  const { clock, intents, key } = await setup();
+  clock.t = T0 + BUILD_HOLD_MS + 10_000;
+  assert.deepEqual(await intents.pending(key, clock.t), { signature: SIG });
+  clock.t = T0 + SIGNED_HOLD_MS - 1;
+  assert.deepEqual(await intents.pending(key, clock.t), { signature: SIG });
+  clock.t = T0 + SIGNED_HOLD_MS;
+  assert.equal(await intents.pending(key, clock.t), null);
 });
 
 test("a report with a wrong token, id or blockhash changes nothing", async () => {
@@ -77,29 +137,30 @@ test("a report with a wrong token, id or blockhash changes nothing", async () =>
   await intents.report(otherId, HASH, SIG, "confirmed", T0 + 2_000);
   await intents.report(token, "x".repeat(43), SIG, "confirmed", T0 + 2_000);
   await intents.report("not-a-token", HASH, SIG, "confirmed", T0 + 2_000);
-  assert.equal(await intents.pending(key, T0 + 3_000), SIG);
+  assert.deepEqual(await intents.pending(key, T0 + 3_000), { signature: SIG });
   assert.equal(isIntentToken(token), true);
   assert.equal(isIntentToken("x"), false);
 });
 
-test("a newer build of the same trade replaces the record; the old token can't clear it", async () => {
+test("after the first resolves, a new build is held on its own; the old token can't clear it", async () => {
   const { intents, key, token } = await setup();
   // The first one confirmed elsewhere and the user trades again: the new one is tracked on its own.
   await intents.report(token, HASH, SIG, "confirmed", T0 + 2_000);
-  const second = await intents.remember(key, HASH, T0 + 3_000);
+  const second = (await intents.remember(key, HASH, T0 + 3_000)) as string;
   await intents.report(second, HASH, "t".repeat(87), "pending", T0 + 4_000);
   await intents.report(token, HASH, SIG, "confirmed", T0 + 5_000);
-  assert.equal(await intents.pending(key, T0 + 6_000), "t".repeat(87));
+  assert.deepEqual(await intents.pending(key, T0 + 6_000), { signature: "t".repeat(87) });
 });
 
 test("a store that throws lets the trade through", async () => {
-  const broken = { get: () => Promise.reject(new Error("down")), set: () => Promise.reject(new Error("down")), del: () => Promise.reject(new Error("down")) };
+  const down = () => Promise.reject(new Error("down"));
+  const broken = { get: down, set: down, add: down, del: down };
   const intents = txIntents(broken);
   const warn = console.warn;
   console.warn = () => {};
   try {
     assert.equal(await intents.pending(intentKey(trade()), T0), null);
-    assert.match(await intents.remember(intentKey(trade()), HASH, T0), /^[0-9a-f]{32}\./);
+    assert.match((await intents.remember(intentKey(trade()), HASH, T0)) ?? "", /^[0-9a-f]{32}\./);
   } finally {
     console.warn = warn;
   }
@@ -115,9 +176,10 @@ test("with Redis unreachable, the shared store falls back to memory and still de
   try {
     const now = Date.now();
     const key = intentKey(trade());
-    const token = await intents.remember(key, HASH, now);
+    const token = (await intents.remember(key, HASH, now)) as string;
     await intents.report(token, HASH, SIG, "pending", now);
-    assert.equal(await intents.pending(key, now), SIG);
+    assert.deepEqual(await intents.pending(key, now), { signature: SIG });
+    assert.equal(await intents.remember(key, HASH, now), null, "the fallback also never overwrites");
   } finally {
     console.warn = warn;
   }

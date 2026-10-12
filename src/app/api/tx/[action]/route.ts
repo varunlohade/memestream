@@ -36,19 +36,22 @@ async function build(parsed: ParsedTx): Promise<PreparedTx> {
 }
 
 /**
- * An identical request from the same wallet whose earlier transaction is signed but not yet
- * confirmed, failed or expired answers 409 (tx-intents.ts). The answer carries `intent`, which the
- * client sends back on its status polls.
+ * An identical request from the same wallet while an earlier one is held (built in the last 30 s,
+ * or signed and not yet confirmed, failed or expired) answers 409 (tx-intents.ts). The answer
+ * carries `intent`, which the client sends back on its status polls (or to /api/tx/rejected).
  */
 export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, async (request: Request, { params }: RouteContext<"/api/tx/[action]">, guard) => {
   try {
     const parsed = parseTxRequest((await params).action, await jsonBody(request));
     const key = intentKey(parsed);
-    const pendingSignature = await intents().pending(key, Date.now());
-    if (pendingSignature) return duplicateResponse(pendingSignature);
+    const held = await intents().pending(key, Date.now());
+    if (held) return duplicateResponse(held.signature);
     if (!(await guard.spend(BUILD_RPC_CALLS[parsed.action]))) return busy();
     const prepared = await build(parsed);
-    return ok({ ...prepared, intent: await intents().remember(key, prepared.blockhash, Date.now()) });
+    // Added only if none exists, so of two racing identical builds only one is handed out.
+    const intent = await intents().remember(key, prepared.blockhash, Date.now());
+    if (!intent) return duplicateResponse(null);
+    return ok({ ...prepared, intent });
   } catch (error) {
     return failOrBusy(error);
   }

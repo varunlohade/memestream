@@ -69,7 +69,10 @@ export function TxProvider({ children }: { children: ReactNode }) {
       try {
         signature = await signAndSend(prepared.transaction);
       } catch (error) {
-        throw new Error(isUserRejection(error) ? MESSAGES.rejected : (error as Error).message || "Your wallet couldn't send it");
+        if (!isUserRejection(error)) throw new Error((error as Error).message || "Your wallet couldn't send it");
+        // Nothing was signed: drop the server's double-pay hold so a retry works at once.
+        if (prepared.intent) await fetch(`/api/tx/rejected?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
+        throw new Error(MESSAGES.rejected);
       }
       onStage("Confirming");
       const answer = await waitForResult(signature, prepared.blockhash, prepared.intent);
