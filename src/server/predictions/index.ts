@@ -12,7 +12,7 @@ import { isBase58Of } from "@/lib/base58";
 import { isPredictionId } from "@/lib/markets/math";
 import type { MarketRecord } from "@/lib/markets/record";
 import { getCoinDetail } from "@/server/coins";
-import { closeMarketTrading, createMarket, MarketUnavailableError, resolveMarket } from "@/server/markets";
+import { closeMarketTrading, createMarket, MarketUnavailableError, resolveMarket, walletHoldsShares } from "@/server/markets";
 import { UserError } from "@/server/errors";
 import { aiCheckFromEnv } from "./ai-check";
 import { reviewFromEnv } from "./review";
@@ -34,6 +34,13 @@ function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
   return next;
 }
 
+/** MEMESTREAM_ADMIN_WALLETS: a comma list of the wallets that settle market challenges (never the streamer). */
+const adminWallets = () =>
+  (process.env.MEMESTREAM_ADMIN_WALLETS ?? "")
+    .split(",")
+    .map((w) => w.trim())
+    .filter((w) => isBase58Of(w, 32));
+
 /** The oracle's market steps, or null with MEMESTREAM_MARKETS off. */
 function marketDeps(): MarketDeps | null {
   if (!marketsEnabled()) return null;
@@ -49,6 +56,7 @@ function marketDeps(): MarketDeps | null {
       }),
     close: (record) => oneAtATime(() => closeMarketTrading(record)),
     resolve: (record, outcome) => oneAtATime(() => resolveMarket(record, outcome)),
+    holdsShares: walletHoldsShares,
   };
 }
 
@@ -108,7 +116,7 @@ export function predictions(): { service: PredictionsService } | { error: string
     devSecret ??= randomBytes(32).toString("hex");
     secret = devSecret;
   }
-  const { prefix, waits } = testSettings();
+  const { prefix, waits, challengeMs } = testSettings();
   let store;
   if (url && token) {
     // The SDK's default retries stay on: it re-sends a request whose fetch threw. Reads and ticks
@@ -130,6 +138,8 @@ export function predictions(): { service: PredictionsService } | { error: string
     review: reviewFromEnv(),
     ai: aiCheckFromEnv(),
     markets: marketDeps(),
+    admins: adminWallets(),
+    challengeMs,
     defer: (task) => after(task),
     coin: async (mint) => {
       const coin = (await getCoinDetail(mint, null))?.coin;

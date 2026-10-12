@@ -20,6 +20,8 @@ export type MarketRecord = {
   signature: string;
   /** Betting closes then (ms): trades are refused from that moment, whatever the pools hold. */
   lockAt: number;
+  /** What it resolves from: the streamer's official link, or the coin's stream ("" if none). */
+  source: string;
 };
 
 /** A wallet's YES and NO shares and its SOL, as decimal strings. */

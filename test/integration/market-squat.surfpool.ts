@@ -103,6 +103,7 @@ test("a squat at our market's addresses (seen after our first transaction) is re
     pools: { yes: keys.pools.yes.toBase58(), no: keys.pools.no.toBase58() },
     signature: "",
     lockAt: Date.now() + 60_000,
+    source: "",
   };
   const sell = { mint: record.mint, predictionId: "42", side: "yes" as const, action: "sell" as const, amount: "1", slippageBps: 100 };
   await assert.rejects(server.getMarket(record, null, Date.now()), /don't match memestream's/);
@@ -173,6 +174,7 @@ test("a gift squat (our range and fee, another start price, our oracle as creato
     pools: { yes: keys.pools.yes.toBase58(), no: keys.pools.no.toBase58() },
     signature: "",
     lockAt: Date.now() + 600_000,
+    source: "",
   };
   const buy = { mint: record.mint, predictionId: "43", side: "yes" as const, action: "buy" as const, amount: "0.005", slippageBps: 100 };
   await assert.rejects(server.getMarket(record, null, Date.now()), /weren't made by memestream/);

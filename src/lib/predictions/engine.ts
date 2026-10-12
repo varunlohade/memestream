@@ -39,8 +39,14 @@ import {
   MAX_UPVOTERS_STORED,
   MAX_UPVOTES,
   MAX_WON_ENTRIES,
+  CHALLENGE_BOND,
+  cleanLink,
+  cleanReason,
+  MARKET_CHALLENGE_MS,
   MARKET_CREATE_MAX_TRIES,
+  MARKET_DECISION_MS,
   MARKET_RETRY_MS,
+  OVERTURN_REWARD,
   MIN_BET,
   MIN_HOLDING_COINS,
   MINUTE_MS,
@@ -71,7 +77,7 @@ export type Suggestion = {
 /** An AI review in progress: checks started so far, and when the last one started. */
 export type Review = { tries: number; at: number };
 /** A question the streamer or a mod typed, waiting for its review before it goes live. */
-export type PendingLaunch = { id: string; text: string; by: string; windowMin: number; at: number; review: Review };
+export type PendingLaunch = { id: string; text: string; by: string; windowMin: number; at: number; review: Review; source?: string };
 /** A short note for one wallet (or every staff wallet, `to: STAFF`) until `until`. */
 export type Notice = { to: string; text: string; until: number };
 export type BetRecord = { side: Side; amount: number; eligible: boolean };
@@ -90,7 +96,12 @@ export type AiCheck = { tries: number; at: number; frames: FrameNote[] };
  * derives from the coin, the prediction id and the oracle).
  */
 export type MarketStep = "opening" | "open" | "closed" | "resolved" | "failed";
-export type MarketState = { step: MarketStep; tries: number; at: number; question?: string };
+export type MarketState = { step: MarketStep; tries: number; at: number; question?: string; challenge?: Challenge; decision?: Decision };
+/** A holder's challenge of the streamer's proposed result, with its points bond. */
+export type Challenge = { by: string; at: number; reason: string; link?: string; bond: number };
+/** How an admin settled a challenge ("auto": nobody decided in time, so it was voided). */
+export type DecisionKind = "uphold" | "overturn" | "void";
+export type Decision = { kind: DecisionKind; by: string; at: number };
 /** How a market pays: one side, or "refund" (cancelled or disputed: every token pays half). */
 export type MarketOutcome = Side | "refund";
 /** A live prediction: open for bets until `lockAt`, then waiting for a result. */
@@ -110,6 +121,8 @@ export type Prediction = {
   /** Frames grabbed for the AI check (only on a coin whose stream has frames, with the check set up). */
   frames?: FrameNote[];
   market?: MarketState;
+  /** The official source the streamer named for a real-world question (an http(s) link); else the stream decides. */
+  source?: string;
 };
 /**
  * A result, kept short: no per-wallet lists. Only while its flag window is open does it keep
@@ -135,6 +148,9 @@ export type Summary = {
   /** Present while the AI check runs; the result counts only after it ends. */
   check?: AiCheck;
   market?: MarketState;
+  source?: string;
+  /** A market's betting window [launchedAt, lockAt], for "stream window HH:MM–HH:MM". */
+  window?: [number, number];
 };
 export type FlagWindow = {
   /** Each bettor's [stake, payout, flagged (1) or not (0)]. */
@@ -169,19 +185,28 @@ export type Action =
   | { kind: "suggest"; text: string }
   | { kind: "upvote"; id: string }
   | { kind: "bet"; id: string; side: Side; amount: number }
-  | { kind: "launch"; id?: string; text?: string; windowMin?: number }
+  | { kind: "launch"; id?: string; text?: string; windowMin?: number; source?: string }
   | { kind: "remove"; id: string }
   | { kind: "approve"; id: string }
   | { kind: "resolve"; id: string; outcome: Outcome }
   | { kind: "flag"; id: string }
   | { kind: "mod"; wallet: string; add: boolean }
-  | { kind: "crowd"; on: boolean };
+  | { kind: "crowd"; on: boolean }
+  | { kind: "challenge"; id: string; reason: string; link?: string }
+  | { kind: "decide"; id: string; decision: DecisionKind };
 
 /**
  * Who acts and what the server knows about them: watch-time eligibility, whether they hold the
  * coin (the sybil-resistant signal for suggesting and upvoting), and their current balance.
  */
-export type Actor = { wallet: string; eligible: boolean; holder: boolean; balance: number };
+export type Actor = {
+  wallet: string;
+  eligible: boolean;
+  holder: boolean;
+  balance: number;
+  /** Holds YES or NO shares of the market a challenge is about (one budgeted read, challenges only). */
+  shares?: boolean;
+};
 /**
  * Facts from outside the coin's document: when the streamer's own heartbeat last came in, and
  * when their current stream started (their first heartbeat after 2+ hours away).
@@ -193,6 +218,10 @@ export type Env = {
   aiCheck?: boolean;
   /** On-chain markets are on (MEMESTREAM_MARKETS): each prediction that goes live gets one. */
   markets?: boolean;
+  /** Wallets that settle challenges (MEMESTREAM_ADMIN_WALLETS). */
+  admins?: string[];
+  /** The challenge window (shorter only in test runs; production always MARKET_CHALLENGE_MS). */
+  challengeMs?: number;
 };
 
 /** A balance change: `delta` points, allowed only if the balance is at least `floor` before it. */
@@ -358,31 +387,48 @@ const marketRetryDue = (m: MarketState, now: number) => m.tries === 0 || now >= 
 /** The market still needs a server step (it isn't resolved or given up on). */
 const marketPending = (m: MarketState | undefined) => m !== undefined && m.step !== "resolved" && m.step !== "failed";
 
+/** When the streamer's proposed result goes final if nobody challenges it. */
+export const challengeEndsAt = (p: Summary, env: Env) => p.resolvedAt + (env.challengeMs ?? MARKET_CHALLENGE_MS);
+
+const OTHER_SIDE: Record<Side, Side> = { yes: "no", no: "yes" };
+
 /**
- * What a market pays: the streamer's result, unless it was cancelled or the AI check disagreed
- * (both refund everyone). Points flags never count here: they cost nothing, so a crowd of free
- * wallets could otherwise force a real-SOL refund. They still keep a result off the points leaderboard.
+ * What a market pays, once that's settled; null while it isn't yet.
+ * - Cancelled: a refund, at once.
+ * - Challenged: the admin's decision (uphold: the proposal; overturn: the other side; void: refund).
+ * - Otherwise: the streamer's result once the challenge window is over and the AI check is done; an
+ *   AI "disagree" refunds. Points flags never count: they cost nothing, so a crowd of free wallets
+ *   could otherwise force a real-SOL refund (they still keep a result off the points leaderboard).
  */
-export const marketOutcome = (p: Summary): MarketOutcome => (p.outcome === "cancel" || p.ai?.verdict === "disagree" ? "refund" : p.outcome);
+export function marketFinal(p: Summary, now: number, env: Env): MarketOutcome | null {
+  if (p.outcome === "cancel") return "refund";
+  const { challenge, decision } = p.market ?? {};
+  if (challenge) {
+    if (!decision) return null;
+    return decision.kind === "uphold" ? p.outcome : decision.kind === "overturn" ? OTHER_SIDE[p.outcome] : "refund";
+  }
+  if (now < challengeEndsAt(p, env) || p.check) return null;
+  return p.ai?.verdict === "disagree" ? "refund" : p.outcome;
+}
 
 /**
  * The step due on one prediction's market, if any: create while it's live and taking bets; close
- * trading once betting closes; resolve once the result counts (flag window over, AI check done).
+ * trading once betting closes; resolve once its result is final (marketFinal).
  */
-function marketJobFor(p: Prediction | Summary, live: boolean, now: number): MarketJob | null {
+function marketJobFor(p: Prediction | Summary, live: boolean, now: number, env: Env): MarketJob | null {
   const m = p.market;
   if (!m || !marketRetryDue(m, now)) return null;
   if (m.step === "opening") return live && now < (p as Prediction).lockAt && m.tries < MARKET_CREATE_MAX_TRIES ? { id: p.id, kind: "create" } : null;
   if (m.step === "open") return !live || now >= (p as Prediction).lockAt ? { id: p.id, kind: "close" } : null;
-  if (m.step === "closed" && !live && !(p as Summary).open && !(p as Summary).check) return { id: p.id, kind: "resolve", outcome: marketOutcome(p as Summary) };
-  return null;
+  const outcome = m.step === "closed" && !live ? marketFinal(p as Summary, now, env) : null;
+  return outcome ? { id: p.id, kind: "resolve", outcome } : null;
 }
 
-function marketJobs(game: Game, now: number): { p: Prediction | Summary; job: MarketJob }[] {
+function marketJobs(game: Game, now: number, env: Env): { p: Prediction | Summary; job: MarketJob }[] {
   const out: { p: Prediction | Summary; job: MarketJob }[] = [];
   for (const [list, live] of [[game.live, true], [game.resolved, false]] as const) {
     for (const p of list) {
-      const job = marketJobFor(p, live, now);
+      const job = marketJobFor(p, live, now, env);
       if (job) out.push({ p, job });
     }
   }
@@ -390,13 +436,13 @@ function marketJobs(game: Game, now: number): { p: Prediction | Summary; job: Ma
 }
 
 /** Whether any market step is due now. */
-export const marketsDue = (game: Game, now: number) => marketJobs(game, now).length > 0;
+export const marketsDue = (game: Game, now: number, env: Env) => marketJobs(game, now, env).length > 0;
 
 /** Claims every due market step (counts the try), like startAi: committing this first means no other server starts the same one. */
 export function startMarkets(state: Game, now: number, env: Env = { streamerSeenAt: null }): Result & { jobs: MarketJob[] } {
   const jobs: MarketJob[] = [];
   const result = run(state, now, env, ({ game }) => {
-    for (const { p, job } of marketJobs(game, now)) {
+    for (const { p, job } of marketJobs(game, now, env)) {
       p.market = { ...p.market!, tries: p.market!.tries + 1, at: now };
       jobs.push(job);
     }
@@ -468,6 +514,7 @@ function tick(ctx: Ctx) {
   autoCancelUnresolved(ctx);
   endStaleChecks(ctx);
   endUnopenedMarkets(ctx);
+  voidUndecidedChallenges(ctx);
   closeFlagWindows(ctx);
   launchCrowdPick(ctx);
 }
@@ -508,7 +555,7 @@ function approveReview(ctx: Ctx, target: ReviewTarget) {
   if (!p || p.id !== target.id || p.text !== target.text) return;
   game.pending = null;
   if (game.live.length >= MAX_LIVE || game.launched >= MAX_PREDICTIONS_PER_STREAM) return notify(ctx, STAFF, "Not launched: no slot was free");
-  launch(ctx, { id: p.id, text: p.text }, p.by, p.windowMin);
+  launch(ctx, { id: p.id, text: p.text, source: p.source }, p.by, p.windowMin);
 }
 
 /** `refund`: only when no review could decide (stuck, removed by hand); a question jev rejected keeps its cost, so rejected spam is never free. */
@@ -559,6 +606,16 @@ function endUnopenedMarkets({ game, now }: Ctx) {
   }
 }
 
+/** A challenge no admin decided within MARKET_DECISION_MS is voided: a refund, and the bond comes back. */
+function voidUndecidedChallenges(ctx: Ctx) {
+  for (const p of ctx.game.resolved) {
+    const m = p.market;
+    if (!m?.challenge || m.decision || ctx.now < m.challenge.at + MARKET_DECISION_MS) continue;
+    m.decision = { kind: "void", by: AUTO, at: ctx.now };
+    ctx.credit(m.challenge.by, m.challenge.bond);
+  }
+}
+
 /** Results past their flag window, with no AI check still running, count now (unless disputed); then only the last MAX_HISTORY stay. */
 function closeFlagWindows(ctx: Ctx) {
   const { game, now } = ctx;
@@ -580,7 +637,7 @@ function launchCrowdPick(ctx: Ctx) {
   }
 }
 
-function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: string, windowMin: number) {
+function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string; source?: string }, by: string, windowMin: number) {
   const { game, now } = ctx;
   let id: string;
   let asker: string | null = null;
@@ -605,6 +662,7 @@ function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: 
     no: 0,
     bettors: 0,
     ...(ctx.env.markets ? { market: { step: "opening" as const, tries: 0, at: now } } : {}),
+    ...("source" in from && from.source ? { source: from.source } : {}),
   });
 }
 
@@ -625,7 +683,8 @@ function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string) {
   const summary: Summary = { id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } };
   // A YES/NO result gets an AI check when the coin's stream has frames; a cancel needs none.
   if (outcome !== "cancel" && ctx.env.aiCheck) summary.check = { tries: 0, at: now, frames: p.frames ?? [] };
-  if (p.market) summary.market = p.market;
+  if (p.market) Object.assign(summary, { market: p.market, window: [p.launchedAt, p.lockAt] });
+  if (p.source) summary.source = p.source;
   game.resolved.unshift(summary);
 }
 
@@ -681,6 +740,10 @@ function act(ctx: Ctx, action: PlayerAction, actor: Actor) {
       requireStaff(ctx.game, actor);
       ctx.game.crowdPicks = action.on;
       return;
+    case "challenge":
+      return challengeResult(ctx, actor, action);
+    case "decide":
+      return decideChallenge(ctx, actor, action);
   }
 }
 
@@ -772,7 +835,12 @@ function launchByStaff(ctx: Ctx, actor: Actor, action: ActionOf<"launch">) {
   if (!(BET_WINDOWS_MIN as readonly number[]).includes(windowMin)) throw new GameError("Pick 1, 2, 5 or 10 minutes");
   if (action.id !== undefined) return launch(ctx, findSuggestion(game, action.id), actor.wallet, windowMin);
   // A typed question goes live only once its review approves it.
-  game.pending = { id: String(game.nextId++), text: cleanedOrThrow(action.text), by: actor.wallet, windowMin, at: ctx.now, review: { tries: 0, at: ctx.now } };
+  let source: string | undefined;
+  if (action.source !== undefined && action.source !== "") {
+    source = cleanLink(action.source) ?? undefined;
+    if (!source) throw new GameError("The source must be an http(s) link");
+  }
+  game.pending = { id: String(game.nextId++), text: cleanedOrThrow(action.text), by: actor.wallet, windowMin, at: ctx.now, review: { tries: 0, at: ctx.now }, ...(source ? { source } : {}) };
 }
 
 /** A question staff may decide by hand: one whose every review check failed. */
@@ -830,4 +898,41 @@ function changeMods({ game }: Ctx, actor: Actor, { wallet, add }: ActionOf<"mod"
   if (game.mods.length >= MAX_MODS) throw new GameError(`At most ${MAX_MODS} mods`);
   if (game.live.some((p) => Object.hasOwn(p.bets, wallet))) throw new GameError("That wallet has a bet on a live prediction");
   game.mods.push(wallet);
+}
+
+/**
+ * A holder challenges the streamer's proposed YES/NO during its window, once per market, posting
+ * CHALLENGE_BOND points. The market then waits for an admin's decision.
+ */
+function challengeResult(ctx: Ctx, actor: Actor, { id, reason, link }: ActionOf<"challenge">) {
+  const { game, now, env } = ctx;
+  const p = game.resolved.find((x) => x.id === id);
+  const m = p?.market;
+  if (!p || !m || (m.step !== "open" && m.step !== "closed")) throw new GameError("This result has no market to challenge");
+  if (p.outcome === "cancel") throw new GameError("A cancelled prediction refunds everyone; there's nothing to challenge");
+  if (now >= challengeEndsAt(p, env)) throw new GameError("The challenge window is over");
+  if (m.challenge) throw new GameError("This result is already challenged");
+  if (!actor.shares) throw new GameError("Only holders of this market's shares can challenge");
+  const cleaned = cleanReason(reason);
+  if (!cleaned.ok) throw new GameError(cleaned.error);
+  let evidence: string | undefined;
+  if (link !== undefined && link !== "") {
+    evidence = cleanLink(link) ?? undefined;
+    if (!evidence) throw new GameError("The link must be an http(s) link");
+  }
+  if (actor.balance < CHALLENGE_BOND) throw new GameError(`A challenge needs a ${CHALLENGE_BOND}-point bond`);
+  ctx.debit(actor.wallet, CHALLENGE_BOND, CHALLENGE_BOND);
+  m.challenge = { by: actor.wallet, at: now, reason: cleaned.reason, ...(evidence ? { link: evidence } : {}), bond: CHALLENGE_BOND };
+}
+
+/** An admin settles a challenge, once: uphold (the bond is lost), overturn (bond back plus OVERTURN_REWARD) or void (bond back). */
+function decideChallenge(ctx: Ctx, actor: Actor, { id, decision }: ActionOf<"decide">) {
+  const { game, now, env } = ctx;
+  if (!env.admins?.includes(actor.wallet)) throw new GameError("Only a memestream admin can decide a challenge");
+  const m = game.resolved.find((x) => x.id === id)?.market;
+  if (!m?.challenge) throw new GameError("Nothing to decide");
+  if (m.decision) throw new GameError("This challenge is already decided");
+  m.decision = { kind: decision, by: actor.wallet, at: now };
+  if (decision === "overturn") ctx.credit(m.challenge.by, m.challenge.bond + OVERTURN_REWARD);
+  if (decision === "void") ctx.credit(m.challenge.by, m.challenge.bond);
 }

@@ -4,8 +4,9 @@
  * - MEMESTREAM_PREDICTIONS_PREFIX: the Redis key prefix (default "memestream:pm:").
  * - MEMESTREAM_PREDICTIONS_FAST=1: starter points after 1 minute watched (not 10), upvotes and bets
  *   count as eligible after 2 minutes (not 15). Heartbeat spacing, bet sizes and windows stay.
+ * - MEMESTREAM_MARKET_CHALLENGE_MIN (1-120): the market challenge window in minutes (not 2 hours).
  */
-import { ELIGIBLE_AFTER_MS, MINUTE_MS, STARTER_AFTER_MS } from "@/lib/predictions/rules";
+import { ELIGIBLE_AFTER_MS, MARKET_CHALLENGE_MS, MINUTE_MS, STARTER_AFTER_MS } from "@/lib/predictions/rules";
 
 export const DEFAULT_PREFIX = "memestream:pm:";
 const FAST_STARTER_AFTER_MS = MINUTE_MS;
@@ -23,12 +24,20 @@ function starterOverride(env: Record<string, string | undefined>): number | null
   return Number.isInteger(minutes) && minutes >= 1 && minutes * MINUTE_MS <= STARTER_AFTER_MS ? minutes * MINUTE_MS : null;
 }
 
-export function testSettings(env: Record<string, string | undefined> = process.env): { prefix: string; waits: Waits } {
+/** A shorter challenge window for test runs; undefined means the real MARKET_CHALLENGE_MS. */
+function challengeOverride(env: Record<string, string | undefined>): number | undefined {
+  const minutes = Number(env.MEMESTREAM_MARKET_CHALLENGE_MIN);
+  return Number.isInteger(minutes) && minutes >= 1 && minutes * MINUTE_MS <= MARKET_CHALLENGE_MS ? minutes * MINUTE_MS : undefined;
+}
+
+export function testSettings(env: Record<string, string | undefined> = process.env): { prefix: string; waits: Waits; challengeMs?: number } {
   const starter = starterOverride(env);
   const real = starter === null ? REAL_WAITS : { ...REAL_WAITS, starterAfterMs: starter };
   if (env.VERCEL_ENV === "production") return { prefix: DEFAULT_PREFIX, waits: real };
+  const challengeMs = challengeOverride(env);
   return {
     prefix: env.MEMESTREAM_PREDICTIONS_PREFIX || DEFAULT_PREFIX,
     waits: env.MEMESTREAM_PREDICTIONS_FAST === "1" ? { starterAfterMs: FAST_STARTER_AFTER_MS, eligibleAfterMs: FAST_ELIGIBLE_AFTER_MS } : real,
+    ...(challengeMs !== undefined ? { challengeMs } : {}),
   };
 }

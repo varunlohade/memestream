@@ -50,6 +50,21 @@ export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
  */
 export const MARKET_RETRY_MS = 45_000;
 export const MARKET_CREATE_MAX_TRIES = 3;
+/**
+ * Challenge window (UMA style), markets only: the streamer's YES/NO is only proposed; it goes
+ * on chain this long after, unless a holder challenges it with a points bond. A challenge is
+ * settled by an admin (MEMESTREAM_ADMIN_WALLETS): uphold (the bond is lost), overturn (the other
+ * side wins; the bond comes back plus a reward) or void (refund [1,1]; the bond comes back). No
+ * decision within MARKET_DECISION_MS: void.
+ */
+export const MARKET_CHALLENGE_MS = 2 * 60 * MINUTE_MS;
+export const MARKET_DECISION_MS = 24 * 60 * MINUTE_MS;
+export const CHALLENGE_BOND = 100;
+export const OVERTURN_REWARD = 50;
+export const CHALLENGE_REASON_MAX = 200;
+export const CHALLENGE_REASON_MIN = 5;
+/** Links (a market's official source, a challenge's evidence) are kept this short. */
+export const LINK_MAX = 200;
 /** A frame description is cut to this many characters. */
 export const FRAME_NOTE_MAX = 400;
 /** A "Not approved" note shows to its asker for this long. */
@@ -177,4 +192,29 @@ export function cleanQuestion(text: unknown): { ok: true; question: string } | {
   if (URL_LIKE.test(question)) return { ok: false, error: "No links in questions" };
   if (HTML_BRACKETS.test(question)) return { ok: false, error: PLAIN_TEXT_ONLY };
   return { ok: true, question };
+}
+
+/** A challenge's reason: plain text, one line, CHALLENGE_REASON_MIN to CHALLENGE_REASON_MAX characters. */
+export function cleanReason(text: unknown): { ok: true; reason: string } | { ok: false; error: string } {
+  if (typeof text !== "string") return { ok: false, error: "Say why the result is wrong" };
+  const normalized = text.normalize("NFKC");
+  if (FORMAT_CHARS.test(normalized) || CONTROL_CHARS.test(normalized) || HTML_BRACKETS.test(normalized)) return { ok: false, error: PLAIN_TEXT_ONLY };
+  const reason = normalized.replace(/\s+/g, " ").trim();
+  if (reason.length < CHALLENGE_REASON_MIN || reason.length > CHALLENGE_REASON_MAX) {
+    return { ok: false, error: `Reasons are ${CHALLENGE_REASON_MIN} to ${CHALLENGE_REASON_MAX} characters` };
+  }
+  return { ok: true, reason };
+}
+
+/** An http(s) link of at most LINK_MAX characters, normalized; null if it isn't one. */
+export function cleanLink(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > LINK_MAX) return null;
+  try {
+    const url = new URL(value.trim());
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
+    const href = url.href;
+    return href.length <= LINK_MAX ? href : null;
+  } catch {
+    return null;
+  }
 }

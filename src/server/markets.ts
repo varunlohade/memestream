@@ -9,7 +9,7 @@
  * Env (server only): MEMESTREAM_MARKET_ORACLE (public key); MEMESTREAM_MARKET_ORACLE_KEY (the secret
  * key as a JSON byte array, like a solana-keygen file) only where the oracle acts;
  * MEMESTREAM_MARKET_SECRET (32+ characters) keys question ids so nobody can squat a market's
- * addresses; MEMESTREAM_MARKET_METADATA=1/0 names the YES/NO mints (default: on except mainnet).
+ * addresses; MEMESTREAM_MARKET_METADATA=1 names the YES/NO mints (default off: it costs rent).
  */
 import "server-only";
 import { randomBytes } from "node:crypto";
@@ -41,9 +41,10 @@ import { type MarketOrder, prepareMarketTrade, quoteMarketTrade } from "@/lib/ma
 import { fetchQuestion, type QuestionState } from "@/lib/markets/vault";
 import { pollUntil } from "@/lib/poll";
 import { parseTicker } from "@/lib/short-link";
-import { getChain, networkInfo, rememberBuilt, signatureStatus } from "./chain";
+import { getChain, rememberBuilt, signatureStatus } from "./chain";
 import { InputError } from "@/lib/dbc/errors";
-import { asUserFacing, UserError } from "./errors";
+import { asUserFacing, BusyError, UserError } from "./errors";
+import { takeRpcBudget } from "./rpc-budget";
 
 const SIDES: Side[] = ["yes", "no"];
 
@@ -76,12 +77,11 @@ function marketSecret(): string {
   return (devSecret ??= randomBytes(32).toString("hex"));
 }
 
-/** Names on the YES/NO mints: MetaDAO lets only its deployer add them on mainnet, so they're off there unless set. */
-function metadataOn(): boolean {
-  const set = process.env.MEMESTREAM_MARKET_METADATA;
-  if (set === "1" || set === "0") return set === "1";
-  return networkInfo().walletChain !== "solana:mainnet";
-}
+/**
+ * Names on the YES/NO mints cost ~0.0275 SOL of rent per market, and on mainnet MetaDAO lets only its
+ * deployer add them, so they're off unless MEMESTREAM_MARKET_METADATA=1. The app labels YES/NO itself.
+ */
+const metadataOn = () => process.env.MEMESTREAM_MARKET_METADATA === "1";
 
 /** Same as transactions.ts: fresh blockhash, partial-sign with builder keypairs, remember, serialize. */
 async function toPreparedTx(built: BuiltTx): Promise<PreparedTx> {
@@ -202,6 +202,13 @@ async function positionOf(keys: MarketKeys, wallet: PublicKey): Promise<MarketPo
   return { yes: toTokens(tokenAmount(yes?.data)), no: toTokens(tokenAmount(no?.data)), sol: lamportsToSol(new BN(sol?.lamports ?? 0)) };
 }
 
+/** Whether `wallet` holds any YES or NO of a registered market: one read, from the site's RPC budget. */
+export async function walletHoldsShares(record: MarketRecord, wallet: string): Promise<boolean> {
+  if (!(await takeRpcBudget(1))) throw new BusyError();
+  const { yes, no } = await positionOf(keysOf(record), publicKey(wallet, "wallet"));
+  return Number(yes) > 0 || Number(no) > 0;
+}
+
 /** Odds and state of a registered market: open for bets, closed, or resolved (and how it paid). */
 export async function getMarket(record: MarketRecord, wallet: string | null, now: number): Promise<MarketView> {
   return userFacing(async () => {
@@ -309,7 +316,7 @@ export class MarketUnavailableError extends Error {
 }
 
 export type CreateMarketRequest = MarketRef & { ticker: string; seedSolPerPool: string };
-export type CreatedMarket = { record: Omit<MarketRecord, "lockAt">; signatures: string[] };
+export type CreatedMarket = { record: Omit<MarketRecord, "lockAt" | "source">; signatures: string[] };
 
 /**
  * Creates and seeds a market, skipping steps already on chain (so a retry finishes a cut-short

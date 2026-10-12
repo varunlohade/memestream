@@ -28,3 +28,9 @@ test("MEMESTREAM_PREDICTIONS_STARTER_MIN shortens only the starter wait, in prod
   for (const bad of ["0", "11", "1.5", "abc", ""]) assert.deepEqual(prod(bad), REAL_WAITS, bad);
   assert.equal(testSettings({ VERCEL_ENV: "production", MEMESTREAM_PREDICTIONS_STARTER_MIN: "2", MEMESTREAM_PREDICTIONS_PREFIX: "x:" }).prefix, "memestream:pm:");
 });
+
+test("MEMESTREAM_MARKET_CHALLENGE_MIN shortens the market challenge window outside production only, within 1-120 minutes", () => {
+  assert.equal(testSettings({ MEMESTREAM_MARKET_CHALLENGE_MIN: "3" }).challengeMs, 3 * 60_000);
+  assert.equal(testSettings({ MEMESTREAM_MARKET_CHALLENGE_MIN: "3", VERCEL_ENV: "production" }).challengeMs, undefined);
+  for (const bad of ["0", "121", "1.5", "abc", ""]) assert.equal(testSettings({ MEMESTREAM_MARKET_CHALLENGE_MIN: bad }).challengeMs, undefined, bad);
+});

@@ -220,7 +220,7 @@ test("the server runs a market: the oracle creates, closes and resolves; wallets
 
   const created = await server.createMarket({ ...ref, ticker: "test", seedSolPerPool: "0.05" });
   assert.equal(created.signatures.length, 4, "init, split, two pools");
-  const record = { ...created.record, lockAt: now + 60_000 };
+  const record = { ...created.record, lockAt: now + 60_000, source: "" };
   assert.deepEqual((await server.createMarket({ ...ref, ticker: "test", seedSolPerPool: "0.05" })).signatures, [], "a second create finds every step done");
   const opened = await server.getMarket(record, alice.publicKey.toBase58(), now);
   assert.equal(opened.trading, true);

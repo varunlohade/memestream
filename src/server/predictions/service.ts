@@ -9,7 +9,7 @@ import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
-import { applyMarketDone, applyMarketUnavailable, type MarketJob, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
+import { applyMarketDone, applyMarketUnavailable, challengeEndsAt, marketFinal, type MarketJob, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
@@ -31,9 +31,11 @@ export class MarketUnavailable extends Error {}
  * didn't finish; create returns the market's addresses for the registry.
  */
 export type MarketDeps = {
-  create: (mint: string, predictionId: string, symbol: string) => Promise<Omit<MarketRecord, "lockAt">>;
+  create: (mint: string, predictionId: string, symbol: string) => Promise<Omit<MarketRecord, "lockAt" | "source">>;
   close: (record: MarketRecord) => Promise<unknown>;
   resolve: (record: MarketRecord, outcome: MarketOutcome) => Promise<unknown>;
+  /** Whether `wallet` holds any YES or NO of the market (one budgeted read). */
+  holdsShares: (record: MarketRecord, wallet: string) => Promise<boolean>;
 };
 
 /** The AI check's two steps; each throws if its model fails (timeout, error, malformed answer). */
@@ -60,6 +62,10 @@ export type ServiceDeps = {
   ai?: AiCheckDeps | null;
   /** On-chain markets; null or absent when MEMESTREAM_MARKETS is off (then nothing changes). */
   markets?: MarketDeps | null;
+  /** Wallets that settle market challenges (MEMESTREAM_ADMIN_WALLETS). */
+  admins?: string[];
+  /** The market challenge window (shorter only in test runs). */
+  challengeMs?: number;
   /** Runs a task after the response is sent (Next's `after`). */
   defer: (task: () => Promise<void>) => void;
   /** Commit attempts before answering "busy", and the pause between them. */
@@ -181,6 +187,7 @@ function liveView(game: Game, wallet: string | null): PredictionsView["live"] {
       bettors: live.bettors,
       myBet: myBet ? { side: myBet.side, amount: myBet.amount } : null,
       market: live.market?.step ?? null,
+      source: live.source ?? null,
     };
   });
 }
@@ -225,7 +232,22 @@ function myResult(p: Summary, wallet: string | null, now: number): ResolvedView[
   return { bet, payout, flagged: flagged === 1, canFlag: now < p.resolvedAt + FLAG_WINDOW_MS };
 }
 
-function resolvedView(game: Game, wallet: string | null, staff: boolean, now: number): PredictionsView["resolved"] {
+/** A market's place in its challenge window; the challenge itself only for admins. */
+function verdictView(p: Summary, now: number, env: Env, admin: boolean): PredictionsView["resolved"][number]["verdict"] {
+  const m = p.market;
+  if (!m || m.step === "opening" || m.step === "failed") return null;
+  const final = marketFinal(p, now, env);
+  const c = m.challenge;
+  return {
+    status: final ? "final" : c ? "disputed" : "proposed",
+    finalAt: c || p.outcome === "cancel" ? null : challengeEndsAt(p, env),
+    final,
+    decision: m.decision?.kind ?? null,
+    challenge: admin && c ? { by: c.by, at: c.at, reason: c.reason, link: c.link ?? null, bond: c.bond } : null,
+  };
+}
+
+function resolvedView(game: Game, wallet: string | null, staff: boolean, now: number, env: Env, admin: boolean): PredictionsView["resolved"] {
   return game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
     id: p.id,
     text: p.text,
@@ -237,6 +259,10 @@ function resolvedView(game: Game, wallet: string | null, staff: boolean, now: nu
     flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,
     my: myResult(p, wallet, now),
     market: p.market?.step ?? null,
+    source: p.source ?? null,
+    launchedAt: p.window?.[0] ?? null,
+    lockAt: p.window?.[1] ?? null,
+    verdict: verdictView(p, now, env, admin),
   }));
 }
 
@@ -248,7 +274,13 @@ export function predictionsService(deps: ServiceDeps) {
   const attempts = deps.attempts ?? DEFAULT_COMMIT_ATTEMPTS;
   const waits = deps.waits ?? REAL_WAITS;
   /** The coin's environment for the engine; markets follow the server flag. */
-  const envOf = (presenceJson: string | null, extra: Partial<Env> = {}): Env => ({ ...parseEnv(presenceJson), markets: Boolean(deps.markets), ...extra });
+  const envOf = (presenceJson: string | null, extra: Partial<Env> = {}): Env => ({
+    ...parseEnv(presenceJson),
+    markets: Boolean(deps.markets),
+    admins: deps.admins ?? [],
+    ...(deps.challengeMs !== undefined ? { challengeMs: deps.challengeMs } : {}),
+    ...extra,
+  });
   const pause = () => new Promise((resolve) => setTimeout(resolve, deps.backoffMs?.() ?? BACKOFF_MIN_MS + Math.random() * BACKOFF_JITTER_MS));
 
   /** Runs `attempt` until it commits, up to `attempts` times; then the coin is too busy. */
@@ -323,6 +355,12 @@ export function predictionsService(deps: ServiceDeps) {
     const aiCheck = aiOn(coin);
     // Holding the coin is checked only where it matters (one cached read), not on every bet.
     const holder = action.kind === "suggest" || action.kind === "upvote" ? await deps.holds(mint, wallet) : false;
+    // A challenge needs shares of that market: one read of the wallet's YES/NO, only for challenges.
+    let shares = false;
+    if (action.kind === "challenge" && deps.markets) {
+      const record = await market(mint, action.id);
+      shares = record ? await deps.markets.holdsShares(record, wallet) : false;
+    }
     // One id per request: if a commit lands but its reply is lost and the store client re-sends it,
     // the re-send answers "replay" and the action counts once.
     const once = { key: `act:${randomUUID()}`, ttlMs: ACT_ONCE_TTL_MS };
@@ -330,7 +368,7 @@ export function predictionsService(deps: ServiceDeps) {
       const { game, save, extra: [watchDoc, presenceDoc] } = await readGame(mint, creator, [watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
       const eligible = isEligible(parseProfile(watchDoc.json), waits.eligibleAfterMs);
-      const result = apply(game, action, { wallet, eligible, holder, balance }, now(), envOf(presenceDoc.json, { aiCheck }));
+      const result = apply(game, action, { wallet, eligible, holder, balance, shares }, now(), envOf(presenceDoc.json, { aiCheck }));
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
@@ -352,7 +390,7 @@ export function predictionsService(deps: ServiceDeps) {
       const result = apply(game, { kind: "tick" }, null, now(), env);
       if (reviewsDue(result.game, now())) startReviewing(mint, creator);
       if (aiDue(result.game, now(), env)) startAiRun(mint, coin);
-      if (deps.markets && marketsDue(result.game, now())) startMarketRun(mint, coin);
+      if (deps.markets && marketsDue(result.game, now(), env)) startMarketRun(mint, coin);
       if (!result.changed) return { game, env };
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       if (status === "ok") return { game: result.game, env };
@@ -560,7 +598,8 @@ export function predictionsService(deps: ServiceDeps) {
       if (job.kind === "create") {
         const live = game.live.find((p) => p.id === job.id);
         if (!live) return;
-        const record: MarketRecord = { ...(await markets.create(mint, job.id, coin.symbol ?? "")), lockAt: live.lockAt };
+        const created = await markets.create(mint, job.id, coin.symbol ?? "");
+        const record: MarketRecord = { ...created, lockAt: live.lockAt, source: live.source ?? coin.streamUrl ?? "" };
         await commitMarketDone(mint, coin.creator, job, record);
         return;
       }
@@ -647,6 +686,7 @@ export function predictionsService(deps: ServiceDeps) {
       hasSuggestion: game.suggestions.some((s) => s.asker === wallet),
       holder,
       notice: noticeFor(game, wallet, isStaff(game, wallet)),
+      admin: (deps.admins ?? []).includes(wallet),
     };
   }
 
@@ -669,7 +709,7 @@ export function predictionsService(deps: ServiceDeps) {
       pending: staff ? pendingView(game) : null,
       queueSize: visibleSuggestions(game, wallet, staff).length,
       queue: queueView(game, wallet, staff),
-      resolved: resolvedView(game, wallet, staff, t),
+      resolved: resolvedView(game, wallet, staff, t, env, me?.admin ?? false),
       mods: staff ? game.mods : [],
       leaderboard: {
         stream: topWinners(streamBoard),
