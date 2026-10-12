@@ -18,6 +18,7 @@
  */
 import type { Redis } from "@upstash/redis";
 import { byPoints } from "@/lib/predictions/rules";
+import { DEFAULT_PREFIX } from "./test-settings";
 
 export type Doc = { v: number; json: string | null };
 export type Move = { wallet: string; delta: number; floor: number };
@@ -101,10 +102,6 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
 // Redis store: the same steps as Lua scripts, which Redis runs atomically.
 // ---------------------------------------------------------------------------------------------
 
-const PREFIX = "memestream:pm:";
-const BALANCES = `${PREFIX}balance`;
-const WON = `${PREFIX}won`;
-
 /**
  * KEYS: balances, won, the documents..., then the nonce key if any.
  * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0) per document, moveCount, (wallet, delta, floor)
@@ -167,21 +164,26 @@ export const TOP_LUA = `return redis.call('ZREVRANGE', KEYS[1], 0, tonumber(ARGV
 
 const present = (value: unknown) => value !== null && value !== undefined && value !== false;
 
-/** `redis` should be created with automaticDeserialization: false, so JSON stays text until parsed here. */
-export function redisStore(redis: Redis): PredictionStore {
+/**
+ * `redis` should be created with automaticDeserialization: false, so JSON stays text until parsed here.
+ * Every key starts with `prefix` (a test run uses its own; see test-settings.ts).
+ */
+export function redisStore(redis: Redis, prefix = DEFAULT_PREFIX): PredictionStore {
+  const BALANCES = `${prefix}balance`;
+  const WON = `${prefix}won`;
   const run = <T>(script: string, keys: string[], args: (string | number)[]) => redis.eval<string[], T>(script, keys, args.map(String));
   return {
     kind: "redis",
     async read(keys) {
       if (keys.length === 0) return [];
-      const rows = await run<[unknown, unknown][]>(READ_LUA, keys.map((k) => PREFIX + k), []);
+      const rows = await run<[unknown, unknown][]>(READ_LUA, keys.map((k) => prefix + k), []);
       return keys.map((_, i) => {
         const [v, json] = rows?.[i] ?? [];
         return present(json) ? { v: Number(v), json: String(json) } : { v: 0, json: null };
       });
     },
     async commit(c) {
-      const keys = [BALANCES, WON, ...c.docs.map((d) => PREFIX + d.key), ...(c.nonce ? [PREFIX + c.nonce.key] : [])];
+      const keys = [BALANCES, WON, ...c.docs.map((d) => prefix + d.key), ...(c.nonce ? [prefix + c.nonce.key] : [])];
       const args = [
         c.docs.length,
         c.nonce ? 1 : 0,

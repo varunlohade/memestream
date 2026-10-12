@@ -12,6 +12,7 @@ import { getCoinDetail } from "@/server/coins";
 import { reviewFromEnv } from "./review";
 import { predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
+import { testSettings } from "./test-settings";
 
 export { predictionsEnabled } from "./flag";
 
@@ -55,13 +56,14 @@ export function predictions(): { service: PredictionsService } | { error: string
     devSecret ??= randomBytes(32).toString("hex");
     secret = devSecret;
   }
+  const { prefix, waits } = testSettings();
   let store;
   if (url && token) {
     // The SDK's default retries stay on: it re-sends a request whose fetch threw. Reads and ticks
     // are safe to repeat, an action's commit carries a one-time id (a re-send answers "replay"),
     // and a re-sent heartbeat is refused as too soon. Turning retries off would only turn brief
     // network blips into errors for actions that did save.
-    store = redisStore(new Redis({ url, token, automaticDeserialization: false }));
+    store = redisStore(new Redis({ url, token, automaticDeserialization: false }), prefix);
   } else if (production) {
     return (cached = { error: "Predictions are not set up (no Redis)" });
   } else {
@@ -80,6 +82,7 @@ export function predictions(): { service: PredictionsService } | { error: string
       return coin ? { creator: coin.creator, status: coin.status } : null;
     },
     holds,
+    waits,
   });
   return (cached = { service });
 }

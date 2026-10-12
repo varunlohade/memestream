@@ -16,6 +16,7 @@
 # next.js
 /.next/
 /.next-check/
+/.next-e2e/
 /out/
 
 # production
@@ -42,7 +43,7 @@ yarn-error.log*
 next-env.d.ts
 
 # devnet keys
-.keys/
+.keys
 *.keypair.json
 
 # cached devnet program/account snapshots for the offline local chain

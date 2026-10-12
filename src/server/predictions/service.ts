@@ -9,11 +9,12 @@ import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, newGame, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
-import { FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STARTER_AFTER_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import { FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
+import { REAL_WAITS, type Waits } from "./test-settings";
 
 export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated" };
 
@@ -34,6 +35,8 @@ export type ServiceDeps = {
   /** Commit attempts before answering "busy", and the pause between them. */
   attempts?: number;
   backoffMs?: () => number;
+  /** Watch time before the starter grant and before eligibility (shorter only in test runs). */
+  waits?: Waits;
 };
 
 /** Too many concurrent writers on one coin: the caller should answer "busy, try again". */
@@ -204,6 +207,7 @@ const RETRY = Symbol("retry");
 export function predictionsService(deps: ServiceDeps) {
   const { store, now } = deps;
   const attempts = deps.attempts ?? DEFAULT_COMMIT_ATTEMPTS;
+  const waits = deps.waits ?? REAL_WAITS;
   const pause = () => new Promise((resolve) => setTimeout(resolve, deps.backoffMs?.() ?? BACKOFF_MIN_MS + Math.random() * BACKOFF_JITTER_MS));
 
   /** Runs `attempt` until it commits, up to `attempts` times; then the coin is too busy. */
@@ -248,7 +252,7 @@ export function predictionsService(deps: ServiceDeps) {
       const [watchDoc, ipDoc, presenceDoc] = await store.read([watchKey(wallet), ipKey, presenceKey(mint)]);
       const wallets: string[] = ipDoc.json ? JSON.parse(ipDoc.json) : [];
       const earning = wallets.includes(wallet) || wallets.length < MAX_EARNING_WALLETS_PER_IP;
-      const result = heartbeat(parseProfile(watchDoc.json), t, earning);
+      const result = heartbeat(parseProfile(watchDoc.json), t, earning, waits.starterAfterMs);
       if (!result.accepted) return { accepted: false, points: 0 };
       const docs: Commit["docs"] = [{ key: watchKey(wallet), v: watchDoc.v, json: JSON.stringify(result.profile) }];
       if (earning && !wallets.includes(wallet)) docs.push({ key: ipKey, v: ipDoc.v, json: JSON.stringify([...wallets, wallet]), ttlMs: DAY_MS });
@@ -277,7 +281,7 @@ export function predictionsService(deps: ServiceDeps) {
       const [coinDoc, watchDoc, presenceDoc] = await store.read([coinKey(mint), watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
       const game = parseGame(coinDoc.json, creator);
-      const eligible = isEligible(parseProfile(watchDoc.json));
+      const eligible = isEligible(parseProfile(watchDoc.json), waits.eligibleAfterMs);
       const result = apply(game, action, { wallet, eligible, holder, balance }, now(), parseEnv(presenceDoc.json));
       const status = await store.commit({ docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
@@ -399,8 +403,8 @@ export function predictionsService(deps: ServiceDeps) {
       wallet,
       balance,
       watchMinutes: Math.floor(profile.watchMs / MINUTE_MS),
-      eligible: isEligible(profile),
-      starterInMinutes: profile.starter ? null : Math.max(0, Math.ceil((STARTER_AFTER_MS - profile.watchMs) / MINUTE_MS)),
+      eligible: isEligible(profile, waits.eligibleAfterMs),
+      starterInMinutes: profile.starter ? null : Math.max(0, Math.ceil((waits.starterAfterMs - profile.watchMs) / MINUTE_MS)),
       role: wallet === game.creator ? "streamer" : game.mods.includes(wallet) ? "mod" : null,
       hasSuggestion: game.suggestions.some((s) => s.asker === wallet),
       holder,
