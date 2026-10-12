@@ -467,6 +467,7 @@ export function Predictions({
       <p className="pm-free">
         Points are free and only for fun.
         {markets ? ` Markets use ${network.test ? `${network.label.toLowerCase()} SOL (test money)` : "real SOL"}.` : ""}
+        {markets && network.test ? " Devnet preview: markets resolve by the memestream oracle, with a 2 h challenge window." : ""}
       </p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>

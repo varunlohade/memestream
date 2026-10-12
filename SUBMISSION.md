@@ -3,6 +3,17 @@
 **Deadline:** 2026-10-13 06:59 UTC (12:29 IST). **Target:** submit tonight, 2026-10-12.
 Meteora DBC listing: https://superteam.fun/earn/listing/meteora-dbc
 
+## Positioning (internal; the form answers are Boss man's own words)
+
+**Headline:** memestream: a prediction market for every live stream.
+
+**First paragraph:** Each stream launches its own coin on Meteora's Dynamic Bonding Curve, and its
+prediction markets trade in Meteora DAMM v2 pools. Viewers ask yes/no questions about the stream,
+the crowd picks which go live, and everyone trades YES and NO. The streamer earns 80% of the coin's
+trading fees, and the coin graduates live into a Meteora pool.
+
+Keep "How it uses DBC" right under this in any write-up: the judges' track is "Best use of Meteora DBC".
+
 ## Where we submit
 
 | Target | Where | Notes |
