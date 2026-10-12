@@ -482,7 +482,7 @@ test("review: a typed staff question goes live only on approval (its window star
   assert.deepEqual([live?.text, live?.launchedAt, live?.lockAt, launched], ["Will chat hit 200?", T0 + 5 * SEC, T0 + 5 * SEC + 2 * MIN, 1]);
 });
 
-test("review: checks start at once, then at most every 15 s, at most 5 times; then staff decide by hand", () => {
+test("review: checks start at once, then at most every 5 s, at most 5 times; then staff decide by hand", () => {
   const w = world({ asker: 100 }, [], [], { reviewed: false });
   w.run({ kind: "suggest", text: "Will I eat a banana?" }, "asker", T0);
   let t = T0;

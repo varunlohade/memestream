@@ -156,9 +156,9 @@ async function waitForHoldings(mint: string, wallet: Keypair, min: number) {
 type Player = { name: string; keypair: Keypair; wallet: string; token: string };
 type View = {
   now: number;
-  me: { balance: number; eligible: boolean; watchMinutes: number; holder: boolean | null } | null;
+  me: { balance: number; eligible: boolean; watchMinutes: number; holder: boolean | null; notice?: string | null } | null;
   live: { id: string; text: string; lockAt: number; yes: number; no: number; bettors: number } | null;
-  queue: { id: string; text: string; upvotes: number; mine: boolean }[];
+  queue: { id: string; text: string; upvotes: number; mine: boolean; status?: string }[];
   resolved: { id: string; outcome: string; disputed: boolean; my: { bet: number; payout: number; flagged: boolean } | null }[];
 };
 
@@ -191,6 +191,16 @@ async function refused(name: string, p: Player, body: Record<string, unknown>, e
   check(name, r.status === 400 && error.includes(expected), `${r.status} "${error}"`);
 }
 const balances = (players: Player[]) => Promise.all(players.map(balance));
+/** Polls `p`'s view until `done` holds (jev review takes about a second); null on timeout. */
+async function waitForView(p: Player, done: (v: View) => boolean, ms = 45_000): Promise<View | null> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const v = await view(p);
+    if (done(v)) return v;
+    if (Date.now() > until) return null;
+    await sleep(700);
+  }
+}
 async function waitUntilLocked(p: Player) {
   const v = await view(p);
   if (!v.live) throw new Error("nothing live");
@@ -295,6 +305,11 @@ async function run() {
   const suggestion = afterSuggest.queue.find((s) => s.mine);
   check("suggest: costs 10 points", afterSuggest.me!.balance === startBalances[0] - SUGGEST_COST, `${startBalances[0]} -> ${afterSuggest.me!.balance}`);
   if (!suggestion) throw new Fatal("suggestion missing from the queue");
+  check("review: a new suggestion starts under review", suggestion.status === "review", `status ${suggestion.status}`);
+  const reviewStarted = Date.now();
+  const approved = await waitForView(v1, (v) => v.queue.some((s) => s.id === suggestion.id && s.status === "ok"));
+  check("review: jev approves it within 45 s", approved !== null, `${((Date.now() - reviewStarted) / 1000).toFixed(1)} s`);
+  if (!approved) throw new Fatal("jev review");
   await refused("suggest: a non-holder can't suggest", outsiderP, { kind: "suggest", text: "Will this be refused today?" }, "Hold at least");
   await refused("suggest: the streamer can't suggest on their own coin", streamer, { kind: "suggest", text: "Will this be refused today?" }, "can't suggest");
   await refused("upvote: not eligible before 2 minutes watched (FAST)", v2, { kind: "upvote", id: suggestion.id }, "Watch");
@@ -363,7 +378,10 @@ async function run() {
   // Each call reads devnet, so the 4 bets go out together to fit in the minute.
   const preBet2 = await balances([v1, v2, v3, v4]);
   const launched2 = await must("launch: the streamer launches their own question (1 min)", () => actOk(streamer, { kind: "launch", text: `Will chat say gg first? (${symbol})`, windowMin: 1 }));
-  check("launch: it is live", launched2.live !== null, launched2.live?.text ?? "none");
+  check("launch: a typed staff question waits for review first", launched2.live === null, launched2.live?.text ?? "not live yet");
+  const live2 = await waitForView(streamer, (v) => v.live !== null);
+  check("launch: jev approves it and it goes live", live2 !== null, live2?.live?.text ?? "none");
+  if (!live2) throw new Fatal("staff launch review");
   const round2: { p: Player; side: Side; amount: number }[] = [
     { p: v1, side: "no", amount: 20 },
     { p: v2, side: "yes", amount: 20 },
@@ -380,6 +398,15 @@ async function run() {
   const refunds = after2.map((b, i) => b - before2[i]);
   check("cancel: every bettor gets their stake back", round2.every((b, i) => refunds[i] === b.amount && after2[i] === preBet2[i]), `refunds ${refunds.join(", ")}`);
   check("cancel: refunds add up to the pool", refunds.reduce((t, d) => t + d, 0) === round2.reduce((t, b) => t + b.amount, 0), `${refunds.reduce((t, d) => t + d, 0)}`);
+
+  // jev rejects junk: it never reaches others, its 10 points stay spent, and its asker waits 5 minutes.
+  const beforeJunk = await balance(v2);
+  await must("review: viewer2 suggests junk", () => actOk(v2, { kind: "suggest", text: "asdkj qwe zzz banana 77?" }));
+  const rejected = await waitForView(v2, (v) => !v.queue.some((s) => s.mine) && Boolean(v.me?.notice));
+  check("review: jev rejects junk and tells only the asker why", rejected !== null && rejected.me!.notice!.startsWith("Not approved"), rejected?.me?.notice ?? "no verdict");
+  check("review: others never see the rejected question", !(await view(v3)).queue.some((s) => s.text.startsWith("asdkj")), "hidden");
+  check("review: a rejected question keeps its 10-point cost", (await balance(v2)) === beforeJunk - SUGGEST_COST, `${beforeJunk} -> ${await balance(v2)}`);
+  await refused("review: the asker waits before suggesting again", v2, { kind: "suggest", text: "Will he win the next round?" }, "wasn't approved");
 }
 
 try {

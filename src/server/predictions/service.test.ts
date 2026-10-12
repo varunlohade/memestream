@@ -433,7 +433,7 @@ for (const [name, make] of STORES) {
     assert.equal((await service.view(COIN, "other")).me?.notice, null);
   });
 
-  test(`${name}: review: a timeout keeps it under review; the next view after 15 s tries again and approves`, async () => {
+  test(`${name}: review: a timeout keeps it under review; the next view after 5 s tries again and approves`, async () => {
     const { service, fund, settle, clock, jev } = setup(make, { autoReview: false });
     await fund("asker", 100);
     jev.answer = (signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
@@ -441,11 +441,11 @@ for (const [name, make] of STORES) {
     await settle();
     assert.equal((await service.view(COIN, "asker")).queue[0].status, "review");
     jev.answer = () => jsonResponse(jevAnswer("APPROVE"));
-    clock.t += 10 * SEC;
+    clock.t += 3 * SEC;
     await service.view(COIN, "asker");
     await settle();
-    assert.equal(jev.calls, 1, "not again within 15 s");
-    clock.t += 5 * SEC;
+    assert.equal(jev.calls, 1, "not again within 5 s");
+    clock.t += 2 * SEC;
     await service.view(COIN, "asker");
     await settle();
     assert.equal(jev.calls, 2);

@@ -51,6 +51,12 @@ if (!((redis.UPSTASH_REDIS_REST_URL && redis.UPSTASH_REDIS_REST_TOKEN) || (redis
   process.exit(1);
 }
 
+// Typed questions go through jev review, so the run needs the real key (server-side only; never printed).
+if (!process.env.TYPESAFE_API_KEY) {
+  console.error("No TYPESAFE_API_KEY. Load it into this shell first: set -a; . ~/instinct-lite/.env; set +a");
+  process.exit(1);
+}
+
 const runId = `${Date.now().toString(36)}${randomBytes(2).toString("hex")}`;
 const port = await freePort();
 const baseUrl = `http://localhost:${port}`;

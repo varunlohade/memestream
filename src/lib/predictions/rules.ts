@@ -32,7 +32,7 @@ export const QUESTION_MAX = 80;
  * AI review: every typed question waits "under review" until jev approves it. A failed check is
  * tried again at most this often, this many times; then the streamer or a mod decides by hand.
  */
-export const REVIEW_RETRY_MS = 15_000;
+export const REVIEW_RETRY_MS = 5_000;
 export const REVIEW_MAX_TRIES = 5;
 /** A "Not approved" note shows to its asker for this long. */
 export const NOTICE_MS = 5 * MINUTE_MS;

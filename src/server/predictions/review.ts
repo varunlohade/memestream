@@ -11,7 +11,7 @@ export const TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone";
 const DEFAULT_MODEL = "jev-latest";
 /** An APPROVE counts only at this confidence or more; below it, the question is not approved. */
 export const APPROVE_MIN_CONFIDENCE = 0.6;
-const TIMEOUT_MS = 4_000;
+const TIMEOUT_MS = 8_000;
 /** Retries on a busy answer (429, 503, 529), after these pauses. */
 const RETRY_PAUSES_MS = [250, 500];
 const RETRY_STATUSES = new Set([429, 503, 529]);

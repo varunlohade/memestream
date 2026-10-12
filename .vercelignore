@@ -4,3 +4,11 @@ design/
 test/
 *.tsbuildinfo
 .next-check/
+# Never upload keys, local env files or other build folders
+.keys
+.keys/
+.env*
+.next-e2e/
+.next-*/
+demo/
+scripts/
