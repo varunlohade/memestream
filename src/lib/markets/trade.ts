@@ -4,6 +4,7 @@
  * slippage cap, a minimum that's never zero, and the minimum the user saw as a floor. The pool SDK
  * wraps SOL going in and unwraps SOL coming out, so the wallet only ever sees SOL.
  */
+import { PriceRangeViolationError } from "@meteora-ag/cp-amm-sdk";
 import type { Connection, PublicKey } from "@solana/web3.js";
 import type BN from "bn.js";
 import { InputError } from "../dbc/errors";
@@ -29,8 +30,22 @@ function openPool(pools: MarketPools, side: Side): DammSnapshot {
   return pools[side];
 }
 
-export function quoteMarketTrade(pools: MarketPools, order: MarketOrder, slippageBps: number): DammQuote {
-  return quoteDammTrade(openPool(pools, order.side), tradeInput(order), slippageBps);
+/**
+ * A pool holds a limited stock of its token on the 0.001-1 SOL range: a bet that would push the
+ * price past 1 SOL (or a sell past 0.001) can't fill. With S SOL seeded per pool, about 0.43 S of
+ * buys take a side from 0.5 to 1.
+ */
+async function withinRange<T>(work: () => T | Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof PriceRangeViolationError) throw new InputError("Too big for this market right now. Try a smaller amount.");
+    throw error;
+  }
+}
+
+export function quoteMarketTrade(pools: MarketPools, order: MarketOrder, slippageBps: number): Promise<DammQuote> {
+  return withinRange(() => quoteDammTrade(openPool(pools, order.side), tradeInput(order), slippageBps));
 }
 
 /** Quotes and builds in one step; `atLeast` is the minimum the user saw. */
@@ -42,5 +57,5 @@ export async function prepareMarketTrade(
   slippageBps: number,
   atLeast?: BN,
 ): Promise<BuiltTx & { quote: DammQuote }> {
-  return prepareDammTrade(connection, openPool(pools, order.side), trader, tradeInput(order), slippageBps, atLeast);
+  return withinRange(() => prepareDammTrade(connection, openPool(pools, order.side), trader, tradeInput(order), slippageBps, atLeast));
 }

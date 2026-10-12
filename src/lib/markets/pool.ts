@@ -67,20 +67,21 @@ export function seedPlan(lamportsPerPool: BN): SeedPlan {
 }
 
 export type MarketKeys = VaultKeys & {
-  coinMint: PublicKey;
-  predictionId: string;
   oracle: PublicKey;
   questionId: Uint8Array;
   pools: Record<Side, PublicKey>;
 };
 
-/** Every address of a market, from its coin, prediction and oracle: no lookups. */
-export function marketKeys(connection: Connection, coinMint: PublicKey, predictionId: string, oracle: PublicKey): MarketKeys {
-  const questionId = questionIdFor(coinMint, predictionId);
+/** Every address of a market, from its question id and oracle: no lookups. */
+export function marketKeysFromId(connection: Connection, questionId: Uint8Array, oracle: PublicKey): MarketKeys {
   const vault = vaultKeys(connection, questionId, oracle);
   const pool = (side: Side) => deriveCustomizablePoolAddress(vault.mints[side], NATIVE_MINT);
-  return { ...vault, coinMint, predictionId, oracle, questionId, pools: { yes: pool("yes"), no: pool("no") } };
+  return { ...vault, oracle, questionId, pools: { yes: pool("yes"), no: pool("no") } };
 }
+
+/** A coin prediction's market. */
+export const marketKeys = (connection: Connection, coinMint: PublicKey, predictionId: string, oracle: PublicKey): MarketKeys =>
+  marketKeysFromId(connection, questionIdFor(coinMint, predictionId), oracle);
 
 export type MarketPools = Record<Side, DammSnapshot>;
 

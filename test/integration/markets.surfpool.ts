@@ -117,6 +117,13 @@ test("a market lives: seed, bet YES and NO, sell, close, resolve YES, redeem", a
     assert.equal(await connection.getAccountInfo(getAssociatedTokenAddressSync(NATIVE_MINT, alice.publicKey)), null, "no wrapped SOL left behind");
   });
 
+  await step("a bet bigger than the pool's stock is refused before it reaches the chain", async () => {
+    const pools = (await loadMarketPools(connection, keys))!;
+    // 0.5 SOL per pool: ~0.21 SOL more of buys takes YES from ~0.57 to 1.
+    await assert.rejects(quoteMarketTrade(pools, { side: "yes", action: "buy", amount: solToLamports("0.3") }, 100), /Too big for this market/);
+    await assert.rejects(prepareMarketTrade(connection, pools, alice.publicKey, { side: "yes", action: "buy", amount: solToLamports("0.3") }, 100), /Too big/);
+  });
+
   await step("bob sells half his NO back for SOL", async () => {
     const no = await tokenBalance(keys, "no", bob);
     const before = await balance(bob);
@@ -131,7 +138,7 @@ test("a market lives: seed, bet YES and NO, sell, close, resolve YES, redeem", a
     for (const tx of closes) await sendAndConfirm(connection, tx, [oracle]);
     const closed = (await loadMarketPools(connection, keys))!;
     assert.equal(isTradingOpen(closed), false);
-    assert.throws(() => quoteMarketTrade(closed, { side: "no", action: "sell", amount: new BN(1000) }, 100), /closed/);
+    await assert.rejects(quoteMarketTrade(closed, { side: "no", action: "sell", amount: new BN(1000) }, 100), /closed/);
     assert.deepEqual(await buildCloseTradingTxs(connection, keys, closed), [], "nothing left to close");
   });
 

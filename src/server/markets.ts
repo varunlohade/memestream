@@ -115,7 +115,7 @@ function previewOf(order: MarketOrder, quote: DammQuote): TradePreview {
 export async function previewMarketTrade(req: MarketQuoteRequest): Promise<TradePreview> {
   return userFacing(async () => {
     const order = orderOf(req);
-    return previewOf(order, quoteMarketTrade(await poolsFor(keysFor(req)), order, req.slippageBps));
+    return previewOf(order, await quoteMarketTrade(await poolsFor(keysFor(req)), order, req.slippageBps));
   });
 }
 

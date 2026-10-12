@@ -89,11 +89,16 @@ export async function resolveIx(connection: Connection, question: PublicKey, ora
   return client(connection).vaultProgram.methods.resolveQuestion({ payoutNumerators: numerators }).accounts({ question, oracle }).instruction();
 }
 
-export type QuestionState = { resolved: boolean; numerators: number[] };
+export type QuestionState = { questionId: Uint8Array; oracle: PublicKey; resolved: boolean; numerators: number[] };
 
 /** null if the question doesn't exist. Resolved once the denominator (sum of numerators) is set. */
 export async function fetchQuestion(connection: Connection, question: PublicKey): Promise<QuestionState | null> {
   const state = await client(connection).fetchQuestion(question);
   if (!state) return null;
-  return { resolved: state.payoutDenominator !== 0, numerators: state.payoutNumerators };
+  return {
+    questionId: Uint8Array.from(state.questionId),
+    oracle: state.oracle,
+    resolved: state.payoutDenominator !== 0,
+    numerators: state.payoutNumerators,
+  };
 }
