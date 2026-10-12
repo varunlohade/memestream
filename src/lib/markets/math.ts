@@ -76,3 +76,26 @@ export function oddsFromPrices(yes: number, no: number): MarketOdds {
   if (!(sum > 0)) throw new Error("Both prices are zero");
   return { priceSol: { yes, no }, probability: { yes: yes / sum, no: no / sum } };
 }
+
+const BPS = BigInt(10_000);
+const ceilDiv = (a: bigint, b: bigint) => (a + b - BigInt(1)) / b;
+
+/**
+ * Gnosis FPMM (FixedProductMarketMaker.sol, calcBuyAmount) for two outcomes: the shares of the
+ * bought side for `amount` collateral, with pool balances `bought` and `other` and a fee in bps
+ * taken from the collateral. Rounds against the buyer. Used as the reference the pool-based
+ * quotes are tested against (trade.ts quotes from the pool itself).
+ */
+export function fpmmBuyAmount(bought: bigint, other: bigint, amount: bigint, feeBps: number): bigint {
+  const net = amount - (amount * BigInt(feeBps)) / BPS;
+  const end = ceilDiv(bought * other, other + net);
+  return bought + net - end;
+}
+
+/** Gnosis FPMM calcSellAmount for two outcomes: the shares of the sold side it takes to get `returned` collateral. Rounds against the seller. */
+export function fpmmSellAmount(sold: bigint, other: bigint, returned: bigint, feeBps: number): bigint {
+  const gross = ceilDiv(returned * BPS, BPS - BigInt(feeBps));
+  if (gross >= other) throw new Error("Not enough of the other side in the pool");
+  const end = ceilDiv(sold * other, other - gross);
+  return gross + end - sold;
+}

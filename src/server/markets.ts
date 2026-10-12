@@ -13,31 +13,20 @@
  */
 import "server-only";
 import { randomBytes } from "node:crypto";
-import { getAmountBFromLiquidityDeltaForConcentratedLiquidity, getSqrtPriceFromPrice, Rounding } from "@meteora-ag/cp-amm-sdk";
 import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { Keypair, PublicKey } from "@solana/web3.js";
+import { LIQUIDITY_SCALE } from "@meteora-ag/cp-amm-sdk";
 import BN from "bn.js";
-import type { PreparedTx, TradePreview } from "@/lib/api-types";
-import type { DammQuote } from "@/lib/damm/trade";
+import type { PreparedTx } from "@/lib/api-types";
 import { formatUnits, lamportsToSol, parseUnits, solToLamports } from "@/lib/dbc/units";
 import type { BuiltTx } from "@/lib/dbc/tx";
 import { buildCreateMarketTxs, buildMarketMetadataTx } from "@/lib/markets/create";
 import { isPredictionId, MIN_MARKET_SECRET_CHARS, type Outcome, type Side } from "@/lib/markets/math";
-import {
-  loadMarketPools,
-  MARKET_FEE_BPS,
-  type MarketKeys,
-  marketKeys,
-  marketKeysFromId,
-  marketOdds,
-  type MarketPools,
-  OUTCOME_DECIMALS,
-  verifyMarketPools,
-} from "@/lib/markets/pool";
-import { poolOwnership, positionNfts } from "@/lib/markets/provenance";
-import type { MarketPosition, MarketRecord, MarketView } from "@/lib/markets/record";
+import { loadMarketPool, MARKET_FEE_BPS, type MarketKeys, marketKeys, marketKeysFromId, marketOdds, type MarketPool, OUTCOME_DECIMALS, verifyMarketPool } from "@/lib/markets/pool";
+import { poolOwnership, positionNftFor } from "@/lib/markets/provenance";
+import type { MarketPosition, MarketPreview, MarketRecord, MarketView } from "@/lib/markets/record";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "@/lib/markets/settle";
-import { type MarketOrder, prepareMarketTrade, quoteMarketTrade } from "@/lib/markets/trade";
+import { type MarketOrder, type MarketQuote, prepareMarketTrade, quoteMarketTrade } from "@/lib/markets/trade";
 import { fetchQuestion, type QuestionState } from "@/lib/markets/vault";
 import { pollUntil } from "@/lib/poll";
 import { parseTicker } from "@/lib/short-link";
@@ -124,7 +113,8 @@ function keysOf(record: MarketRecord): MarketKeys {
   const same =
     keys.question.toBase58() === record.question &&
     keys.vault.toBase58() === record.vault &&
-    SIDES.every((side) => keys.mints[side].toBase58() === record.mints[side] && keys.pools[side].toBase58() === record.pools[side]);
+    keys.pool.toBase58() === record.pool &&
+    SIDES.every((side) => keys.mints[side].toBase58() === record.mints[side]);
   if (!same) throw new UserError(NO_MARKET);
   return keys;
 }
@@ -134,62 +124,54 @@ const verifiedQuestions = new Set<string>();
 const verifiedMakers = new Set<string>();
 
 /**
- * The oracle made both pools: each holds the position our secret-derived NFT created (provenance.ts).
+ * The oracle made the pool: it holds the position our secret-derived NFT created (provenance.ts).
  * Only checkable until trading closes (closing removes that position); the registry entry was
  * written only after this passed at create, and closed markets take no trades.
  */
-async function requireOurPools(keys: MarketKeys): Promise<void> {
+async function requireOurPool(keys: MarketKeys): Promise<void> {
   const id = keys.question.toBase58();
   if (verifiedMakers.has(id)) return;
-  const nfts = positionNfts(marketSecret(), keys.questionId);
-  const owner = await poolOwnership(getChain().connection, keys, { yes: nfts.yes.publicKey, no: nfts.no.publicKey });
-  if (owner.yes !== "ours" || owner.no !== "ours") throw new UserError(NOT_OUR_POOLS);
+  const owner = await poolOwnership(getChain().connection, keys, positionNftFor(marketSecret(), keys.questionId).publicKey);
+  if (owner !== "ours") throw new UserError(NOT_OUR_POOL);
   verifiedMakers.add(id);
 }
 
-const NOT_OUR_POOLS = "This market's pools weren't made by memestream, so trading is off for it";
+const NOT_OUR_POOL = "This market's pool wasn't made by memestream, so trading is off for it";
 
 /**
- * The market's pools and question, checked: both pools exactly as we make them (verifyMarketPools),
- * the question resolvable only by our oracle, and while `open`, both pools made by our oracle.
+ * The market's pool and question, checked: the pool exactly as we make it (verifyMarketPool), the
+ * question resolvable only by our oracle, and while `open`, the pool made by our oracle.
  */
-async function loadVerified(keys: MarketKeys, open: boolean): Promise<{ pools: MarketPools; question: QuestionState }> {
+async function loadVerified(keys: MarketKeys, open: boolean): Promise<{ pool: MarketPool; question: QuestionState }> {
   const { connection } = getChain();
-  const [pools, question] = await Promise.all([loadMarketPools(connection, keys), fetchQuestion(connection, keys.question)]);
-  if (!pools || !question) throw new UserError(NO_MARKET);
+  const [pool, question] = await Promise.all([loadMarketPool(connection, keys), fetchQuestion(connection, keys.question)]);
+  if (!pool || !question) throw new UserError(NO_MARKET);
   if (!verifiedQuestions.has(keys.question.toBase58())) {
     if (!question.oracle.equals(keys.oracle)) throw new UserError("This market's question isn't memestream's, so trading is off for it");
     verifiedQuestions.add(keys.question.toBase58());
   }
-  verifyMarketPools(keys, pools);
-  if (open) await requireOurPools(keys);
-  return { pools, question };
+  verifyMarketPool(keys, pool);
+  if (open) await requireOurPool(keys);
+  return { pool, question };
 }
 
 /** Betting is open until the prediction's lockAt and while the question is unresolved; pool liquidity says nothing (anyone can add some). */
 const tradingOpen = (record: MarketRecord, question: QuestionState, now: number) => now < record.lockAt && !question.resolved;
 
-/** A side's price that a buy may take it to at most: past it, the pool's stock is nearly gone. */
-const MAX_BUY_PRICE = "0.99";
-/** Kept off the most a buy can take, for rounding and price moves before it lands. */
-const MAX_BUY_MARGIN_BPS = 200;
+/** A Q64.64 little-endian fee-per-liquidity counter from the pool account, as a BN. */
+const perLiquidity = (bytes: number[]) => new BN(Buffer.from(bytes).reverse());
 
-/** The most SOL a buy of `side` can spend now, fee included (0 when the side is at the top). */
-function maxBuyLamports(pools: MarketPools, side: Side): BN {
-  const { state } = pools[side];
-  const target = getSqrtPriceFromPrice(MAX_BUY_PRICE, OUTCOME_DECIMALS, OUTCOME_DECIMALS);
-  if (state.sqrtPrice.gte(target)) return new BN(0);
-  const net = getAmountBFromLiquidityDeltaForConcentratedLiquidity(state.sqrtPrice, target, state.liquidity, Rounding.Down);
-  return net.muln(10_000).divn(10_000 - MARKET_FEE_BPS).muln(10_000 - MAX_BUY_MARGIN_BPS).divn(10_000);
-}
-
-/** SOL traded in both pools so far: the 1% fee is taken in SOL on every trade, so fees / 1%. */
-function volumeLamports(pools: MarketPools): BN {
-  return SIDES.map((side) => pools[side].state.metrics)
-    .map((m) => m.totalLpBFee.add(m.totalProtocolBFee))
-    .reduce((a, b) => a.add(b), new BN(0))
-    .muln(10_000)
-    .divn(MARKET_FEE_BPS);
+/**
+ * Shares the pool has swapped out so far (each worth up to 1 SOL): the pool's fees per unit of
+ * liquidity, times its liquidity (all the oracle's while trading is open), give the LP's fees; with
+ * the protocol's cut added back, that is MARKET_FEE_BPS of every swap's output. The split half of a
+ * bet never touches the pool, so this undercounts SOL bet. 0 once trading is closed.
+ */
+function volumeLamports(pool: MarketPool): BN {
+  const { state } = pool;
+  const lpFees = state.liquidity.mul(perLiquidity(state.feeAPerLiquidity).add(perLiquidity(state.feeBPerLiquidity))).shrn(LIQUIDITY_SCALE);
+  const lpShare = 100 - state.poolFees.protocolFeePercent;
+  return lpShare > 0 ? lpFees.muln(100).divn(lpShare).muln(10_000).divn(MARKET_FEE_BPS) : new BN(0);
 }
 
 /** Token account amount (u64 @64), or 0 if the account doesn't exist. */
@@ -213,15 +195,14 @@ export async function walletHoldsShares(record: MarketRecord, wallet: string): P
 export async function getMarket(record: MarketRecord, wallet: string | null, now: number): Promise<MarketView> {
   return userFacing(async () => {
     const keys = keysOf(record);
-    const { pools, question } = await loadVerified(keys, now < record.lockAt);
+    const { pool, question } = await loadVerified(keys, now < record.lockAt);
     return {
-      ...marketOdds(pools),
+      ...marketOdds(pool),
       trading: tradingOpen(record, question, now),
       resolved: question.resolved,
       payoutNumerators: question.resolved ? question.numerators : null,
       lockAt: record.lockAt,
-      volumeSol: lamportsToSol(volumeLamports(pools)),
-      maxBuySol: { yes: lamportsToSol(maxBuyLamports(pools, "yes")), no: lamportsToSol(maxBuyLamports(pools, "no")) },
+      volumeSol: lamportsToSol(volumeLamports(pool)),
       position: wallet ? await positionOf(keys, publicKey(wallet, "wallet")) : null,
     };
   });
@@ -235,25 +216,35 @@ function orderOf(req: MarketQuoteRequest): MarketOrder {
   return { side: req.side, action: req.action, amount: req.action === "buy" ? solToLamports(req.amount) : parseUnits(req.amount, OUTCOME_DECIMALS) };
 }
 
-function previewOf(order: MarketOrder, quote: DammQuote): TradePreview {
+function previewOf(order: MarketOrder, quote: MarketQuote): MarketPreview {
   const [fmtIn, fmtOut] = order.action === "buy" ? [lamportsToSol, toTokens] : [toTokens, lamportsToSol];
-  return { spent: fmtIn(quote.spentAmount), received: fmtOut(quote.outputAmount), minimumReceived: fmtOut(quote.minimumAmountOut), partial: false };
+  const before = quote.probabilityBefore;
+  // A buy pays more per share than the price before it; a sell gets less.
+  const impact = order.action === "buy" ? quote.averagePrice / before - 1 : 1 - quote.averagePrice / before;
+  return {
+    spent: fmtIn(quote.spentAmount),
+    received: fmtOut(quote.outputAmount),
+    minimumReceived: fmtOut(quote.minimumAmountOut),
+    averagePrice: quote.averagePrice,
+    probabilityAfter: quote.probabilityAfter,
+    priceImpact: Math.max(0, impact),
+  };
 }
 
-/** The verified pools of a market that's still taking bets. */
-async function openPools(record: MarketRecord, now: number): Promise<{ keys: MarketKeys; pools: MarketPools }> {
+/** The verified pool of a market that's still taking bets. */
+async function openPool(record: MarketRecord, now: number): Promise<{ keys: MarketKeys; pool: MarketPool }> {
   const keys = keysOf(record);
   if (now >= record.lockAt) throw new UserError("Betting on this prediction is closed");
-  const { pools, question } = await loadVerified(keys, true);
+  const { pool, question } = await loadVerified(keys, true);
   if (!tradingOpen(record, question, now)) throw new UserError("Betting on this prediction is closed");
-  return { keys, pools };
+  return { keys, pool };
 }
 
-export async function previewMarketTrade(record: MarketRecord, req: MarketQuoteRequest, now: number): Promise<TradePreview> {
+export async function previewMarketTrade(record: MarketRecord, req: MarketQuoteRequest, now: number): Promise<MarketPreview> {
   return userFacing(async () => {
     const order = orderOf(req);
-    const { pools } = await openPools(record, now);
-    return previewOf(order, await quoteMarketTrade(pools, order, req.slippageBps));
+    const { pool } = await openPool(record, now);
+    return previewOf(order, quoteMarketTrade(pool, order, req.slippageBps));
   });
 }
 
@@ -266,12 +257,12 @@ function minimumSeen(order: MarketOrder, minReceived: string | undefined): BN | 
   }
 }
 
-export async function buildMarketTradeForWallet(record: MarketRecord, req: MarketTradeRequest, now: number): Promise<PreparedTx & { preview: TradePreview }> {
+export async function buildMarketTradeForWallet(record: MarketRecord, req: MarketTradeRequest, now: number): Promise<PreparedTx & { preview: MarketPreview }> {
   return userFacing(async () => {
     const order = orderOf(req);
     const trader = publicKey(req.wallet, "wallet");
-    const { pools } = await openPools(record, now);
-    const built = await prepareMarketTrade(getChain().connection, pools, trader, order, req.slippageBps, minimumSeen(order, req.minReceived));
+    const { keys, pool } = await openPool(record, now);
+    const built = await prepareMarketTrade(getChain().connection, keys, pool, trader, order, req.slippageBps, minimumSeen(order, req.minReceived));
     return { ...(await toPreparedTx(built)), preview: previewOf(order, built.quote) };
   });
 }
@@ -315,7 +306,8 @@ export class MarketUnavailableError extends Error {
   override name = "MarketUnavailableError";
 }
 
-export type CreateMarketRequest = MarketRef & { ticker: string; seedSolPerPool: string };
+/** `seedSol`: split into that many YES and NO, all deposited in the pool (it comes back at redemption). */
+export type CreateMarketRequest = MarketRef & { ticker: string; seedSol: string };
 export type CreatedMarket = { record: Omit<MarketRecord, "lockAt" | "source">; signatures: string[] };
 
 /**
@@ -330,13 +322,11 @@ export async function createMarket(req: CreateMarketRequest): Promise<CreatedMar
   if (!ticker) throw new UserError("Ticker: 1 to 10 letters or digits");
   const { connection } = getChain();
   const keys = marketKeys(connection, marketSecret(), publicKey(req.mint, "coin"), req.predictionId, oraclePublicKey());
-  const nfts = positionNfts(marketSecret(), keys.questionId);
-  const nftKeys = { yes: nfts.yes.publicKey, no: nfts.no.publicKey };
+  const nft = positionNftFor(marketSecret(), keys.questionId);
   // Never adopt a pool we didn't make (it can look like ours, even name our oracle as its creator).
-  const before = await poolOwnership(connection, keys, nftKeys);
-  if (SIDES.some((side) => before[side] === "theirs")) throw new MarketUnavailableError("Someone else made a pool at this market's address");
+  if ((await poolOwnership(connection, keys, nft.publicKey)) === "theirs") throw new MarketUnavailableError("Someone else made a pool at this market's address");
   const fresh = !(await fetchQuestion(connection, keys.question));
-  const signatures = await sendAllAsOracle(await buildCreateMarketTxs(connection, keys, solToLamports(req.seedSolPerPool), nfts));
+  const signatures = await sendAllAsOracle(await buildCreateMarketTxs(connection, keys, solToLamports(req.seedSol), nft));
   if (fresh && metadataOn()) {
     // Fits Metaplex's 32-character name: "$" + 10 + " #" + 9 + " YES".
     const names = (side: Side) => ({ name: `$${ticker} #${req.predictionId} ${side.toUpperCase()}`, symbol: side.toUpperCase(), uri: "" });
@@ -358,7 +348,7 @@ export async function createMarket(req: CreateMarketRequest): Promise<CreatedMar
     question: keys.question.toBase58(),
     vault: keys.vault.toBase58(),
     mints: { yes: keys.mints.yes.toBase58(), no: keys.mints.no.toBase58() },
-    pools: { yes: keys.pools.yes.toBase58(), no: keys.pools.no.toBase58() },
+    pool: keys.pool.toBase58(),
     signature: signatures.at(-1) ?? "",
   };
   return { record, signatures };
@@ -368,8 +358,8 @@ export async function createMarket(req: CreateMarketRequest): Promise<CreatedMar
 export async function closeMarketTrading(record: MarketRecord): Promise<string[]> {
   const keys = keysOf(record);
   const close = async () => {
-    const { pools } = await loadVerified(keys, false);
-    return sendAllAsOracle(await buildCloseTradingTxs(getChain().connection, keys, pools));
+    const { pool } = await loadVerified(keys, false);
+    return sendAllAsOracle(await buildCloseTradingTxs(getChain().connection, keys, pool));
   };
   try {
     return await close();

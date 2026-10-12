@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { Keypair } from "@solana/web3.js";
-import { isPredictionId, oddsFromPrices, payoutNumerators, priceFromSqrtPrice, questionIdFor, redeemLamports } from "./math";
+import { fpmmBuyAmount, fpmmSellAmount, isPredictionId, oddsFromPrices, payoutNumerators, priceFromSqrtPrice, questionIdFor, redeemLamports } from "./math";
 
 const coin = Keypair.generate().publicKey;
 const other = Keypair.generate().publicKey;
@@ -65,4 +65,24 @@ test("odds: prices scaled so the two sides sum to 1", () => {
   assert.ok(Math.abs(odds.probability.yes + odds.probability.no - 1) < 1e-12);
   assert.deepEqual(oddsFromPrices(0.5, 0.5).probability, { yes: 0.5, no: 0.5 });
   assert.throws(() => oddsFromPrices(0, 0), /zero/);
+});
+
+test("FPMM buy: shares grow with the bet, cost more than 1:1 only through price, and the fee rounds against the buyer", () => {
+  const b = BigInt(1_000_000_000); // 1 YES + 1 NO in the pool: 50/50
+  const one = fpmmBuyAmount(b, b, BigInt(100_000_000), 0);
+  // 0.1 at 50/50: 0.1 + (1 - 1/1.1) = 0.190909...
+  assert.equal(one, BigInt(190_909_090));
+  assert.ok(fpmmBuyAmount(b, b, BigInt(100_000_000), 30) < one, "a fee buys fewer shares");
+  assert.ok(fpmmBuyAmount(b, b, BigInt(10_000_000_000), 0) > BigInt(10_000_000_000), "any size fills: 10x the pool still buys more shares than SOL");
+});
+
+test("FPMM sell is the inverse of buy (no fee), and needs more shares with a fee", () => {
+  const [yes, no] = [BigInt(1_000_000_000), BigInt(1_000_000_000)];
+  const x = BigInt(100_000_000);
+  const bought = fpmmBuyAmount(yes, no, x, 0);
+  // After the buy the pool holds yes + x - bought YES and no + x NO; selling back to get x returns about what was bought.
+  const back = fpmmSellAmount(yes + x - bought, no + x, x, 0);
+  assert.ok(back - bought >= BigInt(0) && back - bought <= BigInt(2), `${back} vs ${bought}`);
+  assert.ok(fpmmSellAmount(yes, no, x, 30) > fpmmSellAmount(yes, no, x, 0));
+  assert.throws(() => fpmmSellAmount(yes, no, no, 0), /Not enough/);
 });

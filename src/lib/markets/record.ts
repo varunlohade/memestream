@@ -15,7 +15,8 @@ export type MarketRecord = {
   question: string;
   vault: string;
   mints: Record<Side, string>;
-  pools: Record<Side, string>;
+  /** The YES/NO pool. */
+  pool: string;
   /** The last create transaction the oracle sent ("" if every step was already on chain). */
   signature: string;
   /** Betting closes then (ms): trades are refused from that moment, whatever the pools hold. */
@@ -35,7 +36,18 @@ export type MarketView = MarketOdds & {
   payoutNumerators: number[] | null;
   lockAt: number;
   volumeSol: string;
-  /** The most SOL a buy of each side can spend right now (the pool's stock limit). */
-  maxBuySol: Record<Side, string>;
   position: MarketPosition | null;
+};
+
+/** /api/markets/preview: what a bet gets, at what average price, and where it leaves the odds. */
+export type MarketPreview = {
+  spent: string;
+  received: string;
+  minimumReceived: string;
+  /** SOL per share, on average. */
+  averagePrice: number;
+  /** The probability of the side traded, after the trade. */
+  probabilityAfter: number;
+  /** How much worse the average price is than the price before the trade (0.07 = 7%). */
+  priceImpact: number;
 };

@@ -1,11 +1,12 @@
 /**
- * Ending a market: the oracle closes trading (takes its liquidity out of both pools), resolves the
+ * Ending a market: the oracle closes trading (takes its liquidity out of the pool), resolves the
  * question, and then every holder — the oracle too, for the tokens its liquidity came back as —
  * redeems YES/NO for SOL.
  *
- * Closing trading: the oracle's position is each pool's only liquidity, so removing it leaves the
- * pools empty and every swap fails. From then on holders can't sell; they wait for the result and
- * redeem. Before resolution a holder of both sides can still merge YES + NO back into SOL (vault.ts).
+ * Closing trading: the oracle's position is the pool's liquidity, so removing it leaves the pool
+ * (nearly) empty. Anyone can add a little back, so the server never judges "open" from liquidity: it
+ * refuses bets from the prediction's lockAt (server/markets.ts). Before resolution a holder of both
+ * sides can still merge YES + NO back into SOL (vault.ts).
  */
 import { CpAmm } from "@meteora-ag/cp-amm-sdk";
 import { createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction, getAssociatedTokenAddressSync, NATIVE_MINT } from "@solana/spl-token";
@@ -15,7 +16,7 @@ import { InputError } from "../dbc/errors";
 import { built, type BuiltTx } from "../dbc/tx";
 import { lpPositionsOf } from "../damm/positions";
 import { type Outcome, payoutNumerators, type Side } from "./math";
-import type { MarketKeys, MarketPools } from "./pool";
+import type { MarketKeys, MarketPool } from "./pool";
 import { unwrapSolIx } from "./create";
 import { fetchQuestion, redeemIxs, resolveIx } from "./vault";
 
@@ -24,40 +25,38 @@ export const CLOSE_SLIPPAGE_BPS = 100;
 const atLeast = (amount: BN) => amount.muln(10_000 - CLOSE_SLIPPAGE_BPS).divn(10_000);
 
 /**
- * One transaction per pool that still has the oracle's liquidity: claims its fees, removes all
- * liquidity and closes the position (its rent comes back). The SOL side is unwrapped. Minimums come
- * from a fresh withdraw quote, less CLOSE_SLIPPAGE_BPS: a price pushed around between the quote and
- * the close makes the close fail (and the server tries again) rather than fill worse.
+ * One transaction per position the oracle still has in the market's pool: claims its fees, removes
+ * all liquidity and closes the position (its rent comes back). The oracle gets YES + NO back, which
+ * it redeems after resolution. Minimums come from a fresh withdraw quote, less CLOSE_SLIPPAGE_BPS: a
+ * price pushed around between the quote and the close makes the close fail (and the server tries
+ * again) rather than fill worse.
  */
-export async function buildCloseTradingTxs(connection: Connection, keys: MarketKeys, pools: MarketPools): Promise<BuiltTx[]> {
+export async function buildCloseTradingTxs(connection: Connection, keys: MarketKeys, pool: MarketPool): Promise<BuiltTx[]> {
   const cpAmm = new CpAmm(connection);
   const txs: BuiltTx[] = [];
-  for (const side of SIDES) {
-    const pool = pools[side];
-    for (const p of await lpPositionsOf(connection, pool.address, keys.oracle)) {
-      const quote = cpAmm.getWithdrawQuote({
-        liquidityDelta: p.positionState.unlockedLiquidity,
-        minSqrtPrice: pool.state.sqrtMinPrice,
-        maxSqrtPrice: pool.state.sqrtMaxPrice,
-        sqrtPrice: pool.state.sqrtPrice,
-        collectFeeMode: pool.state.collectFeeMode,
-        tokenAAmount: pool.state.tokenAAmount,
-        tokenBAmount: pool.state.tokenBAmount,
-        liquidity: pool.state.liquidity,
-      });
-      const tx = await cpAmm.removeAllLiquidityAndClosePosition({
-        owner: keys.oracle,
-        position: p.position,
-        positionNftAccount: p.positionNftAccount,
-        poolState: pool.state,
-        positionState: p.positionState,
-        tokenAAmountThreshold: atLeast(quote.outAmountA),
-        tokenBAmountThreshold: atLeast(quote.outAmountB),
-        vestings: [],
-        currentPoint: pool.currentPoint,
-      });
-      txs.push(built(tx, keys.oracle));
-    }
+  for (const p of await lpPositionsOf(connection, pool.address, keys.oracle)) {
+    const quote = cpAmm.getWithdrawQuote({
+      liquidityDelta: p.positionState.unlockedLiquidity,
+      minSqrtPrice: pool.state.sqrtMinPrice,
+      maxSqrtPrice: pool.state.sqrtMaxPrice,
+      sqrtPrice: pool.state.sqrtPrice,
+      collectFeeMode: pool.state.collectFeeMode,
+      tokenAAmount: pool.state.tokenAAmount,
+      tokenBAmount: pool.state.tokenBAmount,
+      liquidity: pool.state.liquidity,
+    });
+    const tx = await cpAmm.removeAllLiquidityAndClosePosition({
+      owner: keys.oracle,
+      position: p.position,
+      positionNftAccount: p.positionNftAccount,
+      poolState: pool.state,
+      positionState: p.positionState,
+      tokenAAmountThreshold: atLeast(quote.outAmountA),
+      tokenBAmountThreshold: atLeast(quote.outAmountB),
+      vestings: [],
+      currentPoint: pool.currentPoint,
+    });
+    txs.push(built(tx, keys.oracle));
   }
   return txs;
 }

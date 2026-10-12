@@ -28,7 +28,7 @@ function fakeMarkets() {
         question: `question-${id}`,
         vault: "vault",
         mints: { yes: "yes-mint", no: "no-mint" },
-        pools: { yes: "yes-pool", no: "no-pool" },
+        pool: "pool",
         signature: "sig",
       };
       return record;

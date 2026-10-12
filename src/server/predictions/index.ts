@@ -23,7 +23,7 @@ import { testSettings } from "./test-settings";
 
 export { marketsEnabled, predictionsEnabled } from "./flag";
 
-/** SOL on each pool's wSOL side when a market opens (the whole seed is ~2.6x this; it comes back at redemption). */
+/** SOL the oracle seeds a market with (split into YES + NO, all in the pool; it comes back at redemption). */
 const DEFAULT_SEED_SOL = "0.05";
 
 /** One oracle step at a time in this process: they share the oracle's wrapped-SOL account. */
@@ -44,12 +44,12 @@ const adminWallets = () =>
 /** The oracle's market steps, or null with MEMESTREAM_MARKETS off. */
 function marketDeps(): MarketDeps | null {
   if (!marketsEnabled()) return null;
-  const seedSolPerPool = process.env.MEMESTREAM_MARKET_SEED_SOL || DEFAULT_SEED_SOL;
+  const seedSol = process.env.MEMESTREAM_MARKET_SEED_SOL || DEFAULT_SEED_SOL;
   return {
     create: (mint, predictionId, ticker) =>
       oneAtATime(async () => {
         try {
-          return (await createMarket({ mint, predictionId, ticker, seedSolPerPool })).record;
+          return (await createMarket({ mint, predictionId, ticker, seedSol })).record;
         } catch (error) {
           throw error instanceof MarketUnavailableError ? new MarketUnavailable(error.message) : error;
         }

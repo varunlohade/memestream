@@ -1,41 +1,43 @@
 /**
- * Each market trades in two Meteora DAMM v2 pools: YES/wSOL and NO/wSOL (outcome = token A,
- * wSOL = token B, both 9 decimals). A pool's price is SOL per outcome token, which is the
- * market's probability for that side.
+ * Each market trades in ONE Meteora DAMM v2 pool of YES (token A) against NO (token B), both 9
+ * decimals, the way a Gnosis FPMM does: a bet splits SOL into YES + NO and swaps the side it doesn't
+ * want for the side it does (trade.ts), so any size fills and only the price moves.
  *
- * The pools are concentrated on prices 0.001–1 SOL: no one pays more than a token can ever redeem
- * for, and the seed liquidity goes further than over the full price range.
+ * The pool's price p is NO per YES; the market's probability of YES is p / (1 + p), and a share of
+ * YES costs that much SOL at the margin. The pool starts at p = 1 (50/50) on p = 0.001 to 1000, so
+ * its liquidity covers probabilities from about 0.1% to 99.9%.
  */
 import {
   ActivationType,
   BaseFeeMode,
   bpsToFeeNumerator,
-  getBaseFeeHandlerFromPodAlignedData,
   CollectFeeMode,
   deriveCustomizablePoolAddress,
   getAmountAFromLiquidityDelta,
+  getAmountBFromLiquidityDelta,
+  getBaseFeeHandlerFromPodAlignedData,
   getBaseFeeParams,
+  getLiquidityDeltaFromAmountA,
   getLiquidityDeltaFromAmountB,
   getSqrtPriceFromPrice,
   type PoolFeesParams,
   Rounding,
 } from "@meteora-ag/cp-amm-sdk";
-import { NATIVE_MINT } from "@solana/spl-token";
 import type { Connection, PublicKey } from "@solana/web3.js";
-import type BN from "bn.js";
+import BN from "bn.js";
 import { InputError } from "../dbc/errors";
 import { type DammSnapshot, loadDammSnapshot } from "../damm/pool";
-import { questionIdFor, type MarketOdds, oddsFromPrices, priceFromSqrtPrice, type Side } from "./math";
+import { type MarketOdds, oddsFromPrices, priceFromSqrtPrice, questionIdFor } from "./math";
 import { vaultKeys, type VaultKeys } from "./vault";
 
 export const OUTCOME_DECIMALS = 9;
 
-/** 1% swap fee, flat (no fee scheduler, no dynamic fee), paid in SOL to the market's LP (the server). */
-export const MARKET_FEE_BPS = 100;
+/** 0.3% swap fee, flat (no fee scheduler, no dynamic fee), in the token paid in, to the pool's LP (the oracle's seed). */
+export const MARKET_FEE_BPS = 30;
 const sqrtPrice = (price: string) => getSqrtPriceFromPrice(price, OUTCOME_DECIMALS, OUTCOME_DECIMALS);
-export const PRICE_RANGE = { min: sqrtPrice("0.001"), max: sqrtPrice("1"), start: sqrtPrice("0.5") };
-/** Fees in SOL only, on a fixed price range (concentrated liquidity). */
-export const COLLECT_FEE_MODE = CollectFeeMode.OnlyB;
+export const PRICE_RANGE = { min: sqrtPrice("0.001"), max: sqrtPrice("1000"), start: sqrtPrice("1") };
+/** Fees in the input token (YES or NO), on a fixed price range (concentrated liquidity). */
+export const COLLECT_FEE_MODE = CollectFeeMode.BothToken;
 export const ACTIVATION_TYPE = ActivationType.Timestamp;
 
 export function marketPoolFees(): PoolFeesParams {
@@ -51,78 +53,83 @@ export function marketPoolFees(): PoolFeesParams {
 }
 
 export type SeedPlan = {
-  /** Liquidity each pool starts with. */
+  /** The SOL split into YES + NO: `lamports` of each. */
+  lamports: BN;
+  /** The pool's starting liquidity, and the YES and NO it takes for it (each at most `lamports`). */
   liquidity: BN;
-  /** Outcome tokens each pool takes at 0.5: also the SOL to split into YES + NO. */
-  outcomeTokens: BN;
-  /** SOL each pool takes as its wSOL side. */
-  lamportsPerPool: BN;
+  yes: BN;
+  no: BN;
 };
 
-/**
- * Seeding with `lamportsPerPool` SOL on each pool's wSOL side at a 0.5 start price. On the 0.001–1
- * range that needs ~0.61 outcome tokens per SOL, so the whole seed costs ~2.61× `lamportsPerPool`.
- */
-export function seedPlan(lamportsPerPool: BN): SeedPlan {
-  const liquidity = getLiquidityDeltaFromAmountB(lamportsPerPool, PRICE_RANGE.min, PRICE_RANGE.start, COLLECT_FEE_MODE);
-  const outcomeTokens = getAmountAFromLiquidityDelta(PRICE_RANGE.start, PRICE_RANGE.max, liquidity, Rounding.Up, COLLECT_FEE_MODE);
-  return { liquidity, outcomeTokens, lamportsPerPool };
+/** Seeding with S SOL: split into S YES + S NO, both deposited at 1:1 (50/50). Any rounding dust stays with the oracle. */
+export function seedPlan(lamports: BN): SeedPlan {
+  const { min, max, start } = PRICE_RANGE;
+  const liquidity = BN.min(
+    getLiquidityDeltaFromAmountA(lamports, start, max, COLLECT_FEE_MODE),
+    getLiquidityDeltaFromAmountB(lamports, min, start, COLLECT_FEE_MODE),
+  );
+  const yes = getAmountAFromLiquidityDelta(start, max, liquidity, Rounding.Up, COLLECT_FEE_MODE);
+  const no = getAmountBFromLiquidityDelta(min, start, liquidity, Rounding.Up, COLLECT_FEE_MODE);
+  return { lamports, liquidity, yes, no };
 }
 
 export type MarketKeys = VaultKeys & {
   oracle: PublicKey;
   questionId: Uint8Array;
-  pools: Record<Side, PublicKey>;
+  /** The YES/NO pool. */
+  pool: PublicKey;
 };
 
 /** Every address of a market, from its question id and oracle: no lookups. */
 export function marketKeysFromId(connection: Connection, questionId: Uint8Array, oracle: PublicKey): MarketKeys {
   const vault = vaultKeys(connection, questionId, oracle);
-  const pool = (side: Side) => deriveCustomizablePoolAddress(vault.mints[side], NATIVE_MINT);
-  return { ...vault, oracle, questionId, pools: { yes: pool("yes"), no: pool("no") } };
+  return { ...vault, oracle, questionId, pool: deriveCustomizablePoolAddress(vault.mints.yes, vault.mints.no) };
 }
 
 /** A coin prediction's market; `secret` is the server's market secret (see questionIdFor). */
 export const marketKeys = (connection: Connection, secret: string, coinMint: PublicKey, predictionId: string, oracle: PublicKey): MarketKeys =>
   marketKeysFromId(connection, questionIdFor(secret, coinMint, predictionId), oracle);
 
-export type MarketPools = Record<Side, DammSnapshot>;
+export type MarketPool = DammSnapshot;
 
-/** Both pools, or null if the market has no pools (not created, or a pool is missing). */
-export async function loadMarketPools(connection: Connection, keys: MarketKeys): Promise<MarketPools | null> {
-  const [yes, no] = await Promise.all([loadDammSnapshot(connection, keys.pools.yes), loadDammSnapshot(connection, keys.pools.no)]);
-  if (yes && no) return { yes, no };
+/** The market's pool, or null if it has none (not created yet). */
+export async function loadMarketPool(connection: Connection, keys: MarketKeys): Promise<MarketPool | null> {
+  const pool = await loadDammSnapshot(connection, keys.pool);
+  if (pool) return pool;
   // loadDammSnapshot reads a failed RPC call (a rate limit) as "no pool": ask once more, so an RPC
   // error surfaces as one (busy, try again) rather than as "no market".
-  const infos = await connection.getMultipleAccountsInfo([keys.pools.yes, keys.pools.no]);
-  if (infos[0] && infos[1]) throw new Error("Couldn't read the market's pools: RPC rate limit or outage");
+  if (await connection.getAccountInfo(keys.pool)) throw new Error("Couldn't read the market's pool: RPC rate limit or outage");
   return null;
 }
 
-/** Price and probability per side, from the pools' current prices. */
-export function marketOdds(pools: MarketPools): MarketOdds {
-  const price = (side: Side) => priceFromSqrtPrice(BigInt(pools[side].state.sqrtPrice.toString()));
-  return oddsFromPrices(price("yes"), price("no"));
+/** The probability of YES at a pool sqrt price: p / (1 + p), with p = NO per YES. */
+export function yesProbability(sqrtPriceQ64: BN): number {
+  const p = priceFromSqrtPrice(BigInt(sqrtPriceQ64.toString()));
+  return p / (1 + p);
 }
 
-const NOT_OURS = "This market's pools don't match memestream's, so trading is off for it";
+/** The pool's spot odds: what a share of each side costs at the margin, summing to 1. */
+export function marketOdds(pool: MarketPool): MarketOdds {
+  const yes = yesProbability(pool.state.sqrtPrice);
+  return oddsFromPrices(yes, 1 - yes);
+}
+
+const NOT_OURS = "This market's pool doesn't match memestream's, so trading is off for it";
 
 /**
  * A pool at a market's address is ours only if it is exactly what buildCreateMarketTxs makes: anyone
  * can create a pool at that address first, with the tokens the other way round, another range or
- * fee. Token A must be the outcome and B wSOL (the trade builders assume it), on our price range,
- * with our flat 1% fee, no dynamic fee, fees collected in SOL, and already active. This says nothing
- * about who made the pool: provenance.ts checks that.
+ * fee. Token A must be YES and B NO (the trade builders assume it), on our price range, with our
+ * flat fee, no dynamic fee, our fee mode, and already active. This says nothing about who made the
+ * pool: provenance.ts checks that.
  */
-export function verifyMarketPools(keys: MarketKeys, pools: MarketPools): void {
-  for (const side of ["yes", "no"] as const) {
-    const { state, address, currentPoint } = pools[side];
-    if (!address.equals(keys.pools[side]) || state.activationPoint.gt(currentPoint)) throw new InputError(NOT_OURS);
-    if (!state.tokenAMint.equals(keys.mints[side]) || !state.tokenBMint.equals(NATIVE_MINT)) throw new InputError(NOT_OURS);
-    if (!state.sqrtMinPrice.eq(PRICE_RANGE.min) || !state.sqrtMaxPrice.eq(PRICE_RANGE.max)) throw new InputError(NOT_OURS);
-    if (state.collectFeeMode !== COLLECT_FEE_MODE || state.poolFees.dynamicFee.initialized !== 0) throw new InputError(NOT_OURS);
-    const fee = getBaseFeeHandlerFromPodAlignedData(state.poolFees.baseFee.baseFeeInfo.data);
-    const ours = bpsToFeeNumerator(MARKET_FEE_BPS);
-    if (!fee.getMinFeeNumerator().eq(ours) || !fee.getMaxFeeNumerator().eq(ours)) throw new InputError(NOT_OURS);
-  }
+export function verifyMarketPool(keys: MarketKeys, pool: MarketPool): void {
+  const { state, address, currentPoint } = pool;
+  if (!address.equals(keys.pool) || state.activationPoint.gt(currentPoint)) throw new InputError(NOT_OURS);
+  if (!state.tokenAMint.equals(keys.mints.yes) || !state.tokenBMint.equals(keys.mints.no)) throw new InputError(NOT_OURS);
+  if (!state.sqrtMinPrice.eq(PRICE_RANGE.min) || !state.sqrtMaxPrice.eq(PRICE_RANGE.max)) throw new InputError(NOT_OURS);
+  if (state.collectFeeMode !== COLLECT_FEE_MODE || state.poolFees.dynamicFee.initialized !== 0) throw new InputError(NOT_OURS);
+  const fee = getBaseFeeHandlerFromPodAlignedData(state.poolFees.baseFee.baseFeeInfo.data);
+  const ours = bpsToFeeNumerator(MARKET_FEE_BPS);
+  if (!fee.getMinFeeNumerator().eq(ours) || !fee.getMaxFeeNumerator().eq(ours)) throw new InputError(NOT_OURS);
 }

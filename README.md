@@ -108,6 +108,10 @@ app asks you to check your wallet history and offers "I checked, unlock". Rules 
   transactions can't land once their blockhash expires, so this only affects wallets that swap in
   a fresh one; the app tells you to reject any open popup first.
 
+- Prediction markets (MEMESTREAM_MARKETS) call MetaDAO's deployed conditional vault program
+  (licensed BSL 1.1) and Meteora DAMM v2; none of MetaDAO's source is copied into this repo. The
+  market maths follows the Gnosis FPMM design, for two outcomes (YES/NO) only.
+
 The local chain runs offline with a real-time clock (a block every 400 ms), so the launch fee
 falls to its 1% base about a minute after launch, as on mainnet.
 

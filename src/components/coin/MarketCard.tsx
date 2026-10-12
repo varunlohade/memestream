@@ -9,16 +9,18 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
-import { DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS, type TradePreview } from "@/lib/api-types";
+import { DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
 import { compact, fractionOf, minusReserve } from "@/lib/format";
 import { postJson } from "@/lib/http";
-import type { MarketView } from "@/lib/markets/record";
+import type { MarketPreview, MarketView } from "@/lib/markets/record";
 
 type Side = "yes" | "no";
 type Action = "buy" | "sell";
 
 const ODDS_POLL_MS = 5_000;
 const PREVIEW_DELAY_MS = 400;
+/** Price impact above this is shown in the amount box. */
+const SHOW_IMPACT_ABOVE = 0.05;
 /** SOL kept back on "max" buys for network fees and the new token accounts' rent. */
 const SOL_RESERVE = "0.01";
 const BUY_CHIPS = ["0.05", "0.1"];
@@ -221,13 +223,13 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
   // Quote as you type (debounced); the server refuses a bet bigger than the pool's stock with its message.
   // Each answer carries the inputs it was for, so a stale one never shows.
   const key = `${action}|${amount}`;
-  const [quote, setQuote] = useState<{ key: string; preview: TradePreview | null; error: string | null } | null>(null);
+  const [quote, setQuote] = useState<{ key: string; preview: MarketPreview | null; error: string | null } | null>(null);
   useEffect(() => {
     if (!(Number(amount) > 0)) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const preview = await postJson<TradePreview>("/api/markets/preview", { mint, predictionId, side, action, amount }, controller.signal);
+        const preview = await postJson<MarketPreview>("/api/markets/preview", { mint, predictionId, side, action, amount }, controller.signal);
         setQuote({ key, preview, error: null });
       } catch (e) {
         if (!controller.signal.aborted) setQuote({ key, preview: null, error: (e as Error).message });
@@ -242,9 +244,8 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
   const preview = fresh ? quote.preview : null;
   const error = sendError ?? (fresh ? quote.error : null);
 
-  const sol = market.position?.sol ?? "0";
-  const affordable = minusReserve(sol, SOL_RESERVE, SOL_DECIMALS);
-  const maxBuy = Number(affordable) < Number(market.maxBuySol[side]) ? affordable : market.maxBuySol[side];
+  // Any size fills (shares are minted on demand); "max" is just what the wallet can spend.
+  const maxBuy = minusReserve(market.position?.sol ?? "0", SOL_RESERVE, SOL_DECIMALS);
   const chips: { label: string; amount: string }[] =
     action === "buy"
       ? [...BUY_CHIPS.map((c) => ({ label: c, amount: c })), { label: "max", amount: maxBuy }]
@@ -308,6 +309,19 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
           {preview ? (action === "buy" ? `${shares(preview.received)} ${side.toUpperCase()} shares` : `${compact(Number(preview.received))} SOL`) : "–"}
         </span>
       </div>
+      {preview && (
+        <div className="mk-kv num mute pm-small">
+          <span>Avg price {cents(preview.averagePrice)}</span>
+          <span>
+            {LABEL[side]} {percent(preview.probabilityAfter)} after
+          </span>
+        </div>
+      )}
+      {preview && preview.priceImpact > SHOW_IMPACT_ABOVE && (
+        <p className="notice pm-small num" role="status">
+          Price impact {(preview.priceImpact * 100).toFixed(1)}%: this bet moves the price a lot.
+        </p>
+      )}
       {error && (
         <p className="notice err" role="alert">
           {error}

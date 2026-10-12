@@ -169,13 +169,17 @@ async function run() {
 
   const odds = (wallet: Keypair | null) => ok<MarketView>("POST", "/api/markets/odds", { body: { mint, predictionId: id, wallet: wallet?.publicKey.toBase58() } });
   const before = await odds(viewer);
-  check("odds: a fresh market is 50/50 and taking bets", before.trading && Math.abs(before.probability.yes - 0.5) < 1e-6, `yes ${before.probability.yes}, max buy ${before.maxBuySol.yes} SOL`);
+  check("odds: a fresh market is 50/50 and taking bets", before.trading && Math.abs(before.probability.yes - 0.5) < 1e-6, `yes ${before.probability.yes}`);
   shot("open", mint, viewer.publicKey.toBase58());
 
   const streamerBet = await http("POST", "/api/tx/market", { body: { wallet: creator.publicKey.toBase58(), mint, predictionId: id, side: "no", action: "buy", amount: BET_SOL } });
   check("bet: the streamer can't bet on their own market", streamerBet.status === 400, `${streamerBet.status} "${String(streamerBet.json.error)}"`);
-  const tooBig = await http("POST", "/api/markets/preview", { body: { mint, predictionId: id, side: "yes", action: "buy", amount: "0.1" } });
-  check("bet: a bet past the pool's stock is refused with its message", tooBig.status === 400 && /Too big/.test(String(tooBig.json.error)), `"${String(tooBig.json.error)}"`);
+  const big = await http("POST", "/api/markets/preview", { body: { mint, predictionId: id, side: "yes", action: "buy", amount: "0.1" } });
+  check(
+    "bet: a bet twice the seed fills (only the price moves)",
+    big.status === 200 && Number(big.json.received) > 0.1 && Number(big.json.probabilityAfter) > 0.6,
+    `${big.status} gets ${String(big.json.received)} YES, YES ${Number(big.json.probabilityAfter).toFixed(3)} after, impact ${(Number(big.json.priceImpact) * 100).toFixed(1)}%`,
+  );
   const preview = await ok<{ received: string; minimumReceived: string }>("POST", "/api/markets/preview", { body: { mint, predictionId: id, side: "yes", action: "buy", amount: BET_SOL } });
   const bought = await sendViaApp("market", viewer, { mint, predictionId: id, side: "yes", action: "buy", amount: BET_SOL, minReceived: preview.minimumReceived });
   log(`bet: viewer bought YES for ${BET_SOL} SOL  ${bought.sig}`);
