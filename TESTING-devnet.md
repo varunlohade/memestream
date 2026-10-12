@@ -1,6 +1,7 @@
 # memestream: devnet test list for Boss man
 
 Site: https://memestream-iota.vercel.app (devnet, test money only)
+Test journeys with pictures (private): https://claude.ai/artifact/597JtzSejT5K5J3FVCvNjG
 Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 
 ## 0. Set up (5 min)
@@ -19,17 +20,18 @@ Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 - [ ] Switch Phantom to **Viewer**, reload the coin page.
 - [ ] The trade box shows "Launch fee now X%, drops to 1% in Ns", counting down.
 - [ ] Type 0.01 SOL. "You get about" shows a number. (Don't buy yet unless you want to see the high fee.)
+- [ ] Try the amount chips, the SOL/coin unit switch and max slippage (0.5, 1, 3 or 5%).
 
 ## 3. Buy and sell (Viewer, after the first minute)
 - [ ] The fee line is gone. Buy 0.02 SOL.
 - [ ] Phantom asks once. Approve. You see "Bought <TICKER>" and your holdings go up.
-- [ ] While a trade runs, click Buy again: nothing happens. Reload the page: it still waits, then says it went through. (No double charge.)
+- [ ] The result shows a Solscan link. Open it: the trade is on devnet.
 - [ ] Sell tab → 50% → Sell. You see "Sold <TICKER>" and SOL comes back (minus about 1% fee each way).
 
 ## 4. Graduate (Viewer)
-- [ ] Buy until the XP bar reaches 0.1 / 0.1 SOL (one 0.15 buy fills it; the extra stays in your wallet).
+- [ ] Buy until the curve progress reaches 0.1 SOL (one 0.15 buy fills it; the extra stays in your wallet).
 - [ ] The page says "The curve is full." Press "Graduate to Meteora". Approve.
-- [ ] You see "Graduated to Meteora", the XP bar says "Graduated", and the page says "Graduated: trades in its Meteora pool."
+- [ ] The coin shows as graduated and now trades in its Meteora pool.
 
 ## 5. After graduation (Viewer)
 - [ ] Buy 0.01 SOL again: it trades in the Meteora pool.
@@ -43,12 +45,11 @@ Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 
 ## 7. Overlay and short link
 - [ ] Open https://memestream-iota.vercel.app/YOURTICKER: it goes to your coin.
-- [ ] Open /overlay/<your coin address>?layout=a (also try b and c): see-through panel with price and XP bar; shows "Graduated" after step 4.
+- [ ] Open /overlay/<your coin address>?layout=a (also try b and c): see-through panel with price and graduation bar; shows "Graduated" after step 4.
 - [ ] Optional: add that URL in OBS as a Browser Source (1920×1080).
 
 ## 8. Quick break tests
-- [ ] Reject a trade in Phantom: the page unlocks right away, nothing spent.
-- [ ] Open the coin in 2 tabs, buy in one: the other says a trade is in progress.
+- [ ] Reject a trade in Phantom: nothing is spent, and you can trade again at once.
 - [ ] Open /coin/ with a random address: you get "Not found".
 
 If anything looks wrong, note the step number and what you saw, and send it to steve.
@@ -79,3 +80,28 @@ npm run e2e:predictions:local
 - [ ] After the minute, the streamer resolves. The viewer's points go up on a win, or the stake is gone on a loss.
 - [ ] Viewer: flag the result. It shows as flagged.
 - [ ] Launch a second question and resolve it as Cancel. The viewer gets the stake back.
+
+## 10. Test prediction markets (devnet SOL)
+
+Needs `MEMESTREAM_MARKETS=1` on the server and an admin wallet in `MEMESTREAM_ADMIN_WALLETS`.
+
+### a. Automated
+- `scripts/markets-e2e.mts` plays one full round against a running server: launch a question, the
+  market opens, a viewer buys YES and sells half back, trading closes at the lock, the streamer
+  proposes YES, a holder challenges with a bond, an admin decides, the viewer redeems. The file's
+  header lists the env it needs. Run the server with `MEMESTREAM_MARKET_CHALLENGE_MIN=3` (test runs
+  only) so the challenge window is short.
+
+### b. By hand on the live site (3 wallets: Streamer, Viewer, Admin)
+- [ ] **Streamer:** launch a question (as in 9b). The question shows a market card with YES and NO odds.
+- [ ] **Viewer:** buy YES with 0.01 devnet SOL. Phantom asks once. Your position line shows YES shares.
+- [ ] **Viewer:** buy a bigger amount: it still fills (no bet cap); the odds move.
+- [ ] **Viewer:** sell some shares back. SOL returns, minus the 0.3% pool fee and price moves.
+- [ ] **Streamer:** try to buy: it says you can't bet on your own coin.
+- [ ] After the lock, trading closes. **Streamer:** resolve YES. The card shows "Proposed: YES" and a
+      2-hour countdown.
+- [ ] **Viewer:** press Challenge, give a reason (and a link if you have one). It costs 100 points.
+- [ ] **Streamer:** the Challenge button doesn't appear for your own coin.
+- [ ] **Admin:** open the coin. Pick Final YES, Final NO or Void.
+- [ ] **Viewer:** press Redeem. A winning share pays 1 SOL; a void pays 0.5 SOL per share.
+- [ ] Every market trade shows a Solscan link.
