@@ -19,6 +19,8 @@ import { readKeypair, readOrCreateKeypair } from "./keys";
 
 const BASE_URL = (process.env.BASE_URL ?? "https://memestream-iota.vercel.app").replace(/\/$/, "");
 const USERS = ["alice", "bob", "carol"] as const;
+/** Streamers: mapped to existing devnet keys, never created or copied. */
+const CREATORS: Record<string, string> = { dave: ".keys/devnet-creator.json" };
 const FUND_CAP_SOL = 0.5;
 const SESSIONS = ".keys/sim-sessions.json";
 const FUNDED = ".keys/sim-funded.json";
@@ -30,7 +32,9 @@ const USAGE = `usage: npx tsx scripts/sim.mts <command>
   signin <name> | suggest <name> <TICKER> "<question>" | upvote <name> <TICKER> <questionId>
   bet <name> <TICKER> <marketId> yes|no <sol> | sellbet <name> <TICKER> <marketId> yes|no <shares>
   challenge <name> <TICKER> <marketId> "<reason>" | redeem <name> <TICKER> <marketId> | markets <TICKER>
-  names: ${USERS.join(", ")}`;
+  streamer: golive dave "<name>" <TICKER> <streamUrl> | launch dave <TICKER> "<question>"|<queueId>
+            resolve dave <TICKER> <predictionId> yes|no|cancel
+  names: ${USERS.join(", ")}; streamer: ${Object.keys(CREATORS).join(", ")}`;
 
 class Stop extends Error {}
 const solscan = (sig: string) => `https://solscan.io/tx/${sig}?cluster=devnet`;
@@ -38,6 +42,10 @@ const readJson = <T,>(path: string, empty: T): T => (existsSync(path) ? (JSON.pa
 const writeJson = (path: string, value: unknown) => writeFileSync(path, JSON.stringify(value, null, 2), { mode: 0o600 });
 
 function user(name: string | undefined): { name: string; keypair: Keypair; wallet: string } {
+  if (name && CREATORS[name]) {
+    const keypair = readKeypair(CREATORS[name]);
+    return { name, keypair, wallet: keypair.publicKey.toBase58() };
+  }
   if (!USERS.includes(name as (typeof USERS)[number])) throw new Stop(`Unknown user "${name}". Use ${USERS.join(", ")}.`);
   const keypair = readOrCreateKeypair(`.keys/sim-${name}.json`);
   return { name: name!, keypair, wallet: keypair.publicKey.toBase58() };
@@ -73,8 +81,8 @@ async function http(method: "GET" | "POST", path: string, opts: { token?: string
 // Transactions: the server builds, we sign locally and send, then poll the server's status route
 // ---------------------------------------------------------------------------------------------
 
-async function sendViaApp(connection: Connection, action: "trade" | "market" | "market-redeem", u: ReturnType<typeof user>, body: Record<string, unknown>) {
-  const prepared = (await http("POST", `/api/tx/${action}`, { body: { wallet: u.wallet, ...body } })) as { transaction: string; blockhash: string; intent?: string };
+async function sendViaApp(connection: Connection, action: "launch" | "trade" | "market" | "market-redeem", u: ReturnType<typeof user>, body: Record<string, unknown>) {
+  const prepared = (await http("POST", `/api/tx/${action}`, { body: { wallet: u.wallet, ...body } })) as { transaction: string; blockhash: string; intent?: string; mint?: string };
   const bytes = Buffer.from(prepared.transaction, "base64");
   let raw: Uint8Array;
   try {
@@ -92,7 +100,7 @@ async function sendViaApp(connection: Connection, action: "trade" | "market" | "
   while (Date.now() < deadline) {
     await sleep(3_000);
     const s = (await http("GET", `/api/tx/status?${query}`)) as { status: string; error?: string };
-    if (s.status === "confirmed") return sig;
+    if (s.status === "confirmed") return { sig, mint: prepared.mint };
     if (s.status === "failed") throw new Stop(`failed: ${s.error ?? ""} ${solscan(sig)}`);
   }
   throw new Stop(`no answer in 2 min ${solscan(sig)}`);
@@ -130,6 +138,11 @@ function signedMessage(keypair: Keypair) {
     format: "jwk",
   });
   return { message, signature: bs58.encode(sign(null, Buffer.from(message), key)) };
+}
+
+function streamer(name: string | undefined) {
+  if (!name || !CREATORS[name]) throw new Stop(`Only a streamer can do that. Use ${Object.keys(CREATORS).join(", ")}.`);
+  return user(name);
 }
 
 type Session = { token: string; expiresAt: number };
@@ -227,7 +240,7 @@ async function main(args: string[]): Promise<string> {
         amount = fractionOf(have, n, COIN_DECIMALS);
         if (!(Number(amount) > 0)) throw new Stop(`${u.name} holds no ${coin.symbol}.`);
       }
-      const sig = await sendViaApp(connection, "trade", u, { mint: coin.mint, side: command, amount });
+      const { sig } = await sendViaApp(connection, "trade", u, { mint: coin.mint, side: command, amount });
       return `${command} ${u.name} ${coin.symbol} ${amount}${command === "buy" ? " SOL" : " coins"} confirmed ${solscan(sig)}`;
     }
 
@@ -268,15 +281,44 @@ async function main(args: string[]): Promise<string> {
       if (side !== "yes" && side !== "no") throw new Stop("Side must be yes or no.");
       if (!(Number(amount) > 0)) throw new Stop("Give a positive amount.");
       const action = command === "bet" ? "buy" : "sell";
-      const sig = await sendViaApp(connection, "market", u, { mint: coin.mint, predictionId, side, action, amount });
+      const { sig } = await sendViaApp(connection, "market", u, { mint: coin.mint, predictionId, side, action, amount });
       return `${command} ${u.name} ${coin.symbol}#${predictionId} ${side.toUpperCase()} ${amount}${action === "buy" ? " SOL" : " shares"} confirmed ${solscan(sig)}`;
     }
 
     case "redeem": {
       const u = user(rest[0]);
       const coin = await resolveMint(rest[1]);
-      const sig = await sendViaApp(connection, "market-redeem", u, { mint: coin.mint, predictionId: rest[2] });
+      const { sig } = await sendViaApp(connection, "market-redeem", u, { mint: coin.mint, predictionId: rest[2] });
       return `redeem ${u.name} ${coin.symbol}#${rest[2]} confirmed ${solscan(sig)}`;
+    }
+
+    case "golive": {
+      const u = streamer(rest[0]);
+      const [, name, symbol, streamUrl] = rest;
+      if (!name || !symbol || !streamUrl) throw new Stop('Usage: golive dave "<name>" <TICKER> <streamUrl>');
+      const { sig, mint } = await sendViaApp(connection, "launch", u, { name, symbol, streamUrl });
+      return `golive ${u.name} $${symbol.toUpperCase()} mint ${mint} confirmed ${solscan(sig)}`;
+    }
+
+    case "launch": {
+      const u = streamer(rest[0]);
+      const coin = await resolveMint(rest[1]);
+      const what = rest[2] ?? "";
+      if (!what) throw new Stop('Give a question in quotes, or a queue id.');
+      const fromQueue = /^[1-9][0-9]*$/.test(what);
+      const v = (await act(u, coin.mint, fromQueue ? { kind: "launch", id: what } : { kind: "launch", text: what })) as unknown as View;
+      const hit = (v.live ?? []).find((p) => (fromQueue ? p.id === what : p.text === what));
+      const lock = hit?.lockAt ? `, betting closes ${new Date(hit.lockAt).toISOString()}` : "";
+      return `launch ${u.name} ${coin.symbol} ok${hit ? ` id ${hit.id} market ${hit.market ?? "none"}${lock}` : ""} (no transaction)`;
+    }
+
+    case "resolve": {
+      const u = streamer(rest[0]);
+      const coin = await resolveMint(rest[1]);
+      const outcome = rest[3];
+      if (outcome !== "yes" && outcome !== "no" && outcome !== "cancel") throw new Stop("Outcome must be yes, no or cancel.");
+      await act(u, coin.mint, { kind: "resolve", id: rest[2], outcome });
+      return `resolve ${u.name} ${coin.symbol} #${rest[2]} ${outcome.toUpperCase()} ok (no transaction)`;
     }
 
     case "markets": {
