@@ -2,7 +2,7 @@
 /** Small React wrappers around the canvas pixel art in art.ts. */
 import { type CSSProperties, useEffect, useRef, useSyncExternalStore } from "react";
 import { noSubscription } from "@/components/no-subscription";
-import { drawScene, drawSprite, drawStepChart, seedFrom, type SpriteName, type TextureKind, textureUrl } from "./art";
+import { drawScene, drawSprite, seedFrom, type SpriteName, type TextureKind, textureUrl } from "./art";
 
 export function Sprite({ name, className }: { name: SpriteName; className?: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -19,14 +19,6 @@ export function Scene({ seedKey, width, height, style }: { seedKey: string; widt
     if (ref.current) drawScene(ref.current, seedFrom(seedKey));
   }, [seedKey]);
   return <canvas ref={ref} width={width} height={height} style={{ display: "block", width: "100%", height: "100%", ...style }} aria-hidden />;
-}
-
-export function StepChart({ values, color = "#80FF20" }: { values: number[]; color?: string }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    if (ref.current) drawStepChart(ref.current, values, color);
-  }, [values, color]);
-  return <canvas ref={ref} width={132} height={40} style={{ display: "block", width: "100%", height: "100%" }} aria-hidden />;
 }
 
 /** Textures are drawn once per kind+seed and reused; they never change. */

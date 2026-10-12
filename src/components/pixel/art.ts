@@ -99,28 +99,3 @@ export function drawScene(canvas: HTMLCanvasElement, seed: number) {
     ctx.fillRect(Math.floor(random() * w), Math.floor(random() * h), size, Math.max(1, Math.round(size * (0.5 + random()))));
   }
 }
-
-/** Pixel stair-step line chart of `values` (oldest first). */
-export function drawStepChart(canvas: HTMLCanvasElement, values: number[], color: string) {
-  const { width: w, height: h } = canvas;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.clearRect(0, 0, w, h);
-  if (values.length < 2) return;
-  const max = Math.max(...values);
-  const min = Math.min(...values);
-  const span = max - min || 1;
-  const step = w / (values.length - 1);
-  ctx.fillStyle = color;
-  // A connected stair line: flat until the next trade, then a vertical step to its price.
-  let previous: { x: number; y: number } | null = null;
-  values.forEach((value, i) => {
-    const x = Math.min(Math.round(i * step), w - 2);
-    const y = Math.round(h - 3 - ((value - min) / span) * (h - 6));
-    if (previous) {
-      ctx.fillRect(previous.x, previous.y, x - previous.x + 2, 2);
-      ctx.fillRect(x, Math.min(previous.y, y), 2, Math.abs(y - previous.y) + 2);
-    }
-    previous = { x, y };
-  });
-}
