@@ -184,7 +184,7 @@ for (const [name, make] of STORES) {
     assert.deepEqual(await service.beat(STREAMER, "full"), { accepted: false });
   });
 
-  test(`${name}: the whole flow: holders suggest and upvote; the crowd launches only while the streamer is here`, async () => {
+  test(`${name}: the whole flow: holders suggest and upvote; only the streamer launches, never the crowd`, async () => {
     const { service, clock, fund, balance, nonHolders, streamerHere } = setup(make);
     const viewers = ["v1", "v2", "v3", "v4", "v5", "v6"];
     for (const v of viewers) await fund(v, 1_000, true);
@@ -207,6 +207,10 @@ for (const [name, make] of STORES) {
 
     await streamerHere();
     clock.t += 2_000; // past the signed-out view's 1.5 s cache
+    view = await service.view(COIN, null);
+    assert.deepEqual(view.live, [], "streamer here, 3 upvotes: still waits (no crowd picks)");
+    await service.act(COIN, STREAMER, { kind: "launch", id: "1" });
+    clock.t += 2_000;
     view = await service.view(COIN, null);
     assert.equal(view.live[0]?.text, "Will the streamer eat a banana?");
     const id = view.live[0].id;

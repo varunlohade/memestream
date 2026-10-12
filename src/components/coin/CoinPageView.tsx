@@ -222,15 +222,10 @@ export function CoinPageView({
   mint,
   initial,
   predictions = false,
-  network = { label: "Devnet", test: true },
-  markets = false,
 }: {
   mint: string;
   initial: CoinDetail;
   predictions?: boolean;
-  /** The server's network label, and whether its SOL is test money (not mainnet). */
-  network?: { label: string; test: boolean };
-  markets?: boolean;
 }) {
   const { address } = useWallet();
   const { data, refresh } = useCoin(mint, address, initial);
@@ -311,7 +306,7 @@ export function CoinPageView({
           {/* Kept mounted while hidden, so its sign-in and open prediction survive a tab switch. */}
           {predictions && (
             <div hidden={tab !== "predictions"}>
-              <Predictions mint={coin.mint} symbol={coin.symbol} streamUrl={coin.streamUrl} network={network} markets={markets} />
+              <Predictions mint={coin.mint} symbol={coin.symbol} streamUrl={coin.streamUrl} />
             </div>
           )}
           {tab === "holders" && (

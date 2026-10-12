@@ -19,7 +19,7 @@ function world(balances: Record<string, number> = {}, eligible: string[] = [], n
   const eligibleSet = new Set(eligible);
   let streamerHere = true;
   const actor = (wallet: string): Actor => ({ wallet, eligible: eligibleSet.has(wallet), holder: !nonHolders.includes(wallet), balance: bal.get(wallet) ?? 0 });
-  const env = (now: number) => ({ streamerSeenAt: streamerHere ? now - MIN : null });
+  const env = (now: number) => ({ streamerSeenAt: streamerHere ? now - MIN : null, crowdPicks: true });
   const settle = (result: Result) => {
     for (const [w, m] of result.moves) {
       const before = bal.get(w) ?? 0;
