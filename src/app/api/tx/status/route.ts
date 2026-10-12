@@ -3,6 +3,7 @@ import { isBase58Of } from "@/lib/base58";
 import { getChain, signatureStatus } from "@/server/chain";
 import { UserError } from "@/server/errors";
 import { busy, withRpcGuard } from "@/server/rpc-guard";
+import { intents, isIntentToken } from "@/server/tx-intents";
 import { fail, jsonError, ok } from "../../respond";
 
 const PUBLIC_URL = (process.env.MEMESTREAM_PUBLIC_URL ?? "").replace(/\/$/, "");
@@ -15,7 +16,8 @@ const cache = new Map<string, { at: number; answer: TxStatus }>();
 const RPC_CALLS_PER_MISS = 2;
 
 /**
- * GET /api/tx/status?signature=&blockhash= -> pending | confirmed | failed | expired.
+ * GET /api/tx/status?signature=&blockhash=&intent= -> pending | confirmed | failed | expired.
+ * `intent` (from the build answer) tells the double-pay check that this transaction is pending or done.
  * Browsers don't send Origin on same-origin GETs, so a cross-site Origin is refused but a missing
  * one is allowed; the per-client limit and the global RPC budget are what bound abuse.
  * A tab polls every 3 s; the per-client limit allows a few tabs plus bursts.
@@ -31,15 +33,20 @@ export const GET = withRpcGuard({ name: "tx-status", burst: 20, perSecond: 2 }, 
     // optional: while a wallet hasn't answered yet, only the blockhash is known.
     if (signature !== null && !isBase58Of(signature, 64)) throw new UserError("Not a valid signature");
     if (!isBase58Of(blockhash, 32)) throw new UserError("Not a valid blockhash");
+    const intent = query.get("intent");
+    if (intent !== null && !isIntentToken(intent)) throw new UserError("Not a valid intent");
 
     const key = `${signature}|${blockhash}`;
     const now = Date.now();
     const hit = cache.get(key);
-    if (hit && now - hit.at < CACHE_MS) return ok(hit.answer);
-    if (!(await guard.spend(RPC_CALLS_PER_MISS))) return busy();
-    const answer = await signatureStatus(getChain().connection, { signature, blockhash });
-    cache.set(key, { at: now, answer });
-    for (const [k, v] of cache) if (now - v.at > EVICT_AFTER_MS) cache.delete(k);
+    let answer = hit && now - hit.at < CACHE_MS ? hit.answer : null;
+    if (!answer) {
+      if (!(await guard.spend(RPC_CALLS_PER_MISS))) return busy();
+      answer = await signatureStatus(getChain().connection, { signature, blockhash });
+      cache.set(key, { at: now, answer });
+      for (const [k, v] of cache) if (now - v.at > EVICT_AFTER_MS) cache.delete(k);
+    }
+    if (intent) await intents().report(intent, blockhash, signature, answer.status, now);
     return ok(answer);
   } catch (error) {
     return fail(error);

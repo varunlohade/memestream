@@ -14,7 +14,7 @@ const REDIS_PAUSE_MS = 30_000;
 let redisDownUntil = 0;
 
 let redis: Redis | null | undefined;
-function sharedRedis(): Redis | null {
+export function sharedRedis(): Redis | null {
   if (redis === undefined) {
     const url = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL;
     const token = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN;

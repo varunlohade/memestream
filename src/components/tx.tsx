@@ -36,12 +36,15 @@ export function useTx(): TxState {
   return state;
 }
 
-/** Polls the status route until the transaction lands or fails; null if there's no answer in time. */
-async function waitForResult(signature: string, blockhash: string): Promise<TxStatus | null> {
+/**
+ * Polls the status route until the transaction lands or fails; null if there's no answer in time.
+ * `intent` (from the build) tells the server's double-pay check that it's pending, then done.
+ */
+async function waitForResult(signature: string, blockhash: string, intent?: string): Promise<TxStatus | null> {
   const deadline = Date.now() + CONFIRM_WAIT_MS;
   while (Date.now() < deadline) {
     try {
-      const answer = await fetchJson<TxStatus>(`/api/tx/status?${new URLSearchParams({ signature, blockhash })}`);
+      const answer = await fetchJson<TxStatus>(`/api/tx/status?${new URLSearchParams({ signature, blockhash, ...(intent ? { intent } : {}) })}`);
       if (answer.status === "confirmed" || answer.status === "failed") return answer;
     } catch (error) {
       if (!isBusy(error)) console.warn("tx status check failed:", (error as Error).message);
@@ -69,7 +72,7 @@ export function TxProvider({ children }: { children: ReactNode }) {
         throw new Error(isUserRejection(error) ? MESSAGES.rejected : (error as Error).message || "Your wallet couldn't send it");
       }
       onStage("Confirming");
-      const answer = await waitForResult(signature, prepared.blockhash);
+      const answer = await waitForResult(signature, prepared.blockhash, prepared.intent);
       if (answer?.status === "confirmed") {
         setLast({ id, kind: "confirmed", text: MESSAGES.confirmed, signature });
         return prepared;
