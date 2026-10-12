@@ -1,83 +1,107 @@
 "use client";
-/** Buy/sell panel. Quotes as you type; the server builds the swap; the wallet signs it. */
+/** Buy/sell panel (pump.fun layout). Quotes as you type; the server builds the swap; the wallet signs it. */
 import { useState, useSyncExternalStore } from "react";
 import { type CoinView, type Holdings, useQuote } from "@/components/hooks";
 import { noSubscription } from "@/components/no-subscription";
 import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
-import { COIN_DECIMALS, DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
-import { compact, fractionOf, minusReserve, SIDE_LABEL } from "@/lib/format";
+import { DEFAULT_SLIPPAGE_BPS, SLIPPAGE_CHOICES_BPS } from "@/lib/api-types";
+import { compact, SIDE_LABEL } from "@/lib/format";
 import { LAUNCH_FEE, launchFeeAt } from "@/lib/launch-fee";
-
-type Side = "buy" | "sell";
-
-/** SOL kept back on "Max" buys for network fees and the new token account's rent. */
-const SOL_RESERVE = "0.01";
-
-type Chip = { label: string; amount: string | null };
-
-/** Buy: fixed SOL amounts plus Max. Sell: shares of what the wallet holds. Null amount = unavailable. */
-function chipsFor(side: Side, holdings: Holdings | null): Chip[] {
-  if (side === "buy") {
-    return [
-      { label: "0.1", amount: "0.1" },
-      { label: "0.5", amount: "0.5" },
-      { label: "1", amount: "1" },
-      { label: "Max", amount: holdings ? minusReserve(holdings.sol, SOL_RESERVE, SOL_DECIMALS) : null },
-    ];
-  }
-  const share = (percent: number) => (holdings ? fractionOf(holdings.coins, percent, COIN_DECIMALS) : null);
-  return [
-    { label: "25%", amount: share(25) },
-    { label: "50%", amount: share(50) },
-    { label: "Max", amount: share(100) },
-  ];
-}
+import { convertTyped, NATURAL_UNIT, type Side, slippageLabel, tradeAmount, tradeChips, type Unit } from "@/lib/trade-box";
 
 type Status = { kind: "busy" | "done" | "error"; text: string };
 
 /** The typed amount survives a reload (per coin and side) via sessionStorage; this tab only. */
 const amountKey = (mint: string, side: Side) => `memestream.amount.${mint}.${side}`;
 const DEFAULT_AMOUNT: Record<Side, string> = { buy: "0.5", sell: "" };
-function readAmount(mint: string, side: Side): string | null {
+
+/**
+ * The input unit (per side) lives in sessionStorage, in the same tab as the typed amount it describes:
+ * another tab flipping its unit must never reinterpret this tab's amount (a coin amount read as SOL
+ * would cap to a 100% sell). The max slippage is a browser-wide choice in localStorage.
+ */
+const unitKey = (side: Side) => `memestream.unit.${side}`;
+const SLIPPAGE_KEY = "memestream.slippageBps";
+
+function read(storage: () => Storage, key: string): string | null {
   try {
-    return sessionStorage.getItem(amountKey(mint, side));
+    return storage().getItem(key);
   } catch {
     return null;
   }
 }
-function saveAmount(mint: string, side: Side, amount: string) {
+function save(storage: () => Storage, key: string, value: string) {
   try {
-    sessionStorage.setItem(amountKey(mint, side), amount);
+    storage().setItem(key, value);
   } catch {
-    // storage blocked: the amount just won't survive a reload
+    // storage blocked: the choice just won't survive a reload
   }
+}
+const session = () => sessionStorage;
+const local = () => localStorage;
+
+const asUnit = (value: string | null): Unit | null => (value === "sol" || value === "coin" ? value : null);
+function asSlippage(value: string | null): number | null {
+  const bps = Number(value);
+  return value !== null && (SLIPPAGE_CHOICES_BPS as readonly number[]).includes(bps) ? bps : null;
 }
 
 export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holdings: Holdings | null; onTraded: () => void }) {
   const { address } = useWallet();
   const { run, locked } = useTx();
   const [side, setSide] = useState<Side>("buy");
+
+  const [pickedUnits, setPickedUnits] = useState<Partial<Record<Side, Unit>>>({});
+  const savedUnit = useSyncExternalStore(noSubscription, () => asUnit(read(session, unitKey(side))), () => null);
+  const unit = pickedUnits[side] ?? savedUnit ?? NATURAL_UNIT[side];
+
   /** null = nothing typed in this page view yet: show the saved amount (or the default). */
   const [typed, setTyped] = useState<string | null>(null);
-  const saved = useSyncExternalStore(noSubscription, () => readAmount(coin.mint, side), () => null);
-  const amount = typed ?? saved ?? DEFAULT_AMOUNT[side];
+  const saved = useSyncExternalStore(noSubscription, () => read(session, amountKey(coin.mint, side)), () => null);
+  const amount = typed ?? saved ?? (unit === NATURAL_UNIT[side] ? DEFAULT_AMOUNT[side] : "");
   const setAmount = (value: string) => {
     setTyped(value);
-    saveAmount(coin.mint, side, value);
+    save(session, amountKey(coin.mint, side), value);
   };
-  const [status, setStatus] = useState<Status | null>(null);
-  const { preview, error: quoteError, loading } = useQuote(coin.mint, side, amount, coin.raisedSol);
 
-  const unit = side === "buy" ? "SOL" : coin.symbol;
+  const [pickedSlippage, setPickedSlippage] = useState<number | null>(null);
+  const savedSlippage = useSyncExternalStore(noSubscription, () => asSlippage(read(local, SLIPPAGE_KEY)), () => null);
+  const chosenSlippage = pickedSlippage ?? savedSlippage;
+  const slippageBps = chosenSlippage ?? DEFAULT_SLIPPAGE_BPS;
+  const [slippageOpen, setSlippageOpen] = useState(false);
+
+  /** What the trade sends: SOL for a buy, coins for a sell, converted at the coin's price if typed in the other unit. */
+  const sent = tradeAmount(side, unit, amount, coin.priceSol, holdings?.coins ?? null);
+  const converted = unit !== NATURAL_UNIT[side];
+
+  const [status, setStatus] = useState<Status | null>(null);
+  const { preview, error: quoteError, loading } = useQuote(coin.mint, side, sent, coin.raisedSol, slippageBps);
+
+  const unitLabel = unit === "sol" ? "SOL" : coin.symbol;
+  const spendLabel = side === "buy" ? "SOL" : coin.symbol;
+  const receiveLabel = side === "buy" ? coin.symbol : "SOL";
   const actionLabel = `${SIDE_LABEL[side]} ${coin.symbol}`;
   const blocked = side === "buy" && address === coin.creator;
   const busy = status?.kind === "busy";
 
+  const switchUnit = () => {
+    const next: Unit = unit === "sol" ? "coin" : "sol";
+    setAmount(convertTyped(amount, unit, coin.priceSol));
+    setPickedUnits((units) => ({ ...units, [side]: next }));
+    save(session, unitKey(side), next);
+  };
+
+  const pickSlippage = (bps: number) => {
+    setPickedSlippage(bps);
+    save(local, SLIPPAGE_KEY, String(bps));
+    setSlippageOpen(false);
+  };
+
   const submit = async () => {
     if (!address) return;
     try {
-      await run("trade", actionLabel, { wallet: address, mint: coin.mint, side, amount, slippageBps: DEFAULT_SLIPPAGE_BPS, minReceived: preview?.minimumReceived }, (stage) =>
+      await run("trade", actionLabel, { wallet: address, mint: coin.mint, side, amount: sent, slippageBps, minReceived: preview?.minimumReceived }, (stage) =>
         setStatus({ kind: "busy", text: stage }),
       );
       setStatus({ kind: "done", text: side === "buy" ? `Bought ${coin.symbol}` : `Sold ${coin.symbol}` });
@@ -95,7 +119,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
         ? status.text
         : locked
           ? "Paused: checking your last trade"
-          : actionLabel;
+          : "Place trade";
 
   return (
     <section className="p" aria-label="Trade">
@@ -116,54 +140,66 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
           </button>
         ))}
       </div>
-      <div className="slot amt num">
+      <div className="tb-links">
+        <button type="button" className="tb-link" onClick={switchUnit}>
+          {unit === "sol" ? `switch to $${coin.symbol}` : "switch to SOL"}
+        </button>
+        <button type="button" className="tb-link" aria-expanded={slippageOpen} onClick={() => setSlippageOpen((open) => !open)}>
+          {chosenSlippage === null ? "set max slippage" : `slippage: ${slippageLabel(chosenSlippage)}`}
+        </button>
+      </div>
+      {slippageOpen && (
+        <div className="chips num" role="group" aria-label="Max slippage">
+          {SLIPPAGE_CHOICES_BPS.map((bps) => (
+            <button type="button" key={bps} className="slot" aria-pressed={bps === slippageBps} onClick={() => pickSlippage(bps)}>
+              {slippageLabel(bps)}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="amt num">
         <input
           inputMode="decimal"
           value={amount}
+          placeholder="0.0"
           onChange={(e) => setAmount(e.target.value.replace(/[^\d.]/g, ""))}
-          aria-label={`Amount in ${unit}`}
+          aria-label={`Amount in ${unitLabel}`}
           aria-invalid={Boolean(quoteError)}
           aria-describedby={quoteError ? "trade-error" : undefined}
         />
-        <small aria-hidden>{unit}</small>
+        <small aria-hidden>{unitLabel}</small>
       </div>
-      <div className={`chips num${side === "buy" ? " four" : ""}`}>
-        {chipsFor(side, holdings).map((chip) => (
+      <div className="chips num">
+        {tradeChips(side, unit, holdings, coin.priceSol).map((chip) => (
           <button
             type="button"
             key={chip.label}
             className="slot"
-            disabled={!chip.amount || chip.amount === "0"}
-            onClick={() => chip.amount && setAmount(chip.amount)}
+            disabled={chip.amount === null || chip.amount === "0"}
+            onClick={() => chip.amount !== null && setAmount(chip.amount)}
           >
             {chip.label}
           </button>
         ))}
       </div>
-      {holdings && (
-        <>
-          <div className="get mute" style={{ fontSize: 22 }}>
-            <span>You hold</span>
-            <span className="num">
-              {compact(Number(holdings.coins))} {coin.symbol}
-            </span>
-          </div>
-          <div className="get mute" style={{ fontSize: 22 }}>
-            <span>Wallet</span>
-            <span className="num">{compact(Number(holdings.sol))} SOL</span>
-          </div>
-        </>
-      )}
       {coin.status === "trading" && <LaunchFeeLine launchedAt={coin.launchedAt} />}
+      {converted && sent && (
+        <div className="get">
+          <span className="mute">{side === "buy" ? "You pay" : "You sell"}</span>
+          <span className="num">
+            ≈ {compact(Number(sent))} {spendLabel}
+          </span>
+        </div>
+      )}
       <div className="get">
-        <span className="mute">You get about</span>
+        <span className="mute">You receive</span>
         <span className="num" aria-live="polite">
-          {preview ? `${compact(Number(preview.received))} ${side === "buy" ? coin.symbol : "SOL"}` : loading ? "…" : "-"}
+          {preview ? `≈ ${compact(Number(preview.received))} ${receiveLabel}` : loading ? "…" : "-"}
         </span>
       </div>
       {preview?.partial && (
         <p className="notice" style={{ marginBottom: 12 }}>
-          This fills the curve. Only {compact(Number(preview.spent))} {unit} is spent; the rest stays in your wallet.
+          This fills the curve. Only {compact(Number(preview.spent))} {spendLabel} is spent; the rest stays in your wallet.
         </p>
       )}
       {quoteError && (
@@ -173,8 +209,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
       )}
       <button
         type="button"
-        className={`mbtn ${side}`}
-        style={{ width: "100%" }}
+        className={`mbtn ${side} tb-place`}
         disabled={!address || blocked || !preview || busy || Boolean(locked)}
         onClick={submit}
       >
@@ -185,6 +220,14 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
           {status.text}
         </p>
       )}
+      {holdings && (
+        <div className="get tb-own">
+          <span className="mute">You own</span>
+          <span className="num">
+            {compact(Number(holdings.coins))} {coin.symbol} ≈ {compact(Number(holdings.coins) * coin.priceSol)} SOL
+          </span>
+        </div>
+      )}
       {!address && <p className="mute" style={{ fontSize: 22, marginTop: 10 }}>Use the heart button at the top to connect.</p>}
     </section>
   );
@@ -192,7 +235,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
 
 /**
  * During a coin's first minute: the anti-sniper fee right now and a live countdown to the 1% base,
- * so early buyers aren't surprised. "You get about" already includes it (the quote uses the
+ * so early buyers aren't surprised. "You receive" already includes it (the quote uses the
  * on-chain schedule). Gone once the minute is over. Times come from the viewer's clock, so they
  * can be off by a second or two.
  */
