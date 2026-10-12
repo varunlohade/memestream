@@ -234,6 +234,11 @@ export type Env = {
   admins?: string[];
   /** The challenge window (shorter only in test runs; production always MARKET_CHALLENGE_MS). */
   challengeMs?: number;
+  /**
+   * Upvoted suggestions go live by themselves. Off in the app (removed 2026-10-12): only the
+   * streamer or a mod launches. Kept for the engine's tests.
+   */
+  crowdPicks?: boolean;
 };
 
 /** A balance change: `delta` points, allowed only if the balance is at least `floor` before it. */
@@ -675,7 +680,7 @@ function closeFlagWindows(ctx: Ctx) {
 /** The crowd picks, into every free live slot: only while the streamer is here and has crowd picks on. */
 function launchCrowdPick(ctx: Ctx) {
   const { game, now } = ctx;
-  if (game.pending || !game.crowdPicks || !streamerPresent(ctx.env, now)) return;
+  if (!ctx.env.crowdPicks || game.pending || !game.crowdPicks || !streamerPresent(ctx.env, now)) return;
   while (game.live.length < MAX_LIVE && game.launched < MAX_PREDICTIONS_PER_STREAM) {
     const top = [...game.suggestions]
       .filter((s) => !s.review && s.upvotes >= AUTO_LAUNCH_UPVOTES)

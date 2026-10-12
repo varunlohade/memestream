@@ -16,7 +16,6 @@ import { shortAddress } from "@/lib/format";
 import { fetchJson, postJson } from "@/lib/http";
 import { newNonce, MESSAGE_TTL_MS, sessionMessage, signInInput } from "@/lib/predictions/message";
 import {
-  AUTO_LAUNCH_UPVOTES,
   HEARTBEAT_MS,
   MAX_LIVE,
   MIN_HOLDING_COINS,
@@ -143,15 +142,10 @@ export function Predictions({
   mint,
   symbol,
   streamUrl = null,
-  network = { label: "Devnet", test: true },
-  markets = false,
 }: {
   mint: string;
   symbol: string;
   streamUrl?: string | null;
-  network?: { label: string; test: boolean };
-  /** On-chain markets are on (MEMESTREAM_MARKETS). */
-  markets?: boolean;
 }) {
   const { address, signIn: walletSignIn } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
@@ -360,27 +354,8 @@ export function Predictions({
 
       <div className="pm-subh">
         Up next{" "}
-        <span className="mute pm-small">
-          {!view.crowdPicks
-            ? "(the streamer picks the next question)"
-            : view.streamerHere
-              ? `(the top question with ${AUTO_LAUNCH_UPVOTES} or more upvotes goes live next)`
-              : "(questions wait until the streamer is here)"}
-        </span>
+        <span className="mute pm-small">(the streamer picks the next question)</span>
       </div>
-      {staff && (
-        <div className="pm-window">
-          <button
-            type="button"
-            className={`slot pm-crowd${view.crowdPicks ? " on" : ""}`}
-            onClick={() => act({ kind: "crowd", on: !view.crowdPicks })}
-            disabled={busy}
-            aria-pressed={view.crowdPicks}
-          >
-            Crowd picks questions: {view.crowdPicks ? "on" : "off"}
-          </button>
-        </div>
-      )}
       {view.queue.length === 0 && <p className="mute pm-small">No suggestions yet.</p>}
       {view.queueSize > view.queue.length && <p className="mute pm-small num">{view.queueSize - view.queue.length} more waiting</p>}
       {view.queue.map((s) => (
@@ -480,11 +455,6 @@ export function Predictions({
           {error}
         </p>
       )}
-      <p className="pm-free">
-        Points are free and only for fun.
-        {markets ? ` Markets use ${network.test ? `${network.label.toLowerCase()} SOL (test money)` : "real SOL"}.` : ""}
-        {markets && network.test ? " Devnet preview: markets resolve by the memestream oracle, with a 2 h challenge window." : ""}
-      </p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>
   );
