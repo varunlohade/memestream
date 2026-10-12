@@ -2,6 +2,7 @@
  * Server-side guard against paying twice: the same wallet asking to build the same transaction
  * (same action and inputs, amount compared in base units) gets a 409 while an earlier one is held:
  * - from its build for BUILD_HOLD_MS (the wallet popup), so a second tab or a reload can't build it again;
+ *   a signature reported after that hold lapsed (a slow popup) holds it again;
  * - once the client reports its signature (status poll, ?intent=), until SIGNED_HOLD_MS after the build;
  * - until it's confirmed, failed or expired (status poll), or the wallet rejected it (/api/tx/rejected).
  * A record is only ever added if none exists (never overwritten), so two racing builds can't both pass.
@@ -18,7 +19,7 @@ import type { ParsedTx } from "./requests";
 import { sharedRedis } from "./shared-limit";
 
 /** Held from the build while the wallet popup is open; a client that never reports lets it lapse. */
-export const BUILD_HOLD_MS = 30_000;
+export const BUILD_HOLD_MS = 60_000;
 /** Held once signed: past the blockhash's life (~90 s) plus the grace a wallet's own blockhash may take. */
 export const SIGNED_HOLD_MS = 150_000;
 const REDIS_TIMEOUT_MS = 800;
@@ -172,7 +173,14 @@ export function txIntents(store: IntentStore) {
         if (!match) return;
         const [, key, id] = match;
         const record = await store.get(key);
-        if (!record || record.id !== id || record.blockhash !== blockhash) return;
+        if (!record) {
+          // The popup outlasted the build hold: the build was at least BUILD_HOLD_MS ago. Never overwrites.
+          if (signature && status === "pending") {
+            await store.add(key, { id, blockhash, at: now - BUILD_HOLD_MS, signature }, SIGNED_HOLD_MS - BUILD_HOLD_MS);
+          }
+          return;
+        }
+        if (record.id !== id || record.blockhash !== blockhash) return;
         if (status !== "pending") return store.del(key);
         const left = SIGNED_HOLD_MS - (now - record.at);
         if (signature && !record.signature && left > 0) await store.set(key, { ...record, signature }, left);
