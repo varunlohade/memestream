@@ -14,7 +14,7 @@ export async function generateMetadata({ params }: PageProps<"/coin/[mint]">): P
   const { coin } = detail;
   return {
     title: `$${coin.symbol}`,
-    description: `${coin.name}: buy the stream you think will pop. 80% of fees go to the streamer.`,
+    description: `${coin.name}: bet on what happens next on stream, or buy its coin. 80% of fees go to the streamer.`,
   };
 }
 

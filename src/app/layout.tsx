@@ -7,7 +7,7 @@ const body = VT323({ weight: "400", subsets: ["latin"], variable: "--font-body" 
 
 export const metadata: Metadata = {
   title: { default: "memestream", template: "%s · memestream" },
-  description: "A coin for every live stream. Buy the stream you think will pop.",
+  description: "A prediction market for every live stream. Bet SOL on what happens next, or buy the stream's coin.",
 };
 
 /** Bare shell shared by the site and the OBS overlay; the site adds its top bar and wallet in (site)/layout. */

@@ -1,6 +1,7 @@
 # memestream
 
-**A coin for every live stream, built on Meteora's Dynamic Bonding Curve.**
+**A prediction market for every live stream.** Each question is a MetaDAO conditional vault trading
+in a Meteora pool, and each stream gets its own coin on Meteora's Dynamic Bonding Curve.
 Viewers buy the stream they think will pop. The streamer earns 80% of every trade fee. When the
 coin's curve fills, it graduates live on stream into a Meteora DAMM v2 pool, where trading goes on
 and the streamer's locked LP position earns pool fees forever.

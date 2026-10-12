@@ -36,7 +36,7 @@ addresses or balances you'd rather not show.
 
 ## Submission text (draft)
 
-**Title:** memestream: a coin for every live stream, on Meteora DBC
+**Title:** memestream: a prediction market for every live stream
 
 **Short description:**
 memestream gives every live stream its own coin. Streamers launch in one transaction on Meteora's
