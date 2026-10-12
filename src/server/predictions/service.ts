@@ -6,7 +6,7 @@
  */
 import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
-import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
+import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
@@ -16,9 +16,12 @@ import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_
 import type { LeaderRow, MarketStepView, PredictionsView, Standing } from "@/lib/predictions/view";
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
-import { GAME_KEY_COUNT, gameKeys, loadGame } from "./game-doc";
+import { GAME_KEY_COUNT, gameKeys, LIVE_COINS_KEY, liveIndex, liveSlotKeys, loadGame } from "./game-doc";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
+
+/** A prediction open for bets on some coin, as the live-coins index finds it; `market` only while its market takes trades. */
+export type LiveAcross = { mint: string; id: string; text: string; lockAt: number; yes: number; no: number; bettors: number; market: MarketRecord | null };
 
 export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated"; streamUrl?: string | null; symbol?: string };
 
@@ -299,10 +302,15 @@ export function predictionsService(deps: ServiceDeps) {
     throw new ContentionError("Busy, try again");
   }
 
-  /** The coin's game (its document and every live slot) and the `extra` documents, in one read. */
+  /**
+   * The coin's game (its document and every live slot) and the `extra` documents, in one read.
+   * `save(next)` gives the commit's documents and keeps the live-coins index in the same commit.
+   */
   async function readGame(mint: string, creator: string, extra: string[]) {
     const docs = await store.read([...gameKeys(mint), ...extra]);
-    return { ...loadGame(mint, docs.slice(0, GAME_KEY_COUNT), creator), extra: docs.slice(GAME_KEY_COUNT) };
+    const stored = loadGame(mint, docs.slice(0, GAME_KEY_COUNT), creator);
+    const save = (next: Game) => ({ docs: stored.save(next), sets: [liveIndex(mint, next)] });
+    return { game: stored.game, save, extra: docs.slice(GAME_KEY_COUNT) };
   }
 
   async function facts(mint: string) {
@@ -382,7 +390,7 @@ export function predictionsService(deps: ServiceDeps) {
       const [balance] = await store.balances([wallet]);
       const eligible = isEligible(parseProfile(watchDoc.json));
       const result = apply(game, action, { wallet, eligible, holder, balance, shares }, now(), envOf(presenceDoc.json, { aiCheck }));
-      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result), nonce: once });
+      const status = await store.commit({ ...save(result.game), ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
       return RETRY;
@@ -405,7 +413,7 @@ export function predictionsService(deps: ServiceDeps) {
       if (aiDue(result.game, now(), env)) startAiRun(mint, coin);
       if (deps.markets && marketsDue(result.game, now(), env)) startMarketRun(mint, coin);
       if (!result.changed) return { game, env };
-      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
+      const status = await store.commit({ ...save(result.game), ...ledgerChanges(result) });
       if (status === "ok") return { game: result.game, env };
     }
     // Others are saving the same tick; show what's stored.
@@ -436,7 +444,7 @@ export function predictionsService(deps: ServiceDeps) {
     const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
     const claim = startReviews(game, now(), envOf(presenceDoc.json));
     if (claim.due.length === 0) return;
-    const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
+    const status = await store.commit({ ...save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     await Promise.all(claim.due.map((target) => reviewOne(mint, creator, target)));
   }
@@ -453,7 +461,7 @@ export function predictionsService(deps: ServiceDeps) {
       const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
       const result = applyReview(game, target, verdict, now(), envOf(presenceDoc.json));
       if (!result.changed) return true;
-      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
+      const status = await store.commit({ ...save(result.game), ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
   }
@@ -480,7 +488,7 @@ export function predictionsService(deps: ServiceDeps) {
       const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
       const result = step(game, envOf(presenceDoc.json));
       if (!result.changed) return true;
-      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
+      const status = await store.commit({ ...save(result.game), ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
 
@@ -492,7 +500,7 @@ export function predictionsService(deps: ServiceDeps) {
     const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
     const claim = startAi(game, now(), envOf(presenceDoc.json, { aiCheck: true }));
     if (claim.captures.length === 0 && claim.checks.length === 0) return;
-    const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
+    const status = await store.commit({ ...save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     await Promise.all([
       ...claim.captures.map((target) => captureOne(ai, mint, coin.creator, streamUrl, target)),
@@ -600,7 +608,7 @@ export function predictionsService(deps: ServiceDeps) {
     const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
     const claim = startMarkets(game, now(), envOf(presenceDoc.json));
     if (claim.jobs.length === 0) return;
-    const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
+    const status = await store.commit({ ...save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     const failed = new Set<string>();
     for (const job of claim.jobs) if (!(await marketStep(markets, mint, coin, claim.game, job))) failed.add(job.id);
@@ -651,13 +659,13 @@ export function predictionsService(deps: ServiceDeps) {
       const { game, save, extra: [presenceDoc, registryDoc, openDoc] } = await readGame(mint, creator, [presenceKey(mint), ...registry]);
       const result = applyMarketDone(game, job, record?.question ?? null, now(), envOf(presenceDoc.json));
       if (!result.changed) return true;
-      const docs = save(result.game);
+      const { docs, sets } = save(result.game);
       if (record) {
         docs.push({ key: marketKey(mint, job.id), v: registryDoc.v, json: JSON.stringify(record) });
         const open: string[] = openDoc.json ? JSON.parse(openDoc.json) : [];
         if (!open.includes(mint)) docs.push({ key: OPEN_MARKETS_KEY, v: openDoc.v, json: JSON.stringify([...open, mint]) });
       }
-      const status = await store.commit({ docs, ...ledgerChanges(result) });
+      const status = await store.commit({ docs, sets, ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
 
@@ -793,10 +801,31 @@ export function predictionsService(deps: ServiceDeps) {
     };
   }
 
+  /**
+   * Predictions open for bets across coins, from the live-coins index: up to `maxCoins` listed
+   * coins that `show` accepts, their live slots in one read, and the open markets' registry
+   * entries in one more. No ticks and no chain reads.
+   */
+  async function liveAcross(show: (mint: string) => boolean, maxCoins: number): Promise<LiveAcross[]> {
+    const mints = (await store.members(LIVE_COINS_KEY)).filter(show).slice(0, maxCoins);
+    if (mints.length === 0) return [];
+    const slots = await store.read(mints.flatMap(liveSlotKeys));
+    const t = now();
+    const perCoin = slots.length / mints.length;
+    const live = slots.flatMap((doc, i) => {
+      const p: Prediction | null = doc.json ? JSON.parse(doc.json) : null;
+      return p && p.lockAt > t ? [{ mint: mints[Math.floor(i / perCoin)], p }] : [];
+    });
+    const withMarket = live.filter(({ p }) => marketStepView(p.market) === "open");
+    const records = withMarket.length > 0 ? await store.read(withMarket.map(({ mint, p }) => marketKey(mint, p.id))) : [];
+    const recordOf = new Map(withMarket.map(({ mint, p }, i) => [`${mint}:${p.id}`, records[i].json ? (JSON.parse(records[i].json!) as MarketRecord) : null]));
+    return live.map(({ mint, p }) => ({ mint, id: p.id, text: p.text, lockAt: p.lockAt, yes: p.yes, no: p.no, bettors: p.bettors, market: recordOf.get(`${mint}:${p.id}`) ?? null }));
+  }
+
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market, staffOf, sweepMarkets };
+  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market, staffOf, sweepMarkets, liveAcross };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;

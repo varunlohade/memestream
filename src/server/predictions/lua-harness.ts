@@ -26,6 +26,7 @@ function fakeDb(now: () => number) {
   const strings = new Map<string, { value: string; until: number }>();
   const hashes = new Map<string, Map<string, string>>();
   const zsets = new Map<string, Map<string, number>>();
+  const sets = new Map<string, Set<string>>();
   const expires = new Map<string, number>();
   /** Drops a hash once its PEXPIRE time has passed, as Redis does. */
   const alive = (k: string) => {
@@ -88,6 +89,16 @@ function fakeDb(now: () => number) {
         const stop = Number(a[2]) < 0 ? sorted.length : Number(a[2]) + 1;
         return sorted.slice(Number(a[1]), stop).flatMap(([member, score]) => [member, String(score)]);
       }
+      case "SADD": {
+        const set = sets.get(a[0]) ?? sets.set(a[0], new Set()).get(a[0])!;
+        const had = set.has(a[1]);
+        set.add(a[1]);
+        return had ? 0 : 1;
+      }
+      case "SREM":
+        return sets.get(a[0])?.delete(a[1]) ? 1 : 0;
+      case "SMEMBERS":
+        return [...(sets.get(a[0]) ?? [])];
       default:
         throw new Error(`unsupported command ${name}`);
     }

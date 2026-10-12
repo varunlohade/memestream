@@ -2,6 +2,7 @@
 /** Client-side data hooks. They call our own API routes; the browser never talks to RPC directly. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CoinDetail, CoinView, HolderView, TapeItem, TradePreview } from "@/lib/api-types";
+import type { LiveFeed } from "@/lib/predictions/live";
 import { percentChange } from "@/lib/format";
 import { fetchJson } from "@/lib/http";
 
@@ -56,6 +57,9 @@ export const useCoins = () => usePolled<{ coins: CoinView[] }>("/api/coins");
 
 /** The site's ticker tape: recent trades and graduations (see lib/tape.ts). */
 export const usePolledTape = () => usePolled<{ items: TapeItem[] }>("/api/tape");
+
+/** Predictions open for bets across coins (home page row). The server caches them for 5 s. */
+export const useLivePredictions = () => usePolled<LiveFeed>("/api/predictions/live", null, 10_000);
 
 /** One coin, its recent trades, and (if a wallet is connected) that wallet's holdings. */
 export const useCoin = (mint: string, wallet: string | null, initial: CoinDetail | null = null) =>

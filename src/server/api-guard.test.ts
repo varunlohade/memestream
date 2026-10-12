@@ -20,6 +20,7 @@ test("every route handler that touches the chain uses withRpcGuard on every expo
   const routes = routeFiles("src/app");
   assert.ok(routes.length >= 9, "found the route handlers (API routes, the holders list and the /<ticker> short link)");
   assert.ok(routes.some((f) => f.endsWith("holders/route.ts")), "found the holders route");
+  assert.ok(routes.some((f) => f.endsWith("predictions/live/route.ts")), "found the live predictions route");
   for (const file of routes) {
     const source = readFileSync(file, "utf8");
     if (!CHAIN_IMPORTS.some((name) => source.includes(`from "${name}`))) continue;
