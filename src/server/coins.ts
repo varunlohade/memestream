@@ -12,7 +12,7 @@ import { lpPositionsOf, unclaimedPoolFees } from "@/lib/damm/positions";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
 import { isCanonicalTicker } from "@/lib/short-link";
-import { hiddenCreators, withoutHiddenCreators } from "@/lib/hidden-coins";
+import { hiddenCreators, hiddenMints, withoutHiddenCreators } from "@/lib/hidden-coins";
 import { buildTape } from "@/lib/tape";
 import { streamLinkFromUri } from "@/lib/stream-link";
 import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
@@ -113,7 +113,7 @@ async function refreshList(allowScan: () => Promise<boolean>): Promise<CoinView[
  * whose creators are in MEMESTREAM_HIDDEN_CREATORS. Same cache and budget; direct links still use listCoins.
  */
 export async function listPublicCoins(): Promise<CoinView[]> {
-  return withoutHiddenCreators(await listCoins(), hiddenCreators(process.env.MEMESTREAM_HIDDEN_CREATORS));
+  return withoutHiddenCreators(await listCoins(), hiddenCreators(process.env.MEMESTREAM_HIDDEN_CREATORS), hiddenMints(process.env.MEMESTREAM_HIDDEN_MINTS));
 }
 
 /** A coin's view plus the vault addresses its trade history needs. */

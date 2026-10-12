@@ -6,7 +6,7 @@
 import "server-only";
 import { PublicKey } from "@solana/web3.js";
 import { fetchDammPools } from "@/lib/damm/pool";
-import { hiddenCreators } from "@/lib/hidden-coins";
+import { hiddenCreators, hiddenMints } from "@/lib/hidden-coins";
 import { oddsFromPrices, type Side } from "@/lib/markets/math";
 import { yesProbability } from "@/lib/markets/pool";
 import type { MarketRecord } from "@/lib/markets/record";
@@ -39,7 +39,8 @@ export function liveFeed(service: PredictionsService, spend: (calls: number) => 
 async function load(service: PredictionsService, spend: (calls: number) => Promise<boolean>): Promise<LiveFeed> {
   const coins = await listCoins();
   const hidden = hiddenCreators(process.env.MEMESTREAM_HIDDEN_CREATORS);
-  const shown = new Set(coins.filter((c) => !hidden.has(c.creator)).map((c) => c.mint));
+  const mints = hiddenMints(process.env.MEMESTREAM_HIDDEN_MINTS);
+  const shown = new Set(coins.filter((c) => !hidden.has(c.creator) && !mints.has(c.mint)).map((c) => c.mint));
   const found = await service.liveAcross((mint) => shown.has(mint), MAX_COINS);
   const now = Date.now();
   const picked = pickLive(

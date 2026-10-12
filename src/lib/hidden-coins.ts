@@ -11,6 +11,12 @@ export function hiddenCreators(list: string | undefined): Set<string> {
   );
 }
 
-export function withoutHiddenCreators<T extends { creator: string }>(coins: T[], hidden: Set<string>): T[] {
-  return hidden.size === 0 ? coins : coins.filter((coin) => !hidden.has(coin.creator));
+/** Single coins kept off the public lists by mint address (MEMESTREAM_HIDDEN_MINTS, a comma list). */
+export function hiddenMints(list: string | undefined): Set<string> {
+  return hiddenCreators(list);
+}
+
+export function withoutHiddenCreators<T extends { creator: string; mint?: string }>(coins: T[], hidden: Set<string>, mints: Set<string> = new Set()): T[] {
+  if (hidden.size === 0 && mints.size === 0) return coins;
+  return coins.filter((coin) => !hidden.has(coin.creator) && !(coin.mint && mints.has(coin.mint)));
 }
