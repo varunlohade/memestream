@@ -1,4 +1,6 @@
 import { parseTxRequest } from "@/server/requests";
+import { buildMarketRedeemForWallet, buildMarketTradeForWallet } from "@/server/markets";
+import { registeredMarket } from "@/server/predictions";
 import { buildClaimForWallet, buildClaimPoolFeesForWallet, buildGraduateForWallet, buildLaunchForWallet, buildTradeForWallet } from "@/server/transactions";
 import type { TxAction } from "@/lib/api-types";
 import { busy, withRpcGuard } from "@/server/rpc-guard";
@@ -9,7 +11,7 @@ import { failOrBusy, jsonBody, ok } from "../../respond";
  * request parses so a bad request costs nothing. A trade is charged for the graduated path
  * (+ the Meteora pool and clock); claim-lp also reads the wallet's position NFTs and positions.
  */
-const BUILD_RPC_CALLS: Record<TxAction, number> = { launch: 6, trade: 8, claim: 6, graduate: 6, "claim-lp": 10 };
+const BUILD_RPC_CALLS: Record<TxAction, number> = { launch: 6, trade: 8, claim: 6, graduate: 6, "claim-lp": 10, market: 6, "market-redeem": 8 };
 
 export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, async (request: Request, { params }: RouteContext<"/api/tx/[action]">, guard) => {
   try {
@@ -26,6 +28,11 @@ export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, 
         return ok(await buildGraduateForWallet(parsed.req));
       case "claim-lp":
         return ok(await buildClaimPoolFeesForWallet(parsed.req));
+      // Markets: only registered ones (the oracle made them), so the lookup comes before the build.
+      case "market":
+        return ok(await buildMarketTradeForWallet(await registeredMarket(parsed.req.mint, parsed.req.predictionId, parsed.req.wallet), parsed.req, Date.now()));
+      case "market-redeem":
+        return ok(await buildMarketRedeemForWallet(await registeredMarket(parsed.req.mint, parsed.req.predictionId), parsed.req.wallet));
     }
   } catch (error) {
     return failOrBusy(error);

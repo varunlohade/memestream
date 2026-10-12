@@ -1,6 +1,29 @@
 /** What the predictions API returns for a coin (shared by the server and the browser; types only). */
 import type { Outcome, Side } from "./rules";
 
+/**
+ * A prediction's on-chain market (MEMESTREAM_MARKETS): "opening" until the oracle created it,
+ * "failed" if it couldn't (the points bet stays), else open/closed/resolved. null: no market.
+ */
+export type MarketStepView = "opening" | "open" | "closed" | "resolved" | "failed" | null;
+
+/**
+ * Where a resolved prediction's market stands (markets only): "proposed" (the streamer's result,
+ * final at `finalAt` unless challenged), "disputed" (challenged, or waiting for an admin because
+ * nobody resolved it or the AI check disagreed), or "final" (`final` is what the market pays).
+ */
+export type MarketVerdictView = {
+  status: "proposed" | "disputed" | "final";
+  /** The streamer's proposal: a cancel proposes a refund. */
+  proposed: Side | "refund";
+  finalAt: number | null;
+  final: Side | "refund" | null;
+  /** Why it waits for an admin, for admins only. */
+  why: "challenge" | "unresolved" | "ai" | null;
+  /** The challenge, for admins only (null for everyone else). */
+  challenge: { by: string; at: number; reason: string; link: string | null; bond: number } | null;
+} | null;
+
 export type LeaderRow = { wallet: string; points: number };
 export type Standing = { points: number; rank: number | null };
 
@@ -16,16 +39,16 @@ export type PredictionsView = {
   me: {
     wallet: string;
     balance: number;
-    watchMinutes: number;
+    /** Got the sign-in grant: its bets count toward the asker reward, and it can be on leaderboards. */
     eligible: boolean;
-    /** Minutes left until the starter grant, or null once it is unlocked. */
-    starterInMinutes: number | null;
     role: "streamer" | "mod" | null;
     hasSuggestion: boolean;
     /** Holds at least 1 whole coin (needed to suggest and upvote); null if unknown or staff. */
     holder: boolean | null;
     /** A short "Not approved: ..." note about this wallet's question (staff: about a typed question), shown for a few minutes. */
     notice: string | null;
+    /** A memestream admin (MEMESTREAM_ADMIN_WALLETS): settles market challenges. */
+    admin: boolean;
   } | null;
   /** Live predictions, oldest first (at most MAX_LIVE). */
   live: {
@@ -38,6 +61,9 @@ export type PredictionsView = {
     no: number;
     bettors: number;
     myBet: { side: Side; amount: number } | null;
+    market: MarketStepView;
+    /** What the market resolves from: the streamer's official link, else null (the stream decides). */
+    source: string | null;
   }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;
@@ -61,6 +87,12 @@ export type PredictionsView = {
     /** Flags are taken until then (ms); null once the result counts. */
     flagUntil: number | null;
     my: { bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
+    market: MarketStepView;
+    source: string | null;
+    /** When betting was open (ms), for "stream window HH:MM–HH:MM". */
+    launchedAt: number | null;
+    lockAt: number | null;
+    verdict: MarketVerdictView;
   }[];
   /** The coin's mods (sent to the streamer and mods only). */
   mods: string[];

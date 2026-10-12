@@ -59,3 +59,12 @@ test("parses quote query params", () => {
   assert.throws(() => parseQuote(new URLSearchParams({ mint: "M", side: "buy" })), /Missing amount/);
   assert.throws(() => parseQuote(new URLSearchParams({ side: "buy", amount: "1" })), /Missing mint/);
 });
+
+test("market bets and redemptions go through the tx flow with the /api/markets bodies", () => {
+  const ref = { mint: "So11111111111111111111111111111111111111112", predictionId: "7" };
+  const bet = parseTxRequest("market", { ...ref, wallet: "w", side: "no", action: "sell", amount: "1.5", minReceived: "0.4", slippageBps: 9000 });
+  assert.deepEqual(bet, { action: "market", req: { ...ref, wallet: "w", side: "no", action: "sell", amount: "1.5", minReceived: "0.4", slippageBps: 100 } });
+  assert.deepEqual(parseTxRequest("market-redeem", { ...ref, wallet: "w" }), { action: "market-redeem", req: { ...ref, wallet: "w" } });
+  assert.throws(() => parseTxRequest("market", { ...ref, wallet: "w", side: "maybe", action: "buy", amount: "1" }), /yes or no/);
+  assert.throws(() => parseTxRequest("market-redeem", { wallet: "w", mint: ref.mint }), /Missing predictionId/);
+});

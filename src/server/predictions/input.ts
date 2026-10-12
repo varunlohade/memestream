@@ -3,6 +3,9 @@ import { isBase58Of } from "@/lib/base58";
 import type { Action } from "@/lib/predictions/engine";
 import { isOutcome, isSide } from "@/lib/predictions/rules";
 
+const DECISIONS = ["yes", "no", "refund"] as const;
+const optionalText = (value: unknown) => (typeof value === "string" ? value : undefined);
+
 const isId = (value: unknown): value is string => typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value);
 
 export function parseAction(body: Record<string, unknown>): Action | null {
@@ -19,7 +22,8 @@ export function parseAction(body: Record<string, unknown>): Action | null {
     case "launch": {
       const windowMin = typeof body.windowMin === "number" ? body.windowMin : undefined;
       if (isId(body.id)) return { kind: "launch", id: body.id, windowMin };
-      return typeof body.text === "string" ? { kind: "launch", text: body.text, windowMin } : null;
+      const source = optionalText(body.source);
+      return typeof body.text === "string" ? { kind: "launch", text: body.text, windowMin, ...(source ? { source } : {}) } : null;
     }
     case "resolve":
       return isId(body.id) && isOutcome(body.outcome) ? { kind: "resolve", id: body.id, outcome: body.outcome } : null;
@@ -29,6 +33,14 @@ export function parseAction(body: Record<string, unknown>): Action | null {
         : null;
     case "crowd":
       return typeof body.on === "boolean" ? { kind: "crowd", on: body.on } : null;
+    case "challenge": {
+      const link = optionalText(body.link);
+      return isId(body.id) && typeof body.reason === "string" ? { kind: "challenge", id: body.id, reason: body.reason, ...(link ? { link } : {}) } : null;
+    }
+    case "decide":
+      return isId(body.id) && DECISIONS.includes(body.outcome as (typeof DECISIONS)[number])
+        ? { kind: "decide", id: body.id, outcome: body.outcome as (typeof DECISIONS)[number] }
+        : null;
     default:
       return null;
   }

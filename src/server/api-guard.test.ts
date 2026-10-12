@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 /** Imports that mean a route can make RPC calls. */
-const CHAIN_IMPORTS = ["@/server/chain", "@/server/coins", "@/server/transactions", "@/server/metadata", "@solana/web3.js", "@meteora-ag/", "@/server/predictions"];
+const CHAIN_IMPORTS = ["@/server/chain", "@/server/markets", "@/server/coins", "@/server/transactions", "@/server/metadata", "@solana/web3.js", "@meteora-ag/", "@/server/predictions"];
 
 function routeFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -37,7 +37,7 @@ const PAGE_ALLOWED: Record<string, string[]> = {
   "@/server/chain": ["networkInfo", "getChain"], // config only; RPC handles must not be used (checked below)
 };
 /** Modules a page may never import: they reach the chain without the budget. */
-const PAGE_FORBIDDEN = ["@/server/transactions", "@/server/metadata", "@solana/web3.js", "@meteora-ag/"];
+const PAGE_FORBIDDEN = ["@/server/transactions", "@/server/markets", "@/server/metadata", "@solana/web3.js", "@meteora-ag/"];
 
 function pageFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

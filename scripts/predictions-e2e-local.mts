@@ -1,7 +1,7 @@
 /**
  * `npm run e2e:predictions:local`: builds the app into .next-e2e, starts `next start` on a free port
- * with a production-like devnet setup, a fresh Redis key prefix (memestream:pm-e2e:<run id>:) and
- * MEMESTREAM_PREDICTIONS_FAST=1, runs scripts/predictions-e2e.mts against it, then stops the server.
+ * with a production-like devnet setup and a fresh Redis key prefix (memestream:pm-e2e:<run id>:),
+ * runs scripts/predictions-e2e.mts against it, then stops the server.
  *
  * Needs the Upstash URL and token: from the environment (UPSTASH_REDIS_REST_* or KV_REST_API_*), or
  * from the git-ignored .env.e2e.local, made with:
@@ -73,7 +73,6 @@ const env: NodeJS.ProcessEnv = {
   MEMESTREAM_PREDICTIONS: "1",
   MEMESTREAM_PREDICTIONS_SECRET: randomBytes(32).toString("hex"),
   MEMESTREAM_PREDICTIONS_PREFIX: prefix,
-  MEMESTREAM_PREDICTIONS_FAST: "1",
 };
 
 console.log(`run ${runId}: building into .next-e2e`);

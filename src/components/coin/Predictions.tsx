@@ -1,11 +1,14 @@
 "use client";
 /**
- * Predictions panel (free points only: no money, no prizes; points can't be bought, sold or sent).
- * Shown on the coin page only when the server's MEMESTREAM_PREDICTIONS flag is on.
+ * Predictions panel (free points: no money, no prizes; points can't be bought, sold or sent).
+ * Shown on the coin page only when the server's MEMESTREAM_PREDICTIONS flag is on. With
+ * MEMESTREAM_MARKETS also on, each live prediction gets an on-chain market (MarketCard): its card
+ * replaces the points bet box, and the points game stays for suggestions and the leaderboard.
  *
- * The wallet signs one message to start a session; after that the session token identifies it.
- * While the page is visible, a heartbeat every 60 s earns watch points. The server decides
- * everything (points, limits, who may do what); this panel only shows the state and sends actions.
+ * The wallet signs one message to start a session (its first one brings the points grant); after
+ * that the session token identifies it. The streamer's own page beats once a minute (it marks them
+ * "here"). The server decides everything (points, limits, who may do what); this panel only shows
+ * the state and sends actions.
  */
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/components/wallet/WalletProvider";
@@ -21,13 +24,14 @@ import {
   MIN_HOLDING_COINS,
   multiplier,
   type Outcome,
+  LINK_MAX,
   QUESTION_MAX,
   type Side,
-  STARTER_POINTS,
   SUGGEST_COST,
 } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
+import { MarketCard } from "./MarketCard";
 
 const POLL_MS = 5_000;
 /** Faster while the viewer waits on a question under review, so its approval shows within seconds. */
@@ -67,6 +71,8 @@ const postWithAuth = <T,>(url: string, body: unknown, auth: HeadersInit) =>
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const sideLabel = (side: Side) => (side === "yes" ? "Yes" : "No");
+/** A prediction whose on-chain market exists: its card replaces the points bet. */
+const marketUp = (step: PredictionsView["live"][number]["market"]) => step === "open" || step === "closed" || step === "resolved";
 
 function countdown(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -133,13 +139,28 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
   );
 }
 
-export function Predictions({ mint, symbol }: { mint: string; symbol: string }) {
+export function Predictions({
+  mint,
+  symbol,
+  streamUrl = null,
+  network = { label: "Devnet", test: true },
+  markets = false,
+}: {
+  mint: string;
+  symbol: string;
+  streamUrl?: string | null;
+  network?: { label: string; test: boolean };
+  /** On-chain markets are on (MEMESTREAM_MARKETS). */
+  markets?: boolean;
+}) {
   const { address, signIn: walletSignIn } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [amount, setAmount] = useState("50");
   const [question, setQuestion] = useState("");
+  /** The streamer's optional official source for a real-world question (markets resolve from it). */
+  const [sourceLink, setSourceLink] = useState("");
   const [windowMin, setWindowMin] = useState<number>(DEFAULT_WINDOW_MIN);
   const [board, setBoard] = useState<Board>("stream");
   /** The live prediction shown open when several are live (one at a time). */
@@ -175,9 +196,10 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
     return () => clearInterval(timer);
   }, [mint, authHeaders, pollMs]);
 
-  // Watch points: one heartbeat a minute while this page is visible (the server ignores faster ones).
+  // The streamer's presence: one beat a minute while their own coin's page is visible.
+  const isStreamer = Boolean(session) && view?.me?.role === "streamer";
   useEffect(() => {
-    if (!session) return;
+    if (!isStreamer) return;
     const beat = () => {
       if (document.hidden) return;
       postWithAuth("/api/predictions/heartbeat", { mint }, authHeaders()).catch(() => undefined);
@@ -185,7 +207,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
     beat();
     const timer = setInterval(beat, HEARTBEAT_MS);
     return () => clearInterval(timer);
-  }, [session, authHeaders, mint]);
+  }, [isStreamer, authHeaders, mint]);
 
   const signIn = async () => {
     if (!address || !walletSignIn) return;
@@ -252,7 +274,10 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   };
   const launchOwn = async (e: FormEvent) => {
     e.preventDefault();
-    if (await act({ kind: "launch", text: question, windowMin })) setQuestion("");
+    if (await act({ kind: "launch", text: question, windowMin, ...(sourceLink.trim() ? { source: sourceLink.trim() } : {}) })) {
+      setQuestion("");
+      setSourceLink("");
+    }
   };
 
   const standings = view.leaderboard;
@@ -279,16 +304,16 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
         </div>
       )}
       {!address && <p className="mute pm-small">Connect a wallet to play.</p>}
-      {me && !staff && me.starterInMinutes !== null && (
-        <p className="mute pm-small num">Watch {me.starterInMinutes} more minutes for {STARTER_POINTS} starter points.</p>
-      )}
 
       {live.map((p) =>
         p.id === openLive ? (
           <LiveCard
             key={p.id}
+            mint={mint}
+            source={p.source ?? streamUrl}
             live={p}
             now={now}
+            canBet={Boolean(address) && staff === null}
             viewer={viewer}
             staff={staff !== null}
             busy={busy}
@@ -370,7 +395,6 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
               className={`mbtn ${notHolder ? "off" : "pm-uv"}`}
               disabled={busy || !viewer || notHolder || s.mine || s.upvoted}
               onClick={() => act({ kind: "upvote", id: s.id })}
-              title={me && !me.eligible ? "Watch 15 minutes to upvote" : undefined}
             >
               {s.upvoted ? "Upvoted" : s.mine ? "Yours" : "Upvote"}
             </button>
@@ -396,19 +420,54 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           </button>
         </form>
       )}
+      {staff && (
+        <input
+          className="slot pm-in pm-source"
+          placeholder="Official source link for a real-world question (optional)"
+          maxLength={LINK_MAX}
+          value={sourceLink}
+          onChange={(e) => setSourceLink(e.target.value)}
+          aria-label="Official source link"
+        />
+      )}
       {viewer && notHolder && <p className="mute pm-small">Hold at least {MIN_HOLDING_COINS} ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
-      {view.resolved.slice(0, RESOLVED_SHOWN).map((r) => (
-        <ResolvedRow key={r.id} result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} />
-      ))}
+      {view.resolved.slice(0, RESOLVED_SHOWN).map((r) =>
+        marketUp(r.market) ? (
+          // Remounted when the market's step changes, so it reads the result once it's resolved.
+          <MarketCard
+            key={`${r.id}:${r.market}:${r.verdict?.status}`}
+            mint={mint}
+            predictionId={r.id}
+            text={r.text}
+            now={now}
+            canBet={false}
+            poll={false}
+            source={r.source ?? streamUrl}
+            betWindow={r.launchedAt !== null && r.lockAt !== null ? [r.launchedAt, r.lockAt] : null}
+            verdict={r.verdict}
+            signedIn={Boolean(me)}
+            admin={me?.admin ?? false}
+            onChallenge={(reason, link) => act({ kind: "challenge", id: r.id, reason, ...(link.trim() ? { link: link.trim() } : {}) })}
+            onDecide={(outcome) => void act({ kind: "decide", id: r.id, outcome })}
+          >
+            <ResolvedRow result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} bare />
+          </MarketCard>
+        ) : (
+          <ResolvedRow key={r.id} result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} />
+        ),
+      )}
 
       {error && (
         <p className="notice err" role="alert">
           {error}
         </p>
       )}
-      <p className="pm-free">Free points. No money, no prizes.</p>
+      <p className="pm-free">
+        Points are free and only for fun.
+        {markets ? ` Markets use ${network.test ? `${network.label.toLowerCase()} SOL (test money)` : "real SOL"}.` : ""}
+      </p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>
   );
@@ -418,8 +477,11 @@ type LiveView = PredictionsView["live"][number];
 
 /** A live prediction, open: countdown, pools (tap a side to bet), and the bet box or, for staff, the resolve buttons. */
 function LiveCard(props: {
+  mint: string;
+  source: string | null;
   live: LiveView;
   now: number | null;
+  canBet: boolean;
   viewer: boolean;
   staff: boolean;
   busy: boolean;
@@ -430,6 +492,27 @@ function LiveCard(props: {
 }) {
   const { live, now, viewer, staff, busy, amount } = props;
   const locked = now !== null && now >= live.lockAt;
+  const resolve = staff ? <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} /> : null;
+  if (marketUp(live.market)) {
+    return (
+      <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll source={props.source} betWindow={[live.launchedAt, live.lockAt]}>
+        {resolve}
+      </MarketCard>
+    );
+  }
+  if (live.market === "opening") {
+    return (
+      <div className="pm-live">
+        <div className="pm-livehead">
+          {locked ? <span className="pm-otag pm-oc pm-closedtag">Closed</span> : <span className="pm-livetag">Live</span>}
+          <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
+        </div>
+        <div className="pm-q pm-big">{live.text}</div>
+        <p className="mute pm-small">Opening market…</p>
+        {resolve}
+      </div>
+    );
+  }
   return (
     <div className="pm-live">
       <div className="pm-livehead">
@@ -437,12 +520,13 @@ function LiveCard(props: {
         <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
       </div>
       <div className="pm-q pm-big">{live.text}</div>
+      {live.market === "failed" && <p className="mute pm-small">Market unavailable. Bet points instead.</p>}
       <div className="pm-pools">
         <SidePool side="yes" pools={live} onClick={viewer && !locked ? () => props.onBet("yes") : undefined} disabled={busy} />
         <SidePool side="no" pools={live} onClick={viewer && !locked ? () => props.onBet("no") : undefined} disabled={busy} />
       </div>
       {staff ? (
-        <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />
+        resolve
       ) : (
         <div className="pm-bet num">
           <input
@@ -485,11 +569,15 @@ function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; on
         {live.myBet && <span className="mute pm-by"> Your bet: {fmt(live.myBet.amount)} on {sideLabel(live.myBet.side)}</span>}
       </span>
       <span className="mute num">{now === null ? "" : locked ? "Closed" : `${countdown(live.lockAt - now)} left`}</span>
-      <div className="slot pm-pool num">
-        <b className="pm-fy" style={{ width: `${yes}%` }} />
-        <span>Yes {yes}%</span>
-        <span>No {total > 0 ? 100 - yes : 0}%</span>
-      </div>
+      {live.market && live.market !== "failed" ? (
+        <span className="mute pm-small">{live.market === "opening" ? "Opening market…" : "Market: tap to trade"}</span>
+      ) : (
+        <div className="slot pm-pool num">
+          <b className="pm-fy" style={{ width: `${yes}%` }} />
+          <span>Yes {yes}%</span>
+          <span>No {total > 0 ? 100 - yes : 0}%</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -503,7 +591,7 @@ function ordinal(n: number) {
 function headlineFor(me: PredictionsView["me"]) {
   if (me?.role === "streamer") return "You can't bet on your own coin";
   if (me?.role === "mod") return "Mods can't bet on this coin";
-  return me ? `Your points ${fmt(me.balance)}. You earn points by watching.` : "You earn points by watching.";
+  return me ? `Your points: ${fmt(me.balance)}` : "";
 }
 
 /** A question every review check failed on: staff approve or remove it by hand. */
@@ -553,7 +641,8 @@ function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
   return { text: `You lost ${fmt(my.bet - my.payout)}`, cls: "mute" };
 }
 
-function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void }) {
+/** `bare`: inside its market's card, which already shows the question and the result. */
+function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void; bare?: boolean }) {
   const result = betOutcome(r.my, r.outcome);
   const { role, wallet } = r.resolvedBy;
   const by = role === "auto" ? "auto-cancelled" : wallet ? `${role} ${shortAddress(wallet)}` : role;
@@ -561,10 +650,9 @@ function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResul
   return (
     <div className="pm-rr num">
       <span className="pm-q" title={`Resolved ${at} by ${by}`}>
-        {r.text}
+        {!bare && r.text}
         <span className="mute pm-by">
-          {" "}
-          {at}, {by}
+          {bare ? `Resolved ${at}, ${by}` : ` ${at}, ${by}`}
         </span>
         <AiTag ai={r.ai} />
       </span>

@@ -8,14 +8,74 @@ import { randomBytes } from "node:crypto";
 import { after } from "next/server";
 import { Redis } from "@upstash/redis";
 import { holdsEnough } from "@/lib/predictions/rules";
+import { isBase58Of } from "@/lib/base58";
+import { isPredictionId } from "@/lib/markets/math";
+import type { MarketRecord } from "@/lib/markets/record";
 import { getCoinDetail } from "@/server/coins";
+import { closeMarketTrading, createMarket, MarketUnavailableError, redeemOracleTokens, resolveMarket, walletHoldsShares } from "@/server/markets";
+import { UserError } from "@/server/errors";
 import { aiCheckFromEnv } from "./ai-check";
 import { reviewFromEnv } from "./review";
-import { predictionsService, type PredictionsService } from "./service";
+import { marketsEnabled } from "./flag";
+import { type MarketDeps, MarketUnavailable, predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
 import { testSettings } from "./test-settings";
 
-export { predictionsEnabled } from "./flag";
+export { marketsEnabled, predictionsEnabled } from "./flag";
+
+/** SOL the oracle seeds a market with (split into YES + NO, all in the pool; it comes back at redemption). */
+const DEFAULT_SEED_SOL = "0.05";
+
+/** One oracle step at a time in this process: they share the oracle's wrapped-SOL account. */
+let oracleQueue: Promise<unknown> = Promise.resolve();
+function oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+  const next = oracleQueue.then(work, work);
+  oracleQueue = next.catch(() => undefined);
+  return next;
+}
+
+/** MEMESTREAM_ADMIN_WALLETS: a comma list of the wallets that settle market challenges (never the streamer). */
+const adminWallets = () =>
+  (process.env.MEMESTREAM_ADMIN_WALLETS ?? "")
+    .split(",")
+    .map((w) => w.trim())
+    .filter((w) => isBase58Of(w, 32));
+
+/** The oracle's market steps, or null with MEMESTREAM_MARKETS off. */
+function marketDeps(): MarketDeps | null {
+  if (!marketsEnabled()) return null;
+  const seedSol = process.env.MEMESTREAM_MARKET_SEED_SOL || DEFAULT_SEED_SOL;
+  return {
+    create: (mint, predictionId, ticker) =>
+      oneAtATime(async () => {
+        try {
+          return (await createMarket({ mint, predictionId, ticker, seedSol })).record;
+        } catch (error) {
+          throw error instanceof MarketUnavailableError ? new MarketUnavailable(error.message) : error;
+        }
+      }),
+    close: (record) => oneAtATime(() => closeMarketTrading(record)),
+    resolve: (record, outcome) => oneAtATime(() => resolveMarket(record, outcome)),
+    holdsShares: walletHoldsShares,
+    redeemOracle: (record) => oneAtATime(() => redeemOracleTokens(record)),
+  };
+}
+
+/**
+ * The registered market of a coin's prediction (only markets the oracle created); throws a user
+ * error if there's none. With `bettor`, also refuses the coin's streamer and mods (they resolve it).
+ * Callers pass the same `wallet` the trade is built for: that wallet is its fee payer and only
+ * signer, so no other wallet can sign a trade that passed this check.
+ */
+export async function registeredMarket(mint: string, predictionId: string, bettor?: string): Promise<MarketRecord> {
+  if (!isBase58Of(mint, 32) || !isPredictionId(predictionId)) throw new UserError("No market for this prediction");
+  const ready = marketsEnabled() ? predictions() : null;
+  if (!ready || !("service" in ready)) throw new UserError("No market for this prediction");
+  const record = await ready.service.market(mint, predictionId);
+  if (!record) throw new UserError("No market for this prediction");
+  if (bettor !== undefined && (await ready.service.staffOf(mint, bettor))) throw new UserError("Streamers and mods can't bet on their own coin's predictions");
+  return record;
+}
 
 /** "Holds this coin" answers are reused this long per wallet and coin. */
 const HOLDS_CACHE_MS = 60_000;
@@ -57,7 +117,7 @@ export function predictions(): { service: PredictionsService } | { error: string
     devSecret ??= randomBytes(32).toString("hex");
     secret = devSecret;
   }
-  const { prefix, waits } = testSettings();
+  const { prefix, challengeMs } = testSettings();
   let store;
   if (url && token) {
     // The SDK's default retries stay on: it re-sends a request whose fetch threw. Reads and ticks
@@ -78,13 +138,15 @@ export function predictions(): { service: PredictionsService } | { error: string
     domain,
     review: reviewFromEnv(),
     ai: aiCheckFromEnv(),
+    markets: marketDeps(),
+    admins: adminWallets(),
+    challengeMs,
     defer: (task) => after(task),
     coin: async (mint) => {
       const coin = (await getCoinDetail(mint, null))?.coin;
-      return coin ? { creator: coin.creator, status: coin.status, streamUrl: coin.streamUrl } : null;
+      return coin ? { creator: coin.creator, status: coin.status, streamUrl: coin.streamUrl, symbol: coin.symbol } : null;
     },
     holds,
-    waits,
   });
   return (cached = { service });
 }

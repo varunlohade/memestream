@@ -51,7 +51,7 @@ the streamer) is proven on Meteora's real programs in `test/integration/mainnet-
 - **Never fills worse than the price you saw:** a moved price makes the trade fail, not fill worse.
 - **Live ticker tape** of trades and graduations.
 - **Predictions (free points, no money)**, behind `MEMESTREAM_PREDICTIONS=1`: viewers suggest yes/no
-  questions and bet watch points. Every typed question shows "Under review" to its asker until jev
+  questions and bet points (1,000 on a wallet's first sign-in, at most 5 wallets per IP a day). Every typed question shows "Under review" to its asker until jev
   (TypeSafe's choice model, called from the server only) approves it; a failed check retries, then the
   streamer or a mod approves or removes it by hand. Env: `TYPESAFE_API_KEY` (server only; without it
   questions wait for staff) and `TYPESAFE_MODEL` (default `jev-latest`).
@@ -107,6 +107,12 @@ app asks you to check your wallet history and offers "I checked, unlock". Rules 
 - A wallet popup left open past the unlock window can still be signed after you unlock. Our
   transactions can't land once their blockhash expires, so this only affects wallets that swap in
   a fresh one; the app tells you to reject any open popup first.
+
+- Prediction markets (MEMESTREAM_MARKETS) call MetaDAO's deployed conditional vault program
+  (licensed BSL 1.1) and Meteora DAMM v2; none of MetaDAO's source is copied into this repo. The
+  market maths follows the Gnosis FPMM design, for two outcomes (YES/NO) only.
+- A voided market (an admin's call, or no admin decision in 24 hours) refunds 0.5 SOL per share,
+  whatever each share cost. Voiding at the price at lock (each holder's cost basis) isn't built yet.
 
 The local chain runs offline with a real-time clock (a block every 400 ms), so the launch fee
 falls to its 1% base about a minute after launch, as on mainnet.

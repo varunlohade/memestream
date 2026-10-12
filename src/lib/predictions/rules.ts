@@ -1,7 +1,7 @@
 /**
- * Predictions: free points only. No money, no SOL, no tokens, no prizes. Points come from watching
- * streams; they can never be bought, sold or sent to another wallet. Pure rules and numbers shared
- * by the server, the browser and the tests.
+ * Predictions: free points only. No money, no SOL, no tokens, no prizes. Every wallet gets a
+ * one-time grant when it first signs in; points can never be bought, sold or sent to another
+ * wallet. Pure rules and numbers shared by the server, the browser and the tests.
  */
 
 export type Side = "yes" | "no";
@@ -10,18 +10,11 @@ export type Outcome = Side | "cancel";
 
 export const MINUTE_MS = 60_000;
 
-/** Watching: +2 points per minute, at most 600 a day; heartbeats closer than 50 s apart earn nothing. */
-export const POINTS_PER_MINUTE = 2;
-export const DAILY_WATCH_CAP = 600;
+/** A wallet's one-time grant on its first sign-in (at most MAX_GRANTS_PER_IP wallets per IP a day). */
+export const GRANT_POINTS = 1_000;
+/** The streamer's page beats once a minute while open (it marks "streamer here"); beats closer than 50 s are ignored. */
 export const HEARTBEAT_MS = MINUTE_MS;
 export const MIN_HEARTBEAT_GAP_MS = 50_000;
-/** A one-time starter grant, unlocked after 10 minutes of watching. */
-export const STARTER_POINTS = 200;
-export const STARTER_AFTER_MS = 10 * MINUTE_MS;
-/** Earning watch time (any coin, not over the per-IP cap) a wallet needs before its upvotes and bets count as "eligible". */
-export const ELIGIBLE_AFTER_MS = 15 * MINUTE_MS;
-/** Watch time a wallet needs to appear on a leaderboard. */
-export const LEADERBOARD_AFTER_MS = 30 * MINUTE_MS;
 
 /** Suggestions: 5 to 80 characters, cost 10 points (back when it goes live), expire after 20 minutes. */
 export const SUGGEST_COST = 10;
@@ -43,6 +36,34 @@ export const AI_CHECK_RETRY_MS = 20_000;
 export const AI_CHECK_MAX_TRIES = 3;
 /** Hard deadline: past this long after the result's flag window, an unfinished AI check ends as "couldn't tell", whatever the server's keys. */
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
+/**
+ * On-chain markets (MEMESTREAM_MARKETS): claiming a market's server steps (create, close trading,
+ * resolve) holds them this long, longer than a whole run can take (a create sends up to four
+ * transactions, each waiting up to 60 s to confirm), so no other server re-runs a step still in
+ * flight. A run that failed gives its claim back early: the steps are tried again after
+ * MARKET_FAILED_RETRY_MS. A server that died mid-run frees them when the claim runs out. Creating
+ * gives up after MARKET_CREATE_MAX_TRIES ("Market unavailable"; points bets stay open); closing and
+ * resolving keep trying.
+ */
+export const MARKET_RETRY_MS = 5 * 60_000;
+export const MARKET_FAILED_RETRY_MS = 30_000;
+export const MARKET_CREATE_MAX_TRIES = 3;
+/**
+ * Challenge window (UMA style), markets only: the streamer's YES, NO or cancel is only proposed;
+ * it goes on chain this long after, unless a holder challenges it with a points bond. An admin
+ * (MEMESTREAM_ADMIN_WALLETS, never the coin's streamer) then decides the outcome; the bond is lost
+ * if the proposal stands, comes back on a refund, and comes back plus a reward if the other side
+ * wins. Markets nobody resolved, or where the AI check disagreed, also wait for an admin. No
+ * decision within MARKET_DECISION_MS: void (refund) as a last resort.
+ */
+export const MARKET_CHALLENGE_MS = 2 * 60 * MINUTE_MS;
+export const MARKET_DECISION_MS = 24 * 60 * MINUTE_MS;
+export const CHALLENGE_BOND = 100;
+export const OVERTURN_REWARD = 50;
+export const CHALLENGE_REASON_MAX = 200;
+export const CHALLENGE_REASON_MIN = 5;
+/** Links (a market's official source, a challenge's evidence) are kept this short. */
+export const LINK_MAX = 200;
 /** A frame description is cut to this many characters. */
 export const FRAME_NOTE_MAX = 400;
 /** A "Not approved" note shows to its asker for this long. */
@@ -97,8 +118,8 @@ export const MAX_WON_ENTRIES = 100;
 export const MIN_HOLDING_COINS = 1;
 /** `coins` is a balance in UI units, e.g. "0.000001" or "1.5". */
 export const holdsEnough = (coins: string | null | undefined) => Number(coins ?? 0) >= MIN_HOLDING_COINS;
-/** Distinct wallets that may earn watch points from one IP per UTC day. */
-export const MAX_EARNING_WALLETS_PER_IP = 5;
+/** Distinct wallets that may get the sign-in grant from one IP per UTC day (the anti-farm rule). */
+export const MAX_GRANTS_PER_IP = 5;
 
 /** Leaderboard order: points high to low; ties by wallet, high to low (the same as Redis ZREVRANGE). */
 export const byPoints = (a: { wallet: string; points: number }, b: { wallet: string; points: number }) =>
@@ -170,4 +191,29 @@ export function cleanQuestion(text: unknown): { ok: true; question: string } | {
   if (URL_LIKE.test(question)) return { ok: false, error: "No links in questions" };
   if (HTML_BRACKETS.test(question)) return { ok: false, error: PLAIN_TEXT_ONLY };
   return { ok: true, question };
+}
+
+/** A challenge's reason: plain text, one line, CHALLENGE_REASON_MIN to CHALLENGE_REASON_MAX characters. */
+export function cleanReason(text: unknown): { ok: true; reason: string } | { ok: false; error: string } {
+  if (typeof text !== "string") return { ok: false, error: "Say why the result is wrong" };
+  const normalized = text.normalize("NFKC");
+  if (FORMAT_CHARS.test(normalized) || CONTROL_CHARS.test(normalized) || HTML_BRACKETS.test(normalized)) return { ok: false, error: PLAIN_TEXT_ONLY };
+  const reason = normalized.replace(/\s+/g, " ").trim();
+  if (reason.length < CHALLENGE_REASON_MIN || reason.length > CHALLENGE_REASON_MAX) {
+    return { ok: false, error: `Reasons are ${CHALLENGE_REASON_MIN} to ${CHALLENGE_REASON_MAX} characters` };
+  }
+  return { ok: true, reason };
+}
+
+/** An http(s) link of at most LINK_MAX characters, normalized; null if it isn't one. */
+export function cleanLink(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > LINK_MAX) return null;
+  try {
+    const url = new URL(value.trim());
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
+    const href = url.href;
+    return href.length <= LINK_MAX ? href : null;
+  } catch {
+    return null;
+  }
 }

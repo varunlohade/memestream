@@ -1,6 +1,8 @@
 /** Parses API request bodies into typed requests. Pure, so it unit-tests without HTTP. */
 import { DEFAULT_SLIPPAGE_BPS, SLIPPAGE_CHOICES_BPS, type TxAction } from "@/lib/api-types";
 import { UserError } from "./errors";
+import type { MarketRef, MarketTradeRequest } from "./markets";
+import { parseMarketRequest } from "./market-requests";
 import type { LaunchRequest, QuoteRequest, TradeRequest } from "./transactions";
 
 type Body = Record<string, unknown>;
@@ -35,9 +37,11 @@ export function parseQuote(params: URLSearchParams): QuoteRequest {
 export type ParsedTx =
   | { action: "launch"; req: LaunchRequest }
   | { action: "trade"; req: TradeRequest }
-  | { action: "claim" | "graduate" | "claim-lp"; req: { wallet: string; mint: string } };
+  | { action: "claim" | "graduate" | "claim-lp"; req: { wallet: string; mint: string } }
+  | { action: "market"; req: MarketTradeRequest }
+  | { action: "market-redeem"; req: MarketRef & { wallet: string } };
 
-const ACTIONS: readonly TxAction[] = ["launch", "trade", "claim", "graduate", "claim-lp"];
+const ACTIONS: readonly TxAction[] = ["launch", "trade", "claim", "graduate", "claim-lp", "market", "market-redeem"];
 
 export function parseTxRequest(action: string, body: Body): ParsedTx {
   if (!(ACTIONS as readonly string[]).includes(action)) throw new UserError("Unknown action");
@@ -70,5 +74,16 @@ export function parseTxRequest(action: string, body: Body): ParsedTx {
     case "graduate":
     case "claim-lp":
       return { action: knownAction, req: { wallet, mint: requiredText(body, "mint") } };
+    // The app's money flow (useTx().run) posts here; the bodies are the /api/markets ones.
+    case "market": {
+      const parsed = parseMarketRequest("trade", body);
+      if (parsed.action !== "trade") throw new UserError("Unknown action");
+      return { action: "market", req: parsed.req };
+    }
+    case "market-redeem": {
+      const parsed = parseMarketRequest("redeem", body);
+      if (parsed.action !== "redeem") throw new UserError("Unknown action");
+      return { action: "market-redeem", req: parsed.req };
+    }
   }
 }

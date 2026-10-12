@@ -18,6 +18,7 @@ import {
   deriveDbcPoolAuthority,
   METAPLEX_PROGRAM_ID,
 } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import { CONDITIONAL_VAULT_PROGRAM_ID } from "@metadaoproject/futarchy/v0.4";
 import { Surfnet } from "@solana/surfpool";
 import { Connection, type Keypair, LAMPORTS_PER_SOL, PublicKey } from "@solana/web3.js";
 
@@ -35,8 +36,8 @@ const UPGRADEABLE_LOADER = new PublicKey("BPFLoaderUpgradeab1e111111111111111111
 const PROGRAM_DATA_HEADER = 45;
 const ELF_MAGIC = Buffer.from([0x7f, 0x45, 0x4c, 0x46]);
 
-/** Programs every coin flow calls (beyond the built-in token programs). */
-const PROGRAMS = [DYNAMIC_BONDING_CURVE_PROGRAM_ID, METAPLEX_PROGRAM_ID, DAMM_V2_PROGRAM_ID];
+/** Programs every coin and market flow calls (beyond the built-in token programs). */
+const PROGRAMS = [DYNAMIC_BONDING_CURVE_PROGRAM_ID, METAPLEX_PROGRAM_ID, DAMM_V2_PROGRAM_ID, CONDITIONAL_VAULT_PROGRAM_ID];
 /**
  * Plain accounts those programs read: the DAMM v2 fee-tier configs graduation can use, and the
  * DBC pool authority, whose SOL balance on devnet pays rent for the graduated pool.
