@@ -3,12 +3,12 @@
  * instance), or in-memory maps for local development only.
  *
  * Two kinds of data:
- * - Documents (a coin's game, a wallet's watch record): JSON with a version number.
+ * - Documents (a coin's game, one live prediction, a wallet's watch record): JSON with a version number.
  * - The ledger: every wallet's points balance, plus all-time net winnings for the leaderboard.
  *
  * All writes go through one atomic commit: refuse a nonce already used ("replay"), check every
  * document's version (someone else changed it: "conflict", the caller re-reads and retries), check
- * every balance floor, then use up the nonce, move the points and save the documents. The nonce is
+ * every balance floor, then use up the nonce, move the points and save (or delete) the documents. The nonce is
  * checked first, so a commit re-sent after it already landed answers "replay", not "conflict"; it
  * is used up last, so a refused commit can try again with the same nonce. In Redis that is one Lua script; in memory it is
  * synchronous code with no await between the checks and the writes. store.test.ts runs both.
@@ -23,8 +23,11 @@ import { DEFAULT_PREFIX } from "./test-settings";
 export type Doc = { v: number; json: string | null };
 export type Move = { wallet: string; delta: number; floor: number };
 export type Commit = {
-  /** Documents to save, each with the version it was read at; `ttlMs` makes it expire (then it reads as new). */
-  docs: { key: string; v: number; json: string; ttlMs?: number }[];
+  /**
+   * Documents to save, each with the version it was read at; `ttlMs` makes it expire (then it reads as new).
+   * `json: null` deletes the document (then it reads as new).
+   */
+  docs: { key: string; v: number; json: string | null; ttlMs?: number }[];
   /** A one-time key (signed-message nonce, or a request's idempotency id): refused as "replay" if a commit with it succeeded within ttlMs. */
   nonce?: { key: string; ttlMs: number };
   /** Balance changes; each needs the balance to be at least `floor` before, and never below 0 after. */
@@ -83,7 +86,10 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
       if (c.nonce) nonces.set(c.nonce.key, now() + c.nonce.ttlMs);
       for (const m of c.moves) balances.set(m.wallet, (balances.get(m.wallet) ?? 0) + m.delta);
       for (const w of c.won) won.set(w.wallet, (won.get(w.wallet) ?? 0) + w.delta);
-      for (const d of c.docs) docs.set(d.key, { v: d.v + 1, json: d.json, until: d.ttlMs ? now() + d.ttlMs : Infinity });
+      for (const d of c.docs) {
+        if (d.json === null) docs.delete(d.key);
+        else docs.set(d.key, { v: d.v + 1, json: d.json, until: d.ttlMs ? now() + d.ttlMs : Infinity });
+      }
       return "ok";
     },
     async balances(wallets) {
@@ -104,8 +110,8 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
 
 /**
  * KEYS: balances, won, the documents..., then the nonce key if any.
- * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0) per document, moveCount, (wallet, delta, floor)
- * per move, then (wallet, delta) per winnings change.
+ * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0, delete '1' or '0') per document, moveCount,
+ * (wallet, delta, floor) per move, then (wallet, delta) per winnings change.
  */
 export const COMMIT_LUA = `
 local docCount = tonumber(ARGV[1])
@@ -115,7 +121,7 @@ local i = 4
 for d = 1, docCount do
   local current = redis.call('HGET', KEYS[2 + d], 'v') or '0'
   if current ~= ARGV[i] then return 'conflict' end
-  i = i + 3
+  i = i + 4
 end
 local moveCount = tonumber(ARGV[i])
 i = i + 1
@@ -138,9 +144,13 @@ while i <= #ARGV do
 end
 i = 4
 for d = 1, docCount do
-  redis.call('HSET', KEYS[2 + d], 'v', tostring(tonumber(ARGV[i]) + 1), 'json', ARGV[i + 1])
-  if tonumber(ARGV[i + 2]) > 0 then redis.call('PEXPIRE', KEYS[2 + d], ARGV[i + 2]) end
-  i = i + 3
+  if ARGV[i + 3] == '1' then
+    redis.call('DEL', KEYS[2 + d])
+  else
+    redis.call('HSET', KEYS[2 + d], 'v', tostring(tonumber(ARGV[i]) + 1), 'json', ARGV[i + 1])
+    if tonumber(ARGV[i + 2]) > 0 then redis.call('PEXPIRE', KEYS[2 + d], ARGV[i + 2]) end
+  end
+  i = i + 4
 end
 return 'ok'
 `;
@@ -188,7 +198,7 @@ export function redisStore(redis: Redis, prefix = DEFAULT_PREFIX): PredictionSto
         c.docs.length,
         c.nonce ? 1 : 0,
         c.nonce?.ttlMs ?? 0,
-        ...c.docs.flatMap((d) => [d.v, d.json, d.ttlMs ?? 0]),
+        ...c.docs.flatMap((d) => [d.v, d.json ?? "", d.ttlMs ?? 0, d.json === null ? 1 : 0]),
         c.moves.length,
         ...c.moves.flatMap((m) => [m.wallet, m.delta, m.floor]),
         ...c.won.flatMap((w) => [w.wallet, w.delta]),

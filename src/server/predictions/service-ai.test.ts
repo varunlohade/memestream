@@ -78,19 +78,21 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
   };
   const balance = async (wallet: string) => (await store.balances([wallet]))[0];
   /** A typed staff question live at T0 (1-minute window), bets on both sides, then betting closes. */
+  let liveId = "";
   const playToLock = async () => {
     for (const v of BETTORS) await fund(v);
     await service.act(COIN, STREAMER, { kind: "launch", text: "Is there a person on screen?", windowMin: 1 });
     await settle(); // review approves, the question goes live
     await service.view(COIN, null);
     await settle(); // the launch frame
-    for (const [i, v] of BETTORS.entries()) await service.act(COIN, v, { kind: "bet", side: i % 2 ? "yes" : "no", amount: 100 });
+    liveId = (await service.view(COIN, "v1")).live[0].id;
+    for (const [i, v] of BETTORS.entries()) await service.act(COIN, v, { kind: "bet", id: liveId, side: i % 2 ? "yes" : "no", amount: 100 });
     clock.t = T0 + MIN;
     await service.view(COIN, "v1");
     await settle(); // the lock frame
   };
   const resolve = async (outcome: "yes" | "no" | "cancel") => {
-    await service.act(COIN, STREAMER, { kind: "resolve", outcome });
+    await service.act(COIN, STREAMER, { kind: "resolve", id: liveId, outcome });
     return (await service.view(COIN, "v1")).resolved[0];
   };
   return { clock, service, models, settle, balance, playToLock, resolve, store };

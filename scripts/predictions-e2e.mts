@@ -157,7 +157,7 @@ type Player = { name: string; keypair: Keypair; wallet: string; token: string };
 type View = {
   now: number;
   me: { balance: number; eligible: boolean; watchMinutes: number; holder: boolean | null; notice?: string | null } | null;
-  live: { id: string; text: string; lockAt: number; yes: number; no: number; bettors: number } | null;
+  live: { id: string; text: string; lockAt: number; yes: number; no: number; bettors: number; myBet: { side: string; amount: number } | null }[];
   queue: { id: string; text: string; upvotes: number; mine: boolean; status?: string }[];
   resolved: { id: string; outcome: string; disputed: boolean; my: { bet: number; payout: number; flagged: boolean } | null }[];
 };
@@ -201,10 +201,12 @@ async function waitForView(p: Player, done: (v: View) => boolean, ms = 45_000): 
     await sleep(700);
   }
 }
-async function waitUntilLocked(p: Player) {
+/** Waits until every listed live prediction has stopped taking bets. */
+async function waitUntilLocked(p: Player, ids: string[]) {
   const v = await view(p);
-  if (!v.live) throw new Error("nothing live");
-  const ms = v.live.lockAt - v.now + 1_500;
+  const live = v.live.filter((l) => ids.includes(l.id));
+  if (live.length !== ids.length) throw new Error(`not live: ${ids.join(", ")}`);
+  const ms = Math.max(...live.map((l) => l.lockAt)) - v.now + 1_500;
   console.log(`      waiting ${Math.ceil(ms / 1000)} s for bets to lock`);
   await sleep(ms);
 }
@@ -330,8 +332,10 @@ async function run() {
   await refused("upvote: twice is refused", v2, { kind: "upvote", id: suggestion.id }, "already upvoted");
   await must("upvote: viewer3", () => actOk(v3, { kind: "upvote", id: suggestion.id }));
   const third = await must("upvote: viewer4 (the third upvote)", () => actOk(v4, { kind: "upvote", id: suggestion.id }));
-  check("crowd launch: 3 upvotes put the question live", third.live?.id === suggestion.id && third.live?.text === question, `live ${third.live?.id ?? "none"}`);
-  if (!third.live) throw new Fatal("crowd launch");
+  const crowdLive = third.live.find((l) => l.id === suggestion.id);
+  check("crowd launch: 3 upvotes put the question live", crowdLive?.text === question, `live ${third.live.map((l) => l.id).join(", ") || "none"}`);
+  if (!crowdLive) throw new Fatal("crowd launch");
+  const id1 = crowdLive.id;
   const v1AfterLaunch = await balance(v1);
   check("suggest: the 10 points come back when it goes live", v1AfterLaunch === startBalances[0] + 2, `${v1AfterLaunch}`);
 
@@ -344,19 +348,21 @@ async function run() {
   ];
   const byWallet = new Map(players.map((p) => [p.wallet, p]));
   const preBet = await balances([v1, v2, v3, v4]);
-  for (const b of round1) await must(`bet: ${byWallet.get(b.wallet)!.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(byWallet.get(b.wallet)!, { kind: "bet", side: b.side, amount: b.amount }));
-  await refused("bet: the streamer can't bet", streamer, { kind: "bet", side: "yes", amount: 10 }, "can't bet");
-  await refused("bet: more than half the balance is refused", v2, { kind: "bet", side: "yes", amount: 100 }, "half");
-  await refused("resolve: a viewer who bet can't resolve", v3, { kind: "resolve", outcome: "no" }, "Only the streamer or a mod");
-  await refused("resolve: not while betting is open", streamer, { kind: "resolve", outcome: "yes" }, "still open");
+  for (const b of round1) await must(`bet: ${byWallet.get(b.wallet)!.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(byWallet.get(b.wallet)!, { kind: "bet", id: id1, side: b.side, amount: b.amount }));
+  await refused("bet: a bet that names no prediction is refused", v1, { kind: "bet", side: "yes", amount: 10 }, "Unknown action");
+  await refused("bet: a bet on an unknown prediction is refused", v1, { kind: "bet", id: "9999", side: "yes", amount: 10 }, "closed");
+  await refused("bet: the streamer can't bet", streamer, { kind: "bet", id: id1, side: "yes", amount: 10 }, "can't bet");
+  await refused("bet: more than half the balance is refused", v2, { kind: "bet", id: id1, side: "yes", amount: 100 }, "half");
+  await refused("resolve: a viewer who bet can't resolve", v3, { kind: "resolve", id: id1, outcome: "no" }, "Only the streamer or a mod");
+  await refused("resolve: not while betting is open", streamer, { kind: "resolve", id: id1, outcome: "yes" }, "still open");
   const pool1 = round1.reduce((t, b) => t + b.amount, 0);
-  const live1 = (await view(v1)).live!;
+  const live1 = (await view(v1)).live.find((l) => l.id === id1)!;
   check("bets: pools add up", live1.yes === 80 && live1.no === 60 && live1.bettors === 4, `yes ${live1.yes}, no ${live1.no}, ${live1.bettors} bettors`);
 
-  await waitUntilLocked(v1);
-  await refused("bet: refused once locked", v1, { kind: "bet", side: "yes", amount: 10 }, "closed");
+  await waitUntilLocked(v1, [id1]);
+  await refused("bet: refused once locked", v1, { kind: "bet", id: id1, side: "yes", amount: 10 }, "closed");
   const before1 = await balances([v1, v2, v3, v4]);
-  await must("resolve: the streamer resolves YES", () => actOk(streamer, { kind: "resolve", outcome: "yes" }));
+  await must("resolve: the streamer resolves YES", () => actOk(streamer, { kind: "resolve", id: id1, outcome: "yes" }));
   const after1 = await balances([v1, v2, v3, v4]);
   const deltas1 = after1.map((b, i) => b - before1[i]);
   const expected1 = payouts(round1, "yes");
@@ -377,27 +383,87 @@ async function run() {
   // Round 2: the streamer types a question and launches it (1-minute window), then cancels: refunds.
   // Each call reads devnet, so the 4 bets go out together to fit in the minute.
   const preBet2 = await balances([v1, v2, v3, v4]);
-  const launched2 = await must("launch: the streamer launches their own question (1 min)", () => actOk(streamer, { kind: "launch", text: `Will chat say gg first? (${symbol})`, windowMin: 1 }));
-  check("launch: a typed staff question waits for review first", launched2.live === null, launched2.live?.text ?? "not live yet");
-  const live2 = await waitForView(streamer, (v) => v.live !== null);
-  check("launch: jev approves it and it goes live", live2 !== null, live2?.live?.text ?? "none");
+  const text2 = `Will chat say gg first? (${symbol})`;
+  const launched2 = await must("launch: the streamer launches their own question (1 min)", () => actOk(streamer, { kind: "launch", text: text2, windowMin: 1 }));
+  check("launch: a typed staff question waits for review first", !launched2.live.some((l) => l.text === text2), launched2.live.map((l) => l.text).join(", ") || "not live yet");
+  const live2 = await waitForView(streamer, (v) => v.live.some((l) => l.text === text2));
+  check("launch: jev approves it and it goes live", live2 !== null, live2?.live.map((l) => l.text).join(", ") ?? "none");
   if (!live2) throw new Fatal("staff launch review");
+  const id2 = live2.live.find((l) => l.text === text2)!.id;
   const round2: { p: Player; side: Side; amount: number }[] = [
     { p: v1, side: "no", amount: 20 },
     { p: v2, side: "yes", amount: 20 },
     { p: v3, side: "yes", amount: 10 },
     { p: v4, side: "no", amount: 10 },
   ];
-  await Promise.all(round2.map((b) => must(`bet: ${b.p.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(b.p, { kind: "bet", side: b.side, amount: b.amount }))));
+  await Promise.all(round2.map((b) => must(`bet: ${b.p.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(b.p, { kind: "bet", id: id2, side: b.side, amount: b.amount }))));
   await refused("mod: a wallet with a live bet can't be made a mod", streamer, { kind: "mod", wallet: v4.wallet, add: true }, "has a bet");
-  await refused("resolve: a viewer who bet can't resolve", v4, { kind: "resolve", outcome: "cancel" }, "Only the streamer or a mod");
-  await waitUntilLocked(v1);
+  await refused("resolve: a viewer who bet can't resolve", v4, { kind: "resolve", id: id2, outcome: "cancel" }, "Only the streamer or a mod");
+  await waitUntilLocked(v1, [id2]);
   const before2 = await balances([v1, v2, v3, v4]);
-  await must("resolve: the streamer cancels", () => actOk(streamer, { kind: "resolve", outcome: "cancel" }));
+  await must("resolve: the streamer cancels", () => actOk(streamer, { kind: "resolve", id: id2, outcome: "cancel" }));
   const after2 = await balances([v1, v2, v3, v4]);
   const refunds = after2.map((b, i) => b - before2[i]);
   check("cancel: every bettor gets their stake back", round2.every((b, i) => refunds[i] === b.amount && after2[i] === preBet2[i]), `refunds ${refunds.join(", ")}`);
   check("cancel: refunds add up to the pool", refunds.reduce((t, d) => t + d, 0) === round2.reduce((t, b) => t + b.amount, 0), `${refunds.reduce((t, d) => t + d, 0)}`);
+
+  // Round 3: two predictions live at once. Bets on both; one resolves YES, the other is cancelled;
+  // each one's payouts are checked on their own.
+  const twoLive: { text: string; id: string }[] = [];
+  for (const [i, text] of [`Will the next round go to overtime? (${symbol})`, `Will chat spam emotes next? (${symbol})`].entries()) {
+    await must(`launch: the streamer launches question ${i + 1} of 2 (1 min)`, () => actOk(streamer, { kind: "launch", text, windowMin: 1 }));
+    const live = await waitForView(streamer, (v) => v.live.some((l) => l.text === text));
+    check(`launch: question ${i + 1} of 2 goes live`, live !== null, live?.live.map((l) => l.text).join(", ") ?? "none");
+    if (!live) throw new Fatal("two live: launch");
+    twoLive.push({ text, id: live.live.find((l) => l.text === text)!.id });
+  }
+  const [idA, idB] = twoLive.map((l) => l.id);
+  const both = await view(v1);
+  check("two live: both predictions are live at once", [idA, idB].every((id) => both.live.some((l) => l.id === id)), `live ${both.live.map((l) => l.id).join(", ")}`);
+  const roundA: Bet[] = [
+    { wallet: v1.wallet, side: "yes", amount: 30 },
+    { wallet: v2.wallet, side: "no", amount: 20 },
+    { wallet: v3.wallet, side: "no", amount: 10 },
+  ];
+  const roundB: Bet[] = [
+    { wallet: v1.wallet, side: "no", amount: 10 },
+    { wallet: v2.wallet, side: "yes", amount: 20 },
+    { wallet: v4.wallet, side: "yes", amount: 30 },
+  ];
+  const preBet3 = await balances([v1, v2, v3, v4]);
+  await Promise.all([
+    ...roundA.map((b) => must(`bet A: ${byWallet.get(b.wallet)!.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(byWallet.get(b.wallet)!, { kind: "bet", id: idA, side: b.side, amount: b.amount }))),
+    ...roundB.map((b) => must(`bet B: ${byWallet.get(b.wallet)!.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(byWallet.get(b.wallet)!, { kind: "bet", id: idB, side: b.side, amount: b.amount }))),
+  ]);
+  const pools = await view(v1);
+  const [poolA, poolB] = [idA, idB].map((id) => pools.live.find((l) => l.id === id)!);
+  check("two live: each prediction keeps its own pool", poolA.yes === 30 && poolA.no === 30 && poolA.bettors === 3 && poolB.yes === 50 && poolB.no === 10 && poolB.bettors === 3, `A ${poolA.yes}/${poolA.no}, B ${poolB.yes}/${poolB.no}`);
+  check("two live: v1 sees its own bet on each", poolA.myBet?.amount === 30 && poolB.myBet?.amount === 10, `A ${JSON.stringify(poolA.myBet)}, B ${JSON.stringify(poolB.myBet)}`);
+  const stakes = [v1, v2, v3, v4].map((p) => [...roundA, ...roundB].filter((b) => b.wallet === p.wallet).reduce((t, b) => t + b.amount, 0));
+  const afterBets3 = await balances([v1, v2, v3, v4]);
+  check("two live: each wallet paid its stakes on both", afterBets3.every((b, i) => b === preBet3[i] - stakes[i]), `${preBet3.join(", ")} -> ${afterBets3.join(", ")}`);
+  await refused("two live: a bettor on B can't be made a mod", streamer, { kind: "mod", wallet: v4.wallet, add: true }, "has a bet");
+  await waitUntilLocked(v1, [idA, idB]);
+
+  const beforeA = await balances([v1, v2, v3, v4]);
+  const resolvedA = await must("two live: the streamer resolves A YES", () => actOk(streamer, { kind: "resolve", id: idA, outcome: "yes" }));
+  check("two live: B stays live after A resolves", resolvedA.live.some((l) => l.id === idB) && !resolvedA.live.some((l) => l.id === idA), `live ${resolvedA.live.map((l) => l.id).join(", ")}`);
+  const afterA = await balances([v1, v2, v3, v4]);
+  const paidA = payouts(roundA, "yes");
+  const deltasA = afterA.map((b, i) => b - beforeA[i]);
+  const wantA = [v1, v2, v3, v4].map((p) => paidA.get(p.wallet) ?? 0);
+  check("two live: A pays its own parimutuel shares, nothing from B", deltasA.every((d, i) => d === wantA[i]), `got ${deltasA.join(", ")}, want ${wantA.join(", ")}`);
+
+  const beforeB = await balances([v1, v2, v3, v4]);
+  await must("two live: the streamer cancels B", () => actOk(streamer, { kind: "resolve", id: idB, outcome: "cancel" }));
+  const afterB = await balances([v1, v2, v3, v4]);
+  const deltasB = afterB.map((b, i) => b - beforeB[i]);
+  const wantB = [v1, v2, v3, v4].map((p) => roundB.filter((b) => b.wallet === p.wallet).reduce((t, b) => t + b.amount, 0));
+  check("two live: B refunds exactly its own stakes", deltasB.every((d, i) => d === wantB[i]), `got ${deltasB.join(", ")}, want ${wantB.join(", ")}`);
+  const end3 = await view(v1);
+  const [rA, rB] = [idA, idB].map((id) => end3.resolved.find((r) => r.id === id));
+  check("two live: each result shows its own outcome and my stake", rA?.outcome === "yes" && rA.my?.bet === 30 && rB?.outcome === "cancel" && rB.my?.bet === 10, `A ${rA?.outcome} ${JSON.stringify(rA?.my)}, B ${rB?.outcome} ${JSON.stringify(rB?.my)}`);
+  check("two live: nothing is live afterwards", end3.live.length === 0, `live ${end3.live.length}`);
 
   // jev rejects junk: it never reaches others, its 10 points stay spent, and its asker waits 5 minutes.
   const beforeJunk = await balance(v2);

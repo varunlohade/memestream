@@ -105,6 +105,17 @@ for (const [name, make, options] of STORES) {
     assert.equal(await store.commit(commit({ docs: [{ key: "ip:x", v: 0, json: "[2]", ttlMs: 1_000 }] })), "ok", "starts over at version 0");
   });
 
+  test(`${name}: a document saved as null is deleted and reads as new; a stale version can't delete it`, options, async () => {
+    const store = make();
+    assert.equal(await store.commit(commit({ docs: [{ key: "coin:a:p:0", v: 0, json: '{"id":"1"}' }] })), "ok");
+    assert.equal(await store.commit(commit({ docs: [{ key: "coin:a:p:0", v: 0, json: null }] })), "conflict");
+    assert.deepEqual(await store.read(["coin:a:p:0"]), [{ v: 1, json: '{"id":"1"}' }]);
+    assert.equal(await store.commit(commit({ docs: [{ key: "coin:a", v: 0, json: "{}" }, { key: "coin:a:p:0", v: 1, json: null }] })), "ok");
+    assert.deepEqual(await store.read(["coin:a:p:0", "coin:a"]), [{ v: 0, json: null }, { v: 1, json: "{}" }]);
+    assert.equal(await store.commit(commit({ docs: [{ key: "coin:a:p:0", v: 0, json: '{"id":"2"}' }] })), "ok", "starts over at version 0");
+    assert.deepEqual(await store.read(["coin:a:p:0"]), [{ v: 1, json: '{"id":"2"}' }]);
+  });
+
   test(`${name}: leaderboard ties are ordered the same way in both stores (wallet, high to low)`, options, async () => {
     const store = make();
     await store.commit(commit({ won: [{ wallet: "aaa", delta: 50 }, { wallet: "ccc", delta: 50 }, { wallet: "bbb", delta: 50 }, { wallet: "zzz", delta: 10 }] }));

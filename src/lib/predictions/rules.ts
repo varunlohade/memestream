@@ -47,10 +47,11 @@ export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
 export const FRAME_NOTE_MAX = 400;
 /** A "Not approved" note shows to its asker for this long. */
 export const NOTICE_MS = 5 * MINUTE_MS;
-/** A suggestion goes live by itself with this many eligible upvotes, when nothing is live. */
+/** A suggestion goes live by itself with this many eligible upvotes, while a live slot is free. */
 export const AUTO_LAUNCH_UPVOTES = 3;
 
-/** One live prediction at a time per coin, at most 20 over a stream's life. */
+/** Up to MAX_LIVE live predictions at a time per coin, at most 20 over a stream's life. */
+export const MAX_LIVE = 10;
 export const MAX_PREDICTIONS_PER_STREAM = 20;
 export const BET_WINDOWS_MIN = [1, 2, 5, 10] as const;
 export const DEFAULT_WINDOW_MIN = 2;
@@ -76,8 +77,8 @@ export const STREAM_GAP_MS = 120 * MINUTE_MS;
 /** After a result, bettors can flag it for this long; then it counts (leaderboard, asker reward) unless disputed. */
 export const FLAG_WINDOW_MS = 10 * MINUTE_MS;
 /**
- * Caps that keep a coin's whole game document under about 256 KB, since every action and GET
- * reads it and every action rewrites it (doc-size.test.ts builds one at full caps).
+ * Caps that keep each of a coin's game documents under about 256 KB, since every action and GET
+ * reads them and every action rewrites them (doc-size.test.ts builds a game at full caps).
  * Waiting suggestions per coin.
  */
 export const MAX_QUEUE = 25;
