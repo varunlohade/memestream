@@ -91,7 +91,12 @@ export type MarketPools = Record<Side, DammSnapshot>;
 /** Both pools, or null if the market has no pools (not created, or a pool is missing). */
 export async function loadMarketPools(connection: Connection, keys: MarketKeys): Promise<MarketPools | null> {
   const [yes, no] = await Promise.all([loadDammSnapshot(connection, keys.pools.yes), loadDammSnapshot(connection, keys.pools.no)]);
-  return yes && no ? { yes, no } : null;
+  if (yes && no) return { yes, no };
+  // loadDammSnapshot reads a failed RPC call (a rate limit) as "no pool": ask once more, so an RPC
+  // error surfaces as one (busy, try again) rather than as "no market".
+  const infos = await connection.getMultipleAccountsInfo([keys.pools.yes, keys.pools.no]);
+  if (infos[0] && infos[1]) throw new Error("Couldn't read the market's pools: RPC rate limit or outage");
+  return null;
 }
 
 /** Price and probability per side, from the pools' current prices. */
@@ -106,12 +111,13 @@ const NOT_OURS = "This market's pools don't match memestream's, so trading is of
  * A pool at a market's address is ours only if it is exactly what buildCreateMarketTxs makes: anyone
  * can create a pool at that address first, with the tokens the other way round, another range or
  * fee. Token A must be the outcome and B wSOL (the trade builders assume it), on our price range,
- * with our flat 1% fee, no dynamic fee, and fees collected in SOL. These never change, so a pass can be cached.
+ * with our flat 1% fee, no dynamic fee, fees collected in SOL, and already active. This says nothing
+ * about who made the pool: provenance.ts checks that.
  */
 export function verifyMarketPools(keys: MarketKeys, pools: MarketPools): void {
   for (const side of ["yes", "no"] as const) {
-    const { state, address } = pools[side];
-    if (!address.equals(keys.pools[side])) throw new InputError(NOT_OURS);
+    const { state, address, currentPoint } = pools[side];
+    if (!address.equals(keys.pools[side]) || state.activationPoint.gt(currentPoint)) throw new InputError(NOT_OURS);
     if (!state.tokenAMint.equals(keys.mints[side]) || !state.tokenBMint.equals(NATIVE_MINT)) throw new InputError(NOT_OURS);
     if (!state.sqrtMinPrice.eq(PRICE_RANGE.min) || !state.sqrtMaxPrice.eq(PRICE_RANGE.max)) throw new InputError(NOT_OURS);
     if (state.collectFeeMode !== COLLECT_FEE_MODE || state.poolFees.dynamicFee.initialized !== 0) throw new InputError(NOT_OURS);

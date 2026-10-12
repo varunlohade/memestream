@@ -14,7 +14,7 @@ import {
   NATIVE_MINT,
   TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
-import { type Connection, Keypair, type PublicKey, SystemProgram, Transaction, type TransactionInstruction } from "@solana/web3.js";
+import { type Connection, type Keypair, type PublicKey, SystemProgram, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
 import { built, type BuiltTx } from "../dbc/tx";
 import type { Side } from "./math";
@@ -36,8 +36,7 @@ export function wrapSolIxs(owner: PublicKey, lamports: BN): TransactionInstructi
 /** Closes `owner`'s wrapped-SOL account: its wSOL and rent come back as plain SOL. */
 export const unwrapSolIx = (owner: PublicKey) => createCloseAccountInstruction(getAssociatedTokenAddressSync(NATIVE_MINT, owner), owner, owner);
 
-async function poolTx(connection: Connection, keys: MarketKeys, side: Side, plan: SeedPlan): Promise<BuiltTx> {
-  const positionNft = Keypair.generate();
+async function poolTx(connection: Connection, keys: MarketKeys, side: Side, plan: SeedPlan, positionNft: Keypair): Promise<BuiltTx> {
   const { tx } = await new CpAmm(connection).createCustomPool({
     payer: keys.oracle,
     creator: keys.oracle,
@@ -70,9 +69,10 @@ const tokenAmount = (data: Buffer | undefined) => new BN(data && data.length >= 
 /**
  * The market's transactions still to send, in order. `lamportsPerPool` is the SOL on each pool's
  * wSOL side; the oracle also splits ~0.61× that into YES + NO for the pools' token side (only what
- * it doesn't hold already for a pool still missing).
+ * it doesn't hold already for a pool still missing). Each pool is created with its side's position
+ * NFT from `positionNfts` (provenance.ts), which is how the server later tells its pools from others'.
  */
-export async function buildCreateMarketTxs(connection: Connection, keys: MarketKeys, lamportsPerPool: BN): Promise<BuiltTx[]> {
+export async function buildCreateMarketTxs(connection: Connection, keys: MarketKeys, lamportsPerPool: BN, positionNfts: Record<Side, Keypair>): Promise<BuiltTx[]> {
   const plan = seedPlan(lamportsPerPool);
   const { oracle } = keys;
   const sides: Side[] = ["yes", "no"];
@@ -91,7 +91,7 @@ export async function buildCreateMarketTxs(connection: Connection, keys: MarketK
     const split = new Transaction().add(...wrapSolIxs(oracle, short), ...(await splitIxs(connection, keys, oracle, short)), unwrapSolIx(oracle));
     txs.push(built(split, oracle));
   }
-  for (const side of missing) txs.push(await poolTx(connection, keys, side, plan));
+  for (const side of missing) txs.push(await poolTx(connection, keys, side, plan, positionNfts[side]));
   return txs;
 }
 

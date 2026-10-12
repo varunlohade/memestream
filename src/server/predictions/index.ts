@@ -12,12 +12,12 @@ import { isBase58Of } from "@/lib/base58";
 import { isPredictionId } from "@/lib/markets/math";
 import type { MarketRecord } from "@/lib/markets/record";
 import { getCoinDetail } from "@/server/coins";
-import { closeMarketTrading, createMarket, resolveMarket } from "@/server/markets";
+import { closeMarketTrading, createMarket, MarketUnavailableError, resolveMarket } from "@/server/markets";
 import { UserError } from "@/server/errors";
 import { aiCheckFromEnv } from "./ai-check";
 import { reviewFromEnv } from "./review";
 import { marketsEnabled } from "./flag";
-import { type MarketDeps, predictionsService, type PredictionsService } from "./service";
+import { type MarketDeps, MarketUnavailable, predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
 import { testSettings } from "./test-settings";
 
@@ -39,7 +39,14 @@ function marketDeps(): MarketDeps | null {
   if (!marketsEnabled()) return null;
   const seedSolPerPool = process.env.MEMESTREAM_MARKET_SEED_SOL || DEFAULT_SEED_SOL;
   return {
-    create: (mint, predictionId, ticker) => oneAtATime(async () => (await createMarket({ mint, predictionId, ticker, seedSolPerPool })).record),
+    create: (mint, predictionId, ticker) =>
+      oneAtATime(async () => {
+        try {
+          return (await createMarket({ mint, predictionId, ticker, seedSolPerPool })).record;
+        } catch (error) {
+          throw error instanceof MarketUnavailableError ? new MarketUnavailable(error.message) : error;
+        }
+      }),
     close: (record) => oneAtATime(() => closeMarketTrading(record)),
     resolve: (record, outcome) => oneAtATime(() => resolveMarket(record, outcome)),
   };
@@ -48,6 +55,8 @@ function marketDeps(): MarketDeps | null {
 /**
  * The registered market of a coin's prediction (only markets the oracle created); throws a user
  * error if there's none. With `bettor`, also refuses the coin's streamer and mods (they resolve it).
+ * Callers pass the same `wallet` the trade is built for: that wallet is its fee payer and only
+ * signer, so no other wallet can sign a trade that passed this check.
  */
 export async function registeredMarket(mint: string, predictionId: string, bettor?: string): Promise<MarketRecord> {
   if (!isBase58Of(mint, 32) || !isPredictionId(predictionId)) throw new UserError("No market for this prediction");

@@ -358,8 +358,12 @@ const marketRetryDue = (m: MarketState, now: number) => m.tries === 0 || now >= 
 /** The market still needs a server step (it isn't resolved or given up on). */
 const marketPending = (m: MarketState | undefined) => m !== undefined && m.step !== "resolved" && m.step !== "failed";
 
-/** What a market pays once its result counts: cancelled or disputed refunds everyone. */
-export const marketOutcome = (p: Summary): MarketOutcome => (p.outcome === "cancel" || p.disputed ? "refund" : p.outcome);
+/**
+ * What a market pays: the streamer's result, unless it was cancelled or the AI check disagreed
+ * (both refund everyone). Points flags never count here: they cost nothing, so a crowd of free
+ * wallets could otherwise force a real-SOL refund. They still keep a result off the points leaderboard.
+ */
+export const marketOutcome = (p: Summary): MarketOutcome => (p.outcome === "cancel" || p.ai?.verdict === "disagree" ? "refund" : p.outcome);
 
 /**
  * The step due on one prediction's market, if any: create while it's live and taking bets; close
@@ -415,6 +419,14 @@ export function applyMarketDone(state: Game, job: MarketJob, question: string | 
     if (!p?.market || !from.includes(p.market.step)) return;
     const address = question ?? p.market.question;
     p.market = { step: to, tries: 0, at: now, ...(address ? { question: address } : {}) };
+  });
+}
+
+/** A market that can never open (someone else made a pool at its address): give up now, no retries. */
+export function applyMarketUnavailable(state: Game, id: string, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, ({ game }) => {
+    const p = [...game.live, ...game.resolved].find((x) => x.id === id);
+    if (p?.market?.step === "opening") p.market = { ...p.market, step: "failed" };
   });
 }
 

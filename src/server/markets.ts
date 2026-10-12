@@ -19,7 +19,6 @@ import { Keypair, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import type { PreparedTx, TradePreview } from "@/lib/api-types";
 import type { DammQuote } from "@/lib/damm/trade";
-import { lpPositionsOf } from "@/lib/damm/positions";
 import { formatUnits, lamportsToSol, parseUnits, solToLamports } from "@/lib/dbc/units";
 import type { BuiltTx } from "@/lib/dbc/tx";
 import { buildCreateMarketTxs, buildMarketMetadataTx } from "@/lib/markets/create";
@@ -35,6 +34,7 @@ import {
   OUTCOME_DECIMALS,
   verifyMarketPools,
 } from "@/lib/markets/pool";
+import { poolOwnership, positionNfts } from "@/lib/markets/provenance";
 import type { MarketPosition, MarketRecord, MarketView } from "@/lib/markets/record";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "@/lib/markets/settle";
 import { type MarketOrder, prepareMarketTrade, quoteMarketTrade } from "@/lib/markets/trade";
@@ -42,6 +42,7 @@ import { fetchQuestion, type QuestionState } from "@/lib/markets/vault";
 import { pollUntil } from "@/lib/poll";
 import { parseTicker } from "@/lib/short-link";
 import { getChain, networkInfo, rememberBuilt, signatureStatus } from "./chain";
+import { InputError } from "@/lib/dbc/errors";
 import { asUserFacing, UserError } from "./errors";
 
 const SIDES: Side[] = ["yes", "no"];
@@ -128,14 +129,31 @@ function keysOf(record: MarketRecord): MarketKeys {
   return keys;
 }
 
-/** Questions whose oracle checked out: that never changes, so it's read once per process. */
+/** Markets whose question oracle and pool makers checked out. Neither can ever change, so each is read once per process. */
 const verifiedQuestions = new Set<string>();
+const verifiedMakers = new Set<string>();
 
 /**
- * The market's pools and question, checked: both pools exactly as we make them (verifyMarketPools)
- * and the question resolvable only by our oracle.
+ * The oracle made both pools: each holds the position our secret-derived NFT created (provenance.ts).
+ * Only checkable until trading closes (closing removes that position); the registry entry was
+ * written only after this passed at create, and closed markets take no trades.
  */
-async function loadVerified(keys: MarketKeys): Promise<{ pools: MarketPools; question: QuestionState }> {
+async function requireOurPools(keys: MarketKeys): Promise<void> {
+  const id = keys.question.toBase58();
+  if (verifiedMakers.has(id)) return;
+  const nfts = positionNfts(marketSecret(), keys.questionId);
+  const owner = await poolOwnership(getChain().connection, keys, { yes: nfts.yes.publicKey, no: nfts.no.publicKey });
+  if (owner.yes !== "ours" || owner.no !== "ours") throw new UserError(NOT_OUR_POOLS);
+  verifiedMakers.add(id);
+}
+
+const NOT_OUR_POOLS = "This market's pools weren't made by memestream, so trading is off for it";
+
+/**
+ * The market's pools and question, checked: both pools exactly as we make them (verifyMarketPools),
+ * the question resolvable only by our oracle, and while `open`, both pools made by our oracle.
+ */
+async function loadVerified(keys: MarketKeys, open: boolean): Promise<{ pools: MarketPools; question: QuestionState }> {
   const { connection } = getChain();
   const [pools, question] = await Promise.all([loadMarketPools(connection, keys), fetchQuestion(connection, keys.question)]);
   if (!pools || !question) throw new UserError(NO_MARKET);
@@ -144,6 +162,7 @@ async function loadVerified(keys: MarketKeys): Promise<{ pools: MarketPools; que
     verifiedQuestions.add(keys.question.toBase58());
   }
   verifyMarketPools(keys, pools);
+  if (open) await requireOurPools(keys);
   return { pools, question };
 }
 
@@ -187,7 +206,7 @@ async function positionOf(keys: MarketKeys, wallet: PublicKey): Promise<MarketPo
 export async function getMarket(record: MarketRecord, wallet: string | null, now: number): Promise<MarketView> {
   return userFacing(async () => {
     const keys = keysOf(record);
-    const { pools, question } = await loadVerified(keys);
+    const { pools, question } = await loadVerified(keys, now < record.lockAt);
     return {
       ...marketOdds(pools),
       trading: tradingOpen(record, question, now),
@@ -217,7 +236,8 @@ function previewOf(order: MarketOrder, quote: DammQuote): TradePreview {
 /** The verified pools of a market that's still taking bets. */
 async function openPools(record: MarketRecord, now: number): Promise<{ keys: MarketKeys; pools: MarketPools }> {
   const keys = keysOf(record);
-  const { pools, question } = await loadVerified(keys);
+  if (now >= record.lockAt) throw new UserError("Betting on this prediction is closed");
+  const { pools, question } = await loadVerified(keys, true);
   if (!tradingOpen(record, question, now)) throw new UserError("Betting on this prediction is closed");
   return { keys, pools };
 }
@@ -252,7 +272,7 @@ export async function buildMarketTradeForWallet(record: MarketRecord, req: Marke
 export async function buildMarketRedeemForWallet(record: MarketRecord, wallet: string): Promise<PreparedTx> {
   return userFacing(async () => {
     const keys = keysOf(record);
-    await loadVerified(keys);
+    await loadVerified(keys, false);
     return toPreparedTx(await buildRedeemTx(getChain().connection, keys, publicKey(wallet, "wallet")));
   });
 }
@@ -283,6 +303,11 @@ async function sendAllAsOracle(txs: BuiltTx[]): Promise<string[]> {
   return signatures;
 }
 
+/** A market that can never be ours (someone else made a pool at its address): don't retry, give up. */
+export class MarketUnavailableError extends Error {
+  override name = "MarketUnavailableError";
+}
+
 export type CreateMarketRequest = MarketRef & { ticker: string; seedSolPerPool: string };
 export type CreatedMarket = { record: Omit<MarketRecord, "lockAt">; signatures: string[] };
 
@@ -298,8 +323,13 @@ export async function createMarket(req: CreateMarketRequest): Promise<CreatedMar
   if (!ticker) throw new UserError("Ticker: 1 to 10 letters or digits");
   const { connection } = getChain();
   const keys = marketKeys(connection, marketSecret(), publicKey(req.mint, "coin"), req.predictionId, oraclePublicKey());
+  const nfts = positionNfts(marketSecret(), keys.questionId);
+  const nftKeys = { yes: nfts.yes.publicKey, no: nfts.no.publicKey };
+  // Never adopt a pool we didn't make (it can look like ours, even name our oracle as its creator).
+  const before = await poolOwnership(connection, keys, nftKeys);
+  if (SIDES.some((side) => before[side] === "theirs")) throw new MarketUnavailableError("Someone else made a pool at this market's address");
   const fresh = !(await fetchQuestion(connection, keys.question));
-  const signatures = await sendAllAsOracle(await buildCreateMarketTxs(connection, keys, solToLamports(req.seedSolPerPool)));
+  const signatures = await sendAllAsOracle(await buildCreateMarketTxs(connection, keys, solToLamports(req.seedSolPerPool), nfts));
   if (fresh && metadataOn()) {
     // Fits Metaplex's 32-character name: "$" + 10 + " #" + 9 + " YES".
     const names = (side: Side) => ({ name: `$${ticker} #${req.predictionId} ${side.toUpperCase()}`, symbol: side.toUpperCase(), uri: "" });
@@ -307,10 +337,12 @@ export async function createMarket(req: CreateMarketRequest): Promise<CreatedMar
       console.warn(`markets: naming the YES/NO mints failed (${error.message}); the market works without names`),
     );
   }
-  const { pools } = await loadVerified(keys);
-  for (const side of SIDES) {
-    if ((await lpPositionsOf(connection, pools[side].address, keys.oracle)).length === 0) throw new Error(`markets: the oracle holds no liquidity in the ${side} pool`);
-  }
+  // Pools that aren't ours (made by someone else, or not as we make them) never will be; a read that
+  // found nothing yet is worth a retry.
+  await loadVerified(keys, true).catch((error: Error) => {
+    const notOurs = (error instanceof UserError || error instanceof InputError) && error.message !== NO_MARKET;
+    throw notOurs ? new MarketUnavailableError(error.message) : error;
+  });
   const record: CreatedMarket["record"] = {
     mint: req.mint,
     predictionId: req.predictionId,
@@ -328,8 +360,17 @@ export async function createMarket(req: CreateMarketRequest): Promise<CreatedMar
 /** When betting closes: the oracle takes its liquidity out of both pools. Nothing left to take: no transactions. */
 export async function closeMarketTrading(record: MarketRecord): Promise<string[]> {
   const keys = keysOf(record);
-  const { pools } = await loadVerified(keys);
-  return sendAllAsOracle(await buildCloseTradingTxs(getChain().connection, keys, pools));
+  const close = async () => {
+    const { pools } = await loadVerified(keys, false);
+    return sendAllAsOracle(await buildCloseTradingTxs(getChain().connection, keys, pools));
+  };
+  try {
+    return await close();
+  } catch (error) {
+    // Usually a price pushed past the close's minimums since the quote: quote again at once.
+    console.warn(`markets: closing trading failed (${(error as Error).message}); trying again with a fresh quote`);
+    return close();
+  }
 }
 
 /** After the off-chain flow settles: YES, NO, or refund (disputed or cancelled). null if it was already resolved. */

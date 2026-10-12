@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MarketRecord } from "@/lib/markets/record";
 import { FLAG_WINDOW_MS, MARKET_CREATE_MAX_TRIES, MARKET_RETRY_MS } from "@/lib/predictions/rules";
-import { type MarketDeps, predictionsService } from "./service";
+import { type MarketDeps, MarketUnavailable, predictionsService } from "./service";
 import { memoryStore } from "./store";
 
 const MIN = 60_000;
@@ -43,7 +43,7 @@ function fakeMarkets() {
   return { calls, fail, deps };
 }
 
-function setup(markets: MarketDeps | null) {
+function setup(markets: MarketDeps | null, closeWaitMs = 0) {
   const clock = { t: T0 };
   const store = memoryStore(() => clock.t);
   const deferred: (() => Promise<void>)[] = [];
@@ -57,6 +57,7 @@ function setup(markets: MarketDeps | null) {
     review: async () => ({ approved: true }),
     defer: (task) => void deferred.push(task),
     markets,
+    closeWaitMs,
   });
   const settle = async () => {
     while (deferred.length) await Promise.all(deferred.splice(0).map((task) => task()));
@@ -176,4 +177,32 @@ test("the streamer and mods count as staff for market bets; viewers don't", asyn
   assert.equal(await service.staffOf(COIN, STREAMER), true);
   assert.equal(await service.staffOf(COIN, "mod1"), true);
   assert.equal(await service.staffOf(COIN, "viewer"), false);
+});
+
+test("a market whose pool address someone else took is given up on at once, never retried or registered", async () => {
+  const { calls, deps } = fakeMarkets();
+  const create = deps.create;
+  deps.create = async (...args) => {
+    await create(...args);
+    throw new MarketUnavailable("Someone else made a pool at this market's address");
+  };
+  const { clock, service, launch, look } = setup(deps);
+  const id = await launch(10);
+  assert.equal((await look()).live[0].market, "failed");
+  clock.t += 5 * MARKET_RETRY_MS;
+  await look();
+  assert.equal(calls.length, 1);
+  assert.equal(await service.market(COIN, id), null);
+});
+
+test("a lock that's close gets a timer: trading closes right at lockAt, with no view needed", async () => {
+  const { calls, deps } = fakeMarkets();
+  const { clock, service, settle, launch, look } = setup(deps, 1_000);
+  const id = await launch();
+  const { lockAt } = (await look()).live[0];
+  clock.t = lockAt - 300;
+  setTimeout(() => (clock.t = lockAt), 100); // the clock reaches the lock while the timer waits
+  await service.act(COIN, STREAMER, { kind: "crowd", on: false }); // any action starts a market run
+  await settle();
+  assert.deepEqual(calls, [`create ${id} MIRA`, `close ${id}`], "closed by the timer, not by a later view");
 });

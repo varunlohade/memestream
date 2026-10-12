@@ -9,7 +9,7 @@ import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
-import { applyMarketDone, type MarketJob, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
+import { applyMarketDone, applyMarketUnavailable, type MarketJob, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
@@ -22,6 +22,9 @@ import type { Commit, PredictionStore } from "./store";
 import { REAL_WAITS, type Waits } from "./test-settings";
 
 export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated"; streamUrl?: string | null; symbol?: string };
+
+/** Thrown by MarketDeps.create when the market can never be made (its pool address is taken): no retries. */
+export class MarketUnavailable extends Error {}
 
 /**
  * The oracle's market steps (MEMESTREAM_MARKETS). Each is idempotent on chain and throws if it
@@ -62,6 +65,11 @@ export type ServiceDeps = {
   /** Commit attempts before answering "busy", and the pause between them. */
   attempts?: number;
   backoffMs?: () => number;
+  /**
+   * A market whose betting closes within this long gets a timer (inside the response's after-work)
+   * that closes it right at lockAt, instead of waiting for the next view. 0 turns the timer off (tests).
+   */
+  closeWaitMs?: number;
   /** Watch time before the starter grant and before eligibility (shorter only in test runs). */
   waits?: Waits;
 };
@@ -78,6 +86,10 @@ const marketKey = (mint: string, predictionId: string) => `market:${mint}:${pred
 /** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
 type Presence = { at: number; since?: number };
 const DEFAULT_COMMIT_ATTEMPTS = 12;
+/** Close timers cover locks this close (they run inside the response's after-work, which has a time limit). */
+const DEFAULT_CLOSE_WAIT_MS = 60_000;
+/** A timer fires this long after lockAt, so the server clock is surely past it. */
+const CLOSE_TIMER_SLACK_MS = 500;
 /** How long an action's idempotency id is remembered: far longer than one request and its re-sends. */
 const ACT_ONCE_TTL_MS = 10 * 60 * 1000;
 /** A tick that keeps losing the race just shows what others saved. */
@@ -474,16 +486,46 @@ export function predictionsService(deps: ServiceDeps) {
 
   /** Coins with a market run in flight in this process (another process is held off by the claim). */
   const marketRunning = new Set<string>();
+  /** Coins with a close timer waiting in this process. */
+  const closeTimers = new Set<string>();
+  const closeWaitMs = deps.closeWaitMs ?? DEFAULT_CLOSE_WAIT_MS;
 
-  /** Runs due market steps after the response is sent; one run per coin at a time. */
-  function startMarketRun(mint: string, coin: CoinFacts) {
+  /** One market run for the coin, unless one is already going in this process. */
+  async function runMarketsOnce(mint: string, coin: CoinFacts) {
     if (marketRunning.has(mint)) return;
     marketRunning.add(mint);
-    deps.defer(() =>
-      marketRun(mint, coin)
-        .catch((error: Error) => console.warn(`predictions: a market run failed (${error.message}); the next view retries it`))
-        .finally(() => marketRunning.delete(mint)),
-    );
+    try {
+      await marketRun(mint, coin);
+    } catch (error) {
+      console.warn(`predictions: a market run failed (${(error as Error).message}); the next view retries it`);
+    } finally {
+      marketRunning.delete(mint);
+    }
+  }
+
+  /** Runs due market steps after the response is sent, then waits for a lock that's close and closes it on time. */
+  function startMarketRun(mint: string, coin: CoinFacts) {
+    if (marketRunning.has(mint)) return;
+    deps.defer(async () => {
+      await runMarketsOnce(mint, coin);
+      await closeOnTime(mint, coin);
+    });
+  }
+
+  /** Sleeps until the next open market's lockAt (if it's within closeWaitMs), then runs the close. One timer per coin. */
+  async function closeOnTime(mint: string, coin: CoinFacts) {
+    if (closeWaitMs <= 0 || closeTimers.has(mint)) return;
+    const { game } = await readGame(mint, coin.creator, []);
+    const t = now();
+    const next = Math.min(...game.live.filter((p) => p.market?.step === "open" && p.lockAt > t).map((p) => p.lockAt));
+    if (!Number.isFinite(next) || next - t > closeWaitMs) return;
+    closeTimers.add(mint);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, next - t + CLOSE_TIMER_SLACK_MS));
+      await runMarketsOnce(mint, coin);
+    } finally {
+      closeTimers.delete(mint);
+    }
   }
 
   /** The registered market of a coin's prediction, or null (none, or not created yet). */
@@ -528,6 +570,11 @@ export function predictionsService(deps: ServiceDeps) {
       else await markets.resolve(record, job.outcome);
       await commitMarketDone(mint, coin.creator, job, null);
     } catch (error) {
+      if (error instanceof MarketUnavailable) {
+        console.warn(`predictions: market for prediction ${job.id} is unavailable (${error.message}); points bets stay open`);
+        await commitGame(mint, coin.creator, (g, env) => applyMarketUnavailable(g, job.id, now(), env));
+        return;
+      }
       console.warn(`predictions: market ${job.kind} for prediction ${job.id} failed (${error instanceof Error ? error.message : "unknown error"}); it is tried again later`);
     }
   }

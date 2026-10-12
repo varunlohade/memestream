@@ -12,6 +12,7 @@ import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 import { solToLamports } from "../../src/lib/dbc/units";
 import { buildCreateMarketTxs, buildMarketMetadataTx } from "../../src/lib/markets/create";
+import { positionNfts } from "../../src/lib/markets/provenance";
 import { payoutNumerators, redeemLamports } from "../../src/lib/markets/math";
 import { loadMarketPools, type MarketKeys, marketKeys, marketOdds, type MarketPools, verifyMarketPools } from "../../src/lib/markets/pool";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "../../src/lib/markets/settle";
@@ -61,7 +62,7 @@ async function signAndSend(prepared: { transaction: string; blockhash: string },
 
 async function createMarket(predictionId: string): Promise<{ keys: MarketKeys; pools: MarketPools }> {
   const keys = marketKeys(connection, SECRET, coinMint, predictionId, oracle.publicKey);
-  for (const tx of await buildCreateMarketTxs(connection, keys, SEED_PER_POOL)) await sendAndConfirm(connection, tx, [oracle]);
+  for (const tx of await buildCreateMarketTxs(connection, keys, SEED_PER_POOL, positionNfts(SECRET, keys.questionId))) await sendAndConfirm(connection, tx, [oracle]);
   await sendAndConfirm(connection, await buildMarketMetadataTx(connection, keys, NAMES), [oracle]);
   const pools = await loadMarketPools(connection, keys);
   assert.ok(pools, "both pools exist");

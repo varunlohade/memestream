@@ -76,7 +76,7 @@ function closedAndResolved(outcome: "yes" | "no" | "cancel", env: (now: number) 
   return { game, id };
 }
 
-test("resolve mapping: YES and NO pay their side; a cancel or a disputed result refunds", () => {
+test("resolve mapping: YES and NO pay their side; a cancel refunds; points flags change nothing", () => {
   const after = T0 + MIN + FLAG_WINDOW_MS;
   for (const outcome of ["yes", "no", "cancel"] as const) {
     const { game } = closedAndResolved(outcome);
@@ -84,8 +84,8 @@ test("resolve mapping: YES and NO pay their side; a cancel or a disputed result 
   }
   const { game, id } = closedAndResolved("yes");
   const flagged = apply(game, { kind: "flag", id }, viewer("v1"), T0 + MIN + 1_000, on(T0)).game;
-  assert.equal(flagged.resolved[0].disputed, true);
-  assert.deepEqual(claim(flagged, after).jobs[0], { id, kind: "resolve", outcome: "refund" });
+  assert.equal(flagged.resolved[0].disputed, true, "disputed for the points game");
+  assert.deepEqual(claim(flagged, after).jobs[0], { id, kind: "resolve", outcome: "yes" }, "free-points flags can't force a real-SOL refund");
 });
 
 test("resolve waits for the AI check, as the points results do", () => {
