@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Actor, apply, applyReview, type Game, newGame, STAFF } from "./engine";
 import {
+  AI_CHECK_MAX_TRIES,
   BET_WINDOWS_MIN,
   FLAG_WINDOW_MS,
+  FRAME_NOTE_MAX,
   MAX_BET,
   MAX_BETTORS,
   MAX_HISTORY,
@@ -48,10 +50,15 @@ test("a coin's game document at full caps stays under 256 KB", () => {
 
   // Then the same shapes copied up to every cap: a result can resolve once a minute at the
   // soonest, so at most this many sit in their flag window at once.
+  // Open ones also carry an AI check still running with its launch and lock frames at their longest.
   const openAtOnce = FLAG_WINDOW_MS / (BET_WINDOWS_MIN[0] * MIN);
-  const summary = { ...open, open: null, flags: MAX_BETTORS };
+  const note = (kind: "launch" | "lock") => ({ kind, at: T0, text: "x".repeat(FRAME_NOTE_MAX) });
+  const frames = [note("launch"), note("lock")];
+  const summary = { ...open, open: null, flags: MAX_BETTORS, ai: { verdict: "disagree" as const, at: T0 } };
   game.resolved = Array.from({ length: Math.max(MAX_HISTORY, openAtOnce) }, (_, i) =>
-    i < openAtOnce ? { ...structuredClone(open), id: String(1_000 + i) } : { ...summary, id: String(1_000 + i) },
+    i < openAtOnce
+      ? { ...structuredClone(open), id: String(1_000 + i), check: { tries: AI_CHECK_MAX_TRIES, at: T0, frames } }
+      : { ...summary, id: String(1_000 + i) },
   );
   game.suggestions = Array.from({ length: MAX_QUEUE }, (_, i) => ({
     ...structuredClone(suggestion),
@@ -60,7 +67,7 @@ test("a coin's game document at full caps stays under 256 KB", () => {
     review: { tries: REVIEW_MAX_TRIES, at: T0 + 10 * MIN },
   }));
   const bets = Object.fromEntries(bettors.map((b) => [b, { side: "yes" as const, amount: MAX_BET, eligible: false }]));
-  game.live = { id: "3000", text: question(2), asker: wallet("asker", 0), launchedAt: T0, lockAt: T0, launchedBy: wallet("mod", 0), bets, yes: MAX_BET * MAX_BETTORS, no: 0, bettors: MAX_BETTORS };
+  game.live = { id: "3000", text: question(2), asker: wallet("asker", 0), launchedAt: T0, lockAt: T0, launchedBy: wallet("mod", 0), bets, yes: MAX_BET * MAX_BETTORS, no: 0, bettors: MAX_BETTORS, frames };
   game.won = Object.fromEntries(Array.from({ length: MAX_WON_ENTRIES }, (_, i) => [wallet("winner", i), -1_000_000]));
   game.nextId = 1_000_000;
   // A staff question under review, and every "Not approved" note at its longest.
