@@ -82,7 +82,7 @@ async function http(method: "GET" | "POST", path: string, opts: { token?: string
 // Transactions: the server builds, we sign locally and send, then poll the server's status route
 // ---------------------------------------------------------------------------------------------
 
-async function sendViaApp(connection: Connection, action: "launch" | "trade" | "market" | "market-redeem", u: ReturnType<typeof user>, body: Record<string, unknown>) {
+async function sendViaApp(connection: Connection, action: "launch" | "trade" | "market" | "market-redeem" | "graduate", u: ReturnType<typeof user>, body: Record<string, unknown>) {
   const prepared = (await http("POST", `/api/tx/${action}`, { body: { wallet: u.wallet, ...body } })) as { transaction: string; blockhash: string; intent?: string; mint?: string };
   const bytes = Buffer.from(prepared.transaction, "base64");
   let raw: Uint8Array;
@@ -243,6 +243,13 @@ async function main(args: string[]): Promise<string> {
       }
       const { sig } = await sendViaApp(connection, "trade", u, { mint: coin.mint, side: command, amount });
       return `${command} ${u.name} ${coin.symbol} ${amount}${command === "buy" ? " SOL" : " coins"} confirmed ${solscan(sig)}`;
+    }
+
+    case "graduate": {
+      const u = user(rest[0]);
+      const coin = await resolveMint(rest[1]);
+      const { sig } = await sendViaApp(connection, "graduate", u, { mint: coin.mint });
+      return `graduate ${u.name} ${coin.symbol} to Meteora confirmed ${solscan(sig)}`;
     }
 
     case "signin": {
