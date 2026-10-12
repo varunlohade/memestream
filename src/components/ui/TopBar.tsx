@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
 import { Sprite, useTexture } from "@/components/pixel/Pixel";
+import { useSearch } from "@/components/search";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { shortAddress } from "@/lib/format";
 import { PageTexture } from "./PageTexture";
@@ -85,6 +87,26 @@ function WalletMenu() {
   );
 }
 
+/** Filters the home board by ticker or name; typing on another page goes to the board. */
+function SearchBox() {
+  const { query, setQuery } = useSearch();
+  const router = useRouter();
+  return (
+    <input
+      type="search"
+      className="slot search"
+      placeholder="search token"
+      aria-label="Search coins by ticker or name"
+      value={query}
+      onChange={(e) => {
+        setQuery(e.target.value);
+        // Read on the event, not via usePathname: the top bar must not block prerendering.
+        if (window.location.pathname !== "/") router.push("/");
+      }}
+    />
+  );
+}
+
 export function TopBar({ network }: { network: string }) {
   const texture = useTexture("deep", 2);
   return (
@@ -95,7 +117,13 @@ export function TopBar({ network }: { network: string }) {
         <span className="wm">memestream</span>
         <span className="net">{network}</span>
       </Link>
-      <WalletMenu />
+      <SearchBox />
+      <div className="top-actions">
+        <Link href="/go-live" className="mbtn buy go-live">
+          Go live
+        </Link>
+        <WalletMenu />
+      </div>
     </header>
   );
 }
