@@ -11,6 +11,7 @@ export function parseAction(body: Record<string, unknown>): Action | null {
       return typeof body.text === "string" ? { kind: "suggest", text: body.text } : null;
     case "upvote":
     case "remove":
+    case "approve":
     case "flag":
       return isId(body.id) ? { kind: body.kind, id: body.id } : null;
     case "bet":

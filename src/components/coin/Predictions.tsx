@@ -29,6 +29,8 @@ import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predic
 import bs58 from "bs58";
 
 const POLL_MS = 5_000;
+/** Faster while the viewer waits on a question under review, so its approval shows within seconds. */
+const REVIEW_POLL_MS = 1_500;
 const CLOCK_TICK_MS = 1_000;
 const SESSION_KEY = "memestream.predictions.session";
 /** A saved session this close to expiry is dropped, so a request never carries a token about to lapse. */
@@ -86,6 +88,10 @@ function useServerNow(view: PredictionsView | null) {
   return now;
 }
 
+function ReviewTag() {
+  return <span className="pm-otag pm-oc pm-closedtag">Under review</span>;
+}
+
 function OutcomeTag({ outcome }: { outcome: Outcome }) {
   if (outcome === "yes") return <span className="pm-otag pm-oy">Yes</span>;
   if (outcome === "no") return <span className="pm-otag pm-ono">No</span>;
@@ -133,6 +139,9 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
 
   const authHeaders = useCallback((): HeadersInit => (session ? { authorization: `Bearer ${session.token}` } : {}), [session]);
 
+  const waiting = view !== null && (view.queue.some((s) => s.mine && s.status === "review") || (view.pending !== null && !view.pending.stuck));
+  const pollMs = waiting ? REVIEW_POLL_MS : POLL_MS;
+
   // Poll the coin's predictions while the tab is visible.
   useEffect(() => {
     const load = async () => {
@@ -145,9 +154,9 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
     void load();
     const timer = setInterval(() => {
       if (!document.hidden) void load();
-    }, POLL_MS);
+    }, pollMs);
     return () => clearInterval(timer);
-  }, [mint, authHeaders]);
+  }, [mint, authHeaders, pollMs]);
 
   // Watch points: one heartbeat a minute while this page is visible (the server ignores faster ones).
   useEffect(() => {
@@ -284,9 +293,16 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           )}
           {staff && !locked && <p className="mute pm-small">Resolve once betting closes.</p>}
         </div>
+      ) : view.pending ? (
+        <div className="pm-row">
+          <span className="pm-q">{view.pending.text}</span>
+          <ReviewTag />
+          {view.pending.stuck ? <StuckButtons busy={busy} onAct={(kind) => act({ kind, id: view.pending!.id })} /> : <span />}
+        </div>
       ) : (
         <p className="mute pm-small">Nothing live right now.</p>
       )}
+      {me?.notice && <p className="mute pm-small">{me.notice}</p>}
 
       <div className="pm-subh">
         Up next{" "}
@@ -322,10 +338,16 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
       {view.queue.map((s) => (
         <div className="pm-row" key={s.id}>
           <span className="pm-q">{s.text}</span>
-          <span className="mute num">
-            {s.upvotes} upvote{s.upvotes === 1 ? "" : "s"}
-          </span>
-          {staff ? (
+          {s.status === "review" ? (
+            <ReviewTag />
+          ) : (
+            <span className="mute num">
+              {s.upvotes} upvote{s.upvotes === 1 ? "" : "s"}
+            </span>
+          )}
+          {s.status === "review" ? (
+            staff && s.stuck ? <StuckButtons busy={busy} onAct={(kind) => act({ kind, id: s.id })} /> : <span />
+          ) : staff ? (
             <div className="pm-qb">
               <button type="button" className="mbtn buy" disabled={busy || Boolean(live)} onClick={() => act({ kind: "launch", id: s.id, windowMin })}>
                 Launch
@@ -360,7 +382,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           <button
             type="submit"
             className={`mbtn ${!staff && notHolder ? "off" : "buy"}`}
-            disabled={busy || question.trim().length === 0 || (staff !== null && Boolean(live)) || (!staff && notHolder)}
+            disabled={busy || question.trim().length === 0 || (staff !== null && Boolean(live || view.pending)) || (!staff && notHolder)}
           >
             {staff ? "Launch" : `Suggest, ${SUGGEST_COST} points`}
           </button>
@@ -394,6 +416,20 @@ function headlineFor(me: PredictionsView["me"]) {
   if (me?.role === "streamer") return "You can't bet on your own coin";
   if (me?.role === "mod") return "Mods can't bet on this coin";
   return me ? `Your points ${fmt(me.balance)}. You earn points by watching.` : "You earn points by watching.";
+}
+
+/** A question every review check failed on: staff approve or remove it by hand. */
+function StuckButtons({ busy, onAct }: { busy: boolean; onAct: (kind: "approve" | "remove") => void }) {
+  return (
+    <div className="pm-qb">
+      <button type="button" className="mbtn buy" disabled={busy} onClick={() => onAct("approve")}>
+        Approve
+      </button>
+      <button type="button" className="mbtn off" disabled={busy} onClick={() => onAct("remove")}>
+        Remove
+      </button>
+    </div>
+  );
 }
 
 const RESOLVE_LABELS: Record<Outcome, string> = { yes: "Resolve Yes", no: "Resolve No", cancel: "Cancel" };
