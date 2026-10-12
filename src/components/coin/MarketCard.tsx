@@ -49,7 +49,7 @@ const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-dig
 const OUTCOME_TEXT = { yes: "YES", no: "NO", refund: "refund (every share pays 0.5 SOL)" } as const;
 
 /** The market's odds and the wallet's position, polled while `pollMs` is set. */
-function useMarket(mint: string, predictionId: string, wallet: string | null, pollMs: number | null) {
+export function useMarket(mint: string, predictionId: string, wallet: string | null, pollMs: number | null) {
   const [market, setMarket] = useState<MarketView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const load = useCallback(async () => {
@@ -107,6 +107,8 @@ type CardProps = {
   /** What it resolves from (the streamer's official link, or the stream), and when betting was open. */
   source?: string | null;
   betWindow?: [number, number] | null;
+  /** Open the buy box on this side at once (picked from a compact row). */
+  initialTicket?: Side | null;
   /** After the streamer's result: the proposal, its challenge window, and the final outcome. */
   verdict?: MarketVerdictView;
   /** Signed in to predictions (a challenge needs the session); an admin settles challenges. */
@@ -121,7 +123,7 @@ export function MarketCard(props: CardProps) {
   const { address, chain } = useWallet();
   const { run, locked } = useTx();
   const { market, error, refresh } = useMarket(mint, predictionId, address, poll ? ODDS_POLL_MS : null);
-  const [ticket, setTicket] = useState<Side | null>(null);
+  const [ticket, setTicket] = useState<Side | null>(props.initialTicket ?? null);
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const network = chain === "solana:mainnet" ? "SOL" : "Devnet SOL";

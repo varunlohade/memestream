@@ -29,7 +29,7 @@ import {
 } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
-import { MarketCard } from "./MarketCard";
+import { MarketCard, useMarket } from "./MarketCard";
 
 const POLL_MS = 5_000;
 /** Faster while the viewer waits on a question under review, so its approval shows within seconds. */
@@ -41,6 +41,8 @@ const SESSION_EXPIRY_MARGIN_MS = 60_000;
 /** Bets top out at 1,000 points, so the amount box takes at most 4 digits. */
 const MAX_BET_DIGITS = 4;
 const RESOLVED_SHOWN = 5;
+/** How often a compact market row refreshes its odds. */
+const ROW_ODDS_POLL_MS = 5_000;
 
 /** The session lives in localStorage (a per-viewer convenience; the server checks every token). */
 const savedSession = {
@@ -164,6 +166,8 @@ export function Predictions({
   const [board, setBoard] = useState<Board>("stream");
   /** The live prediction shown open when several are live (one at a time). */
   const [openId, setOpenId] = useState<string | null>(null);
+  /** The side picked on a compact row, to open its buy box at once. */
+  const [openSide, setOpenSide] = useState<"yes" | "no" | null>(null);
   const now = useServerNow(view);
 
   // The saved session for the connected wallet (re-read after signing in or out).
@@ -322,6 +326,7 @@ export function Predictions({
             live={p}
             now={now}
             canBet={Boolean(address) && staff === null}
+            initialSide={openSide}
             viewer={viewer}
             staff={staff !== null}
             busy={busy}
@@ -331,7 +336,16 @@ export function Predictions({
             onResolve={(outcome) => act({ kind: "resolve", id: p.id, outcome })}
           />
         ) : (
-          <LiveRow key={p.id} live={p} now={now} onOpen={() => setOpenId(p.id)} />
+          <LiveRow
+            key={p.id}
+            mint={mint}
+            live={p}
+            now={now}
+            onOpen={(side) => {
+              setOpenSide(side ?? null);
+              setOpenId(p.id);
+            }}
+          />
         ),
       )}
       {view.pending ? (
@@ -485,6 +499,7 @@ function LiveCard(props: {
   live: LiveView;
   now: number | null;
   canBet: boolean;
+  initialSide?: "yes" | "no" | null;
   viewer: boolean;
   staff: boolean;
   busy: boolean;
@@ -498,7 +513,7 @@ function LiveCard(props: {
   const resolve = staff ? <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} /> : null;
   if (marketUp(live.market)) {
     return (
-      <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll source={props.source} betWindow={[live.launchedAt, live.lockAt]}>
+      <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll source={props.source} betWindow={[live.launchedAt, live.lockAt]} initialTicket={props.initialSide}>
         {resolve}
       </MarketCard>
     );
@@ -550,7 +565,7 @@ function LiveCard(props: {
 }
 
 /** A live prediction, closed to one row (several are live): question, your bet, countdown and the pool split. Tap to open it. */
-function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; onOpen: () => void }) {
+function LiveRow({ mint, live, now, onOpen }: { mint: string; live: LiveView; now: number | null; onOpen: (side?: "yes" | "no") => void }) {
   const locked = now !== null && now >= live.lockAt;
   const total = live.yes + live.no;
   const yes = total > 0 ? Math.round((live.yes / total) * 100) : 0;
@@ -560,7 +575,7 @@ function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; on
       role="button"
       tabIndex={0}
       aria-expanded={false}
-      onClick={onOpen}
+      onClick={() => onOpen()}
       onKeyDown={(e) => {
         if (e.key !== "Enter" && e.key !== " ") return;
         e.preventDefault();
@@ -573,7 +588,11 @@ function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; on
       </span>
       <span className="mute num">{now === null ? "" : locked ? "Closed" : `${countdown(live.lockAt - now)} left`}</span>
       {live.market && live.market !== "failed" ? (
-        <span className="mute pm-small">{live.market === "opening" ? "Opening market…" : "Market: tap to trade"}</span>
+        live.market === "opening" || locked ? (
+          <span className="mute pm-small">{locked ? "Betting closed" : "Opening market…"}</span>
+        ) : (
+          <RowOdds mint={mint} predictionId={live.id} onPick={(side) => onOpen(side)} />
+        )
       ) : (
         <div className="slot pm-pool num">
           <b className="pm-fy" style={{ width: `${yes}%` }} />
@@ -581,6 +600,26 @@ function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; on
           <span>No {total > 0 ? 100 - yes : 0}%</span>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A market row's odds with its own Yes / No buttons, so several live markets can be traded from the list. */
+function RowOdds({ mint, predictionId, onPick }: { mint: string; predictionId: string; onPick: (side: "yes" | "no") => void }) {
+  const { market } = useMarket(mint, predictionId, null, ROW_ODDS_POLL_MS);
+  const pct = (side: "yes" | "no") => (market ? `${Math.round(market.probability[side] * 100)}%` : "…");
+  const pick = (side: "yes" | "no") => (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    onPick(side);
+  };
+  return (
+    <div className="pm-qb">
+      <button type="button" className="mbtn buy" onClick={pick("yes")}>
+        YES {pct("yes")}
+      </button>
+      <button type="button" className="mbtn pm-no" onClick={pick("no")}>
+        NO {pct("no")}
+      </button>
     </div>
   );
 }
