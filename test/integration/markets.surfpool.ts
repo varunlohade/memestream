@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { getAssociatedTokenAddressSync, NATIVE_MINT } from "@solana/spl-token";
 import type { Surfnet } from "@solana/surfpool";
-import { Connection, Keypair } from "@solana/web3.js";
+import { Connection, Keypair, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
@@ -15,6 +15,8 @@ import { payoutNumerators, redeemLamports } from "../../src/lib/markets/math";
 import { loadMarketPools, type MarketKeys, marketKeys, marketOdds, type MarketPools } from "../../src/lib/markets/pool";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "../../src/lib/markets/settle";
 import { isTradingOpen, type MarketOrder, prepareMarketTrade, quoteMarketTrade } from "../../src/lib/markets/trade";
+import { pollUntil } from "../../src/lib/poll";
+import { signatureStatus } from "../../src/lib/tx-status";
 import { stepRunner } from "../support/steps";
 
 const [oracle, alice, bob] = [Keypair.generate(), Keypair.generate(), Keypair.generate()];
@@ -42,6 +44,18 @@ const tokenBalance = async (keys: MarketKeys, side: "yes" | "no", wallet: Keypai
 };
 const vaultLamports = async (keys: MarketKeys) =>
   BigInt((await connection.getTokenAccountBalance(getAssociatedTokenAddressSync(NATIVE_MINT, keys.vault, true))).value.amount);
+
+/** Sign a server-built transaction as `wallet`, send it, and wait for its outcome. */
+async function signAndSend(prepared: { transaction: string; blockhash: string }, wallet: Keypair) {
+  const tx = Transaction.from(Buffer.from(prepared.transaction, "base64"));
+  tx.partialSign(wallet);
+  const signature = await connection.sendRawTransaction(tx.serialize());
+  const outcome = await pollUntil(async () => {
+    const result = await signatureStatus(connection, { signature, blockhash: prepared.blockhash });
+    return result.status === "pending" ? undefined : result;
+  }, { timeoutMs: 30_000, intervalMs: 100 });
+  return outcome?.status ?? "pending";
+}
 
 async function createMarket(predictionId: string): Promise<{ keys: MarketKeys; pools: MarketPools }> {
   const keys = marketKeys(connection, coinMint, predictionId, oracle.publicKey);
@@ -167,4 +181,40 @@ test("a disputed or cancelled market refunds: every YES and NO pays half", async
     assert.equal(before - (await vaultLamports(keys)), expected, "half a SOL per token");
   }
   assert.ok((await vaultLamports(keys)) <= BigInt(2), "at most rounding dust stays in the vault");
+});
+
+test("the server runs a market: the oracle creates, closes and resolves; wallets bet and redeem", async () => {
+  process.env.MEMESTREAM_RPC_URL = surfnet.rpcUrl;
+  process.env.MEMESTREAM_CONFIG = Keypair.generate().publicKey.toBase58(); // unused by markets
+  process.env.MEMESTREAM_PUBLIC_URL = "http://127.0.0.1:3000";
+  process.env.MEMESTREAM_MARKET_ORACLE = oracle.publicKey.toBase58();
+  process.env.MEMESTREAM_MARKET_ORACLE_KEY = JSON.stringify(Array.from(oracle.secretKey));
+  const server = await import("../../src/server/markets");
+  const ref = { mint: coinMint.toBase58(), predictionId: "3" };
+
+  assert.equal((await server.createMarket({ ...ref, ticker: "test", seedSolPerPool: "0.05" })).length, 4);
+  const opened = await server.getMarket(ref);
+  assert.equal(opened.trading, true);
+  assert.equal(opened.resolved, false);
+  assert.ok(Math.abs(opened.probability.yes - 0.5) < 1e-6);
+
+  const bet = { ...ref, side: "yes" as const, action: "buy" as const, amount: "0.01", slippageBps: 100 };
+  const preview = await server.previewMarketTrade(bet);
+  assert.equal(preview.spent, "0.01");
+  const prepared = await server.buildMarketTradeForWallet({ ...bet, wallet: alice.publicKey.toBase58(), minReceived: preview.minimumReceived });
+  assert.equal(await signAndSend(prepared, alice), "confirmed");
+  assert.ok((await server.getMarket(ref)).probability.yes > 0.5, "the YES bet moved the odds");
+
+  await assert.rejects(server.buildMarketRedeemForWallet({ ...ref, wallet: alice.publicKey.toBase58() }), /isn't resolved yet/);
+  assert.equal((await server.closeMarketTrading(ref)).length, 2);
+  await assert.rejects(server.previewMarketTrade(bet), /closed/);
+  await server.resolveMarket({ ...ref, outcome: "yes" });
+  const resolved = await server.getMarket(ref);
+  assert.deepEqual([resolved.trading, resolved.resolved, resolved.payoutNumerators], [false, true, [1, 0]]);
+
+  const before = await balance(alice);
+  assert.equal(await signAndSend(await server.buildMarketRedeemForWallet({ ...ref, wallet: alice.publicKey.toBase58() }), alice), "confirmed");
+  assert.ok((await balance(alice)) - before > Number(solToLamports("0.01")), "alice's YES paid more than her 0.01 SOL bet");
+  await server.redeemOracleTokens(ref);
+  await assert.rejects(server.getMarket({ ...ref, predictionId: "999" }), /No market/);
 });
