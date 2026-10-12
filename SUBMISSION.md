@@ -12,6 +12,10 @@ prediction markets trade in Meteora DAMM v2 pools. Viewers ask yes/no questions 
 the crowd picks which go live, and everyone trades YES and NO. The streamer earns 80% of the coin's
 trading fees, and the coin graduates live into a Meteora pool.
 
+**What the coin is for:** your coin is your seat at the table. Hold at least 1 to ask and upvote
+questions; the streamer earns 80% of every coin trade and LP fees after graduation. Next step:
+holders share each market's fees.
+
 Keep "How it uses DBC" right under this in any write-up: the judges' track is "Best use of Meteora DBC".
 
 ## Where we submit
