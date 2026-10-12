@@ -34,7 +34,10 @@ export type Commit = {
   moves: Move[];
   /** All-time net winnings changes (leaderboard). */
   won: { wallet: string; delta: number }[];
+  /** Set memberships to add (`add`) or remove, applied only if the commit succeeds (the live-coins index). */
+  sets?: SetChange[];
 };
+export type SetChange = { key: string; member: string; add: boolean };
 export type CommitResult = "ok" | "conflict" | "replay" | "insufficient";
 export type Leader = { wallet: string; points: number };
 
@@ -45,6 +48,8 @@ export interface PredictionStore {
   balances(wallets: string[]): Promise<number[]>;
   /** Wallets by all-time net winnings, highest first. */
   topWon(limit: number): Promise<Leader[]>;
+  /** The members of a set that commits keep (`Commit.sets`), in no particular order. */
+  members(key: string): Promise<string[]>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -62,6 +67,7 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
   const balances = new Map<string, number>();
   const won = new Map<string, number>();
   const nonces = new Map<string, number>(); // key -> expires at
+  const sets = new Map<string, Set<string>>();
 
   return {
     kind: "memory",
@@ -90,6 +96,11 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
         if (d.json === null) docs.delete(d.key);
         else docs.set(d.key, { v: d.v + 1, json: d.json, until: d.ttlMs ? now() + d.ttlMs : Infinity });
       }
+      for (const s of c.sets ?? []) {
+        const set = sets.get(s.key) ?? sets.set(s.key, new Set()).get(s.key)!;
+        if (s.add) set.add(s.member);
+        else set.delete(s.member);
+      }
       return "ok";
     },
     async balances(wallets) {
@@ -101,6 +112,9 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
         .sort(byPoints)
         .slice(0, limit);
     },
+    async members(key) {
+      return [...(sets.get(key) ?? [])];
+    },
   };
 }
 
@@ -109,9 +123,10 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
 // ---------------------------------------------------------------------------------------------
 
 /**
- * KEYS: balances, won, the documents..., then the nonce key if any.
- * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0, delete '1' or '0') per document, moveCount,
- * (wallet, delta, floor) per move, then (wallet, delta) per winnings change.
+ * KEYS: balances, won, the documents..., the nonce key if any, then one key per set change.
+ * ARGV: docCount, hasNonce, nonceTtlMs, (v, json, ttlMs or 0, delete '1' or '0') per document, setCount,
+ * (member, add '1' or '0') per set change, moveCount, (wallet, delta, floor) per move, then (wallet, delta)
+ * per winnings change.
  */
 export const COMMIT_LUA = `
 local docCount = tonumber(ARGV[1])
@@ -123,6 +138,10 @@ for d = 1, docCount do
   if current ~= ARGV[i] then return 'conflict' end
   i = i + 4
 end
+local setCount = tonumber(ARGV[i])
+local firstSet = i + 1
+local firstSetKey = 3 + docCount + tonumber(ARGV[2])
+i = firstSet + 2 * setCount
 local moveCount = tonumber(ARGV[i])
 i = i + 1
 local firstMove = i
@@ -152,6 +171,10 @@ for d = 1, docCount do
   end
   i = i + 4
 end
+for s = 0, setCount - 1 do
+  local member, add = ARGV[firstSet + 2 * s], ARGV[firstSet + 2 * s + 1]
+  if add == '1' then redis.call('SADD', KEYS[firstSetKey + s], member) else redis.call('SREM', KEYS[firstSetKey + s], member) end
+end
 return 'ok'
 `;
 
@@ -168,6 +191,9 @@ local out = {}
 for k = 1, #ARGV do out[k] = redis.call('HGET', KEYS[1], ARGV[k]) or '0' end
 return out
 `;
+
+/** KEYS: a set. */
+export const MEMBERS_LUA = `return redis.call('SMEMBERS', KEYS[1])`;
 
 /** KEYS: won. ARGV: limit. */
 export const TOP_LUA = `return redis.call('ZREVRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES')`;
@@ -193,12 +219,15 @@ export function redisStore(redis: Redis, prefix = DEFAULT_PREFIX): PredictionSto
       });
     },
     async commit(c) {
-      const keys = [BALANCES, WON, ...c.docs.map((d) => prefix + d.key), ...(c.nonce ? [prefix + c.nonce.key] : [])];
+      const sets = c.sets ?? [];
+      const keys = [BALANCES, WON, ...c.docs.map((d) => prefix + d.key), ...(c.nonce ? [prefix + c.nonce.key] : []), ...sets.map((s) => prefix + s.key)];
       const args = [
         c.docs.length,
         c.nonce ? 1 : 0,
         c.nonce?.ttlMs ?? 0,
         ...c.docs.flatMap((d) => [d.v, d.json ?? "", d.ttlMs ?? 0, d.json === null ? 1 : 0]),
+        sets.length,
+        ...sets.flatMap((s) => [s.member, s.add ? 1 : 0]),
         c.moves.length,
         ...c.moves.flatMap((m) => [m.wallet, m.delta, m.floor]),
         ...c.won.flatMap((w) => [w.wallet, w.delta]),
@@ -217,6 +246,9 @@ export function redisStore(redis: Redis, prefix = DEFAULT_PREFIX): PredictionSto
       const leaders: Leader[] = [];
       for (let i = 0; i + 1 < flat.length; i += 2) leaders.push({ wallet: String(flat[i]), points: Number(flat[i + 1]) });
       return leaders;
+    },
+    async members(key) {
+      return ((await run<unknown[]>(MEMBERS_LUA, [prefix + key], [])) ?? []).map(String);
     },
   };
 }

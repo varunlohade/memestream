@@ -346,6 +346,27 @@ for (const [name, make] of STORES) {
     assert.ok(left.every((d) => d.json === null), "resolved predictions' documents are deleted");
   });
 
+  test(`${name}: the live-coins index lists a coin from launch to its last result; liveAcross shows only open ones`, async () => {
+    const { service, clock, fund, liveId, coins, store } = setup(make);
+    coins.set("other", { creator: STREAMER, status: "trading" });
+    await fund("a", 500);
+    assert.deepEqual(await service.liveAcross(() => true, 10), []);
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
+    await service.act("other", STREAMER, { kind: "launch", text: "Will the boss fall?", windowMin: 5 });
+    const id = await liveId();
+    await service.act(COIN, "a", { kind: "bet", id, side: "yes", amount: 100 });
+    const both = await service.liveAcross(() => true, 10);
+    assert.deepEqual(both.map((l) => [l.mint, l.text, l.yes, l.no, l.bettors, l.market]).sort(), [
+      ["coin", "Will chat win this round?", 100, 0, 1, null],
+      ["other", "Will the boss fall?", 0, 0, 0, null],
+    ]);
+    assert.deepEqual((await service.liveAcross((mint) => mint !== "other", 10)).map((l) => l.mint), ["coin"], "a coin the filter rejects is never read");
+    clock.t += 2 * MIN;
+    assert.deepEqual((await service.liveAcross(() => true, 10)).map((l) => l.mint), ["other"], "betting closed: not shown");
+    await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+    assert.deepEqual(await store.members("predictions:live"), ["other"], "the resolve commit took the coin off the index");
+  });
+
   test(`${name}: auto-cancel refunds everyone after 60 minutes unresolved`, async () => {
     const { service, clock, fund, balance, liveId } = setup(make);
     await fund("a", 500);

@@ -115,6 +115,7 @@ test("markets on: create once after review, registered with its lockAt; close at
   const record = await service.market(COIN, id);
   assert.equal(record?.question, `question-${id}`);
   assert.equal(record?.lockAt, opened.live[0].lockAt, "the registry knows when betting closes");
+  assert.deepEqual((await service.liveAcross(() => true, 10)).map((l) => l.market?.pool), [record?.pool], "the live row gets the open market's registry entry");
 
   await look();
   assert.equal(calls.length, 1, "nothing more while betting is open");

@@ -15,7 +15,7 @@
  */
 import { type FlagWindow, type Game, newGame, type Prediction } from "@/lib/predictions/engine";
 import { MAX_LIVE } from "@/lib/predictions/rules";
-import type { Commit, Doc } from "./store";
+import type { Commit, Doc, SetChange } from "./store";
 
 export const coinKey = (mint: string) => `coin:${mint}`;
 const slotKey = (mint: string, slot: number) => `coin:${mint}:p:${slot}`;
@@ -31,6 +31,13 @@ export const gameKeys = (mint: string) => [
   ...Array.from({ length: RESULT_DOCS }, (_, n) => resultsKey(mint, n)),
 ];
 export const GAME_KEY_COUNT = 1 + MAX_LIVE + RESULT_DOCS;
+/** The live slots alone: each holds one live prediction (with its pools), or nothing. */
+export const liveSlotKeys = (mint: string) => Array.from({ length: MAX_LIVE }, (_, slot) => slotKey(mint, slot));
+
+/** The coins with at least one live prediction (a Redis set), kept by every game commit. */
+export const LIVE_COINS_KEY = "predictions:live";
+/** The index change a commit of `game` makes: the coin is listed while it has a live prediction. */
+export const liveIndex = (mint: string, game: Game): SetChange => ({ key: LIVE_COINS_KEY, member: mint, add: game.live.length > 0 });
 
 /** A live prediction's entry in the coin document: the slot that holds it, and what a glance needs. */
 export type LiveEntry = { id: string; slot: number; text: string; lockAt: number };

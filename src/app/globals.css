@@ -422,3 +422,24 @@ span.pm-flag { text-decoration: none; }
   .pm-bet { grid-template-columns: 72px 1fr; }
   .pm-bet .r { grid-column: 1 / -1; text-align: left; }
 }
+/* Home: live predictions row (a prediction market's front page), cards in the market card's style. */
+.lp { margin-bottom: 22px; }
+.lp-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.lp-head h2 { font-size: 22px; color: #fff; text-shadow: 3px 3px 0 #000; }
+.lp-row { display: grid; grid-auto-flow: column; grid-auto-columns: 300px; gap: 14px; overflow-x: auto; padding-bottom: 10px; scroll-snap-type: x mandatory; overscroll-behavior-x: contain; }
+.lp-card { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 12px 14px; scroll-snap-align: start; min-width: 0; }
+.lp-coin { display: flex; align-items: center; gap: 10px; font-size: 22px; color: #fff; min-width: 0; }
+.lp-coin b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.lp-thumb { flex: none; width: 64px; height: 36px; padding: 3px; position: relative; overflow: hidden; display: block; }
+.lp-kind { margin-left: auto; font-size: 16px; flex: none; }
+.lp-q { font-size: 22px; min-height: 3.3em; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; margin-top: 6px; }
+.lp-odds { font-size: 24px; color: #fff; margin-top: 4px; }
+.lp-pct { font-family: var(--hf); font-size: 28px; text-shadow: 3px 3px 0 #000; }
+.lp-card .mk-bar { margin: 4px 0; }
+.lp-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.lp-btns .mbtn { height: 48px; font-size: 15px; padding: 0 8px; }
+.lp-empty { font-size: 22px; padding: 12px 14px; background: rgba(255,255,255,.06); border-left: 4px solid var(--xp); }
+.lp-golive { color: var(--xp); font-family: var(--hf); font-size: 14px; margin-left: 6px; }
+@media (max-width: 640px) {
+  .lp-row { grid-auto-columns: 260px; }
+}

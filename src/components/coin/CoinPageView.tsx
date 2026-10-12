@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { type CoinDetail, type CoinView, type HolderView, type Holdings, type TradeView, useCoin, useHolders, usePriceTrend } from "@/components/hooks";
 import { useTx } from "@/components/tx";
 import { noSubscription } from "@/components/no-subscription";
@@ -241,6 +241,19 @@ export function CoinPageView({
   const holders = holderData?.holders ?? null;
   const [tab, setTab] = useState<CoinTab>("trades");
   const stone = useTexture("stone", 6);
+  // A link to /coin/<mint>#predictions (the home page's live row) opens the predictions tab.
+  useEffect(() => {
+    if (!predictions) return;
+    const follow = () => {
+      if (window.location.hash === "#predictions") setTab("predictions");
+    };
+    const first = setTimeout(follow, 0);
+    window.addEventListener("hashchange", follow);
+    return () => {
+      clearTimeout(first);
+      window.removeEventListener("hashchange", follow);
+    };
+  }, [predictions]);
 
   const { coin, trades, holdings } = detail;
   const tabs: CoinTab[] = predictions ? ["trades", "predictions", "holders"] : ["trades", "holders"];
@@ -272,7 +285,7 @@ export function CoinPageView({
         <section className="p cp-chart" aria-label="Price chart">
           {points.length > 0 ? <PriceChart points={points} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
         </section>
-        <div className="cp-tabs">
+        <div className="cp-tabs" id="predictions">
           <div className="sort" role="group" aria-label="Trades, predictions and holders">
             {tabs.map((key) => (
               <button

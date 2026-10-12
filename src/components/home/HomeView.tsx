@@ -5,6 +5,7 @@ import { type CoinView, useCoins, usePolledTape } from "@/components/hooks";
 import { useTexture, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { useSearch } from "@/components/search";
+import { LivePredictions } from "./LivePredictions";
 import { LiveBadge } from "@/components/ui/LiveBadge";
 import { BOARD_TABS, type BoardTab, boardCoins, kingOfTheHill, lastTradeTimes } from "@/lib/board";
 import { ago, formatSol, shortAddress } from "@/lib/format";
@@ -62,7 +63,8 @@ function CoinCard({ coin }: { coin: CoinView }) {
   );
 }
 
-export function HomeView() {
+/** `predictions`: the server's MEMESTREAM_PREDICTIONS flag; with it on, the live predictions row leads the page. */
+export function HomeView({ predictions = false }: { predictions?: boolean }) {
   const { data, error } = useCoins();
   const { data: tape } = usePolledTape();
   const { query } = useSearch();
@@ -75,6 +77,7 @@ export function HomeView() {
 
   return (
     <div className="home">
+      {predictions && <LivePredictions />}
       {king && <KingOfTheHill coin={king} />}
       <div className="sort" role="group" aria-label="Sort and filter coins">
         {(Object.keys(BOARD_TABS) as BoardTab[]).map((key) => (

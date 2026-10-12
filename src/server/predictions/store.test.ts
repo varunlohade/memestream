@@ -121,4 +121,18 @@ for (const [name, make, options] of STORES) {
     await store.commit(commit({ won: [{ wallet: "aaa", delta: 50 }, { wallet: "ccc", delta: 50 }, { wallet: "bbb", delta: 50 }, { wallet: "zzz", delta: 10 }] }));
     assert.deepEqual((await store.topWon(4)).map((l) => l.wallet), ["ccc", "bbb", "aaa", "zzz"]);
   });
+
+  test(`${name}: set changes apply only with a commit that lands, after moves and winnings`, options, async () => {
+    const store = make();
+    const on = (member: string, add: boolean) => ({ key: "predictions:live", member, add });
+    assert.equal(await store.commit(commit({ docs: [{ key: "coin:s", v: 0, json: "1" }], nonce: { key: "act:s", ttlMs: 60_000 }, moves: [{ wallet: "w", delta: 5, floor: 0 }], won: [{ wallet: "w", delta: 3 }], sets: [on("a", true), on("b", true)] })), "ok");
+    assert.deepEqual((await store.members("predictions:live")).sort(), ["a", "b"]);
+    assert.deepEqual(await store.balances(["w"]), [5]);
+    assert.deepEqual(await store.topWon(1), [{ wallet: "w", points: 3 }]);
+    assert.equal(await store.commit(commit({ docs: [{ key: "coin:s", v: 0, json: "2" }], sets: [on("c", true)] })), "conflict");
+    assert.equal(await store.commit(commit({ moves: [{ wallet: "w", delta: -9, floor: 0 }], sets: [on("c", true)] })), "insufficient");
+    assert.equal(await store.commit(commit({ sets: [on("a", false), on("a", false)] })), "ok", "removing twice is fine");
+    assert.deepEqual(await store.members("predictions:live"), ["b"]);
+    assert.deepEqual(await store.members("nothing"), []);
+  });
 }
