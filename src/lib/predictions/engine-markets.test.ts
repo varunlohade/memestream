@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Actor, apply, applyAiVerdict, applyMarketDone, applyReview, type Env, type Game, marketsDue, newGame, type Result, startMarkets } from "./engine";
-import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_DECISION_MS, MARKET_RETRY_MS, MAX_HISTORY, OVERTURN_REWARD } from "./rules";
+import { type Actor, apply, applyAiVerdict, applyMarketDone, applyMarketTryFailed, applyReview, type Env, type Game, marketsDue, newGame, type Result, startMarkets } from "./engine";
+import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_DECISION_MS, MARKET_FAILED_RETRY_MS, MARKET_RETRY_MS, MAX_HISTORY, OVERTURN_REWARD } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -115,14 +115,15 @@ test("audit M1: a challenge filed before a late close survives the close and the
   assert.equal(done.resolved[0].market?.challenge?.by, HOLDER);
 });
 
-test("a failed create is tried again after the pause, up to the limit, then the market is unavailable", () => {
+test("a failed create is tried again after the short pause, up to the limit, then the market is unavailable", () => {
   let game = launched(on, 10);
+  const id = game.live[0].id;
   let now = T0;
   for (let i = 0; i < MARKET_CREATE_MAX_TRIES; i++) {
     const c = claim(game, now);
     assert.equal(c.jobs.length, 1, `try ${i + 1}`);
-    game = c.game;
-    now += MARKET_RETRY_MS - 1;
+    game = applyMarketTryFailed(c.game, id, now + 5_000, on(now)).game;
+    now += 5_000 + MARKET_FAILED_RETRY_MS - 1;
     assert.deepEqual(claim(game, now).jobs, [], "not before the pause");
     now += 1;
   }
@@ -246,7 +247,7 @@ test("admins decide the outcome; the bond follows: upheld (lost), refund (back),
 test("audit L4: only admins decide, never the coin's streamer even if listed, and only markets that wait for one", () => {
   const { r, id } = challenged();
   const streamerListed = (now: number) => on(now, { admins: [ADMIN, STREAMER] });
-  assert.throws(() => apply(r.game, { kind: "decide", id, outcome: "yes" }, streamer, RESOLVED_AT + MIN, streamerListed(RESOLVED_AT)), /Only a memestream admin/);
+  assert.throws(() => apply(r.game, { kind: "decide", id, outcome: "yes" }, streamer, RESOLVED_AT + MIN, streamerListed(RESOLVED_AT)), /a coin they stream or mod/);
   assert.throws(() => apply(r.game, { kind: "decide", id, outcome: "yes" }, viewer("v1"), RESOLVED_AT + MIN, on(RESOLVED_AT)), /Only a memestream admin/);
   const { game, id: plain } = resolvedWith("yes");
   assert.throws(() => apply(game, { kind: "decide", id: plain, outcome: "no" }, admin, RESOLVED_AT + MIN, on(RESOLVED_AT)), /Nothing to decide/);
@@ -261,4 +262,38 @@ test("a challenge no admin decides within 24 hours is voided: a refund, the bond
   assert.equal(delta(t, HOLDER), CHALLENGE_BOND);
   assert.equal(apply(t.game, { kind: "tick" }, null, late + MIN, on(late)).moves.size, 0, "the bond comes back once");
   assert.deepEqual(resolveJob(t.game, late), { id, kind: "resolve", outcome: "refund" });
+});
+
+test("audit 4: the streamer and the coin's mods can't challenge on their own coin", () => {
+  const { game, id } = resolvedWith("yes");
+  const modded = apply(game, { kind: "mod", wallet: "Mod", add: true }, streamer, RESOLVED_AT, on(RESOLVED_AT)).game;
+  for (const who of [{ ...streamer, shares: true, balance: 500 }, { ...holder(), wallet: "Mod" }]) {
+    assert.throws(() => apply(modded, { kind: "challenge", id, reason: "It was really a NO round" }, who, RESOLVED_AT + 1_000, on(RESOLVED_AT)), /can't challenge on their own coin/, who.wallet);
+  }
+});
+
+test("audit 4: an admin can't decide a challenge they made, nor a market on a coin they mod", () => {
+  const { game, id } = resolvedWith("yes");
+  const asAdmin: Actor = { ...holder(), wallet: ADMIN };
+  const mine = apply(game, { kind: "challenge", id, reason: "It was really a NO round" }, asAdmin, RESOLVED_AT + 1_000, on(RESOLVED_AT)).game;
+  assert.throws(() => apply(mine, { kind: "decide", id, outcome: "no" }, admin, RESOLVED_AT + MIN, on(RESOLVED_AT)), /a challenge they made/);
+  const { r, id: other } = challenged("yes");
+  const modded = apply(r.game, { kind: "mod", wallet: ADMIN, add: true }, streamer, RESOLVED_AT + MIN, on(RESOLVED_AT)).game;
+  assert.throws(() => apply(modded, { kind: "decide", id: other, outcome: "no" }, admin, RESOLVED_AT + MIN, on(RESOLVED_AT)), /a coin they stream or mod/);
+});
+
+test("audit 4: a claim holds a market's steps for MARKET_RETRY_MS (longer than any run); a failed run gives it back after MARKET_FAILED_RETRY_MS", () => {
+  const { game, id } = resolvedWith("yes", { close: false });
+  const claimed = claim(game, WINDOW_END).game;
+  assert.deepEqual(claim(claimed, WINDOW_END + MARKET_RETRY_MS - 1).jobs, [], "nobody re-runs a step in flight");
+  const released = applyMarketTryFailed(claimed, id, WINDOW_END + 10_000, on(WINDOW_END)).game;
+  assert.deepEqual(claim(released, WINDOW_END + 10_000 + MARKET_FAILED_RETRY_MS - 1).jobs, []);
+  assert.equal(claim(released, WINDOW_END + 10_000 + MARKET_FAILED_RETRY_MS).jobs.length, 2, "close and resolve, again");
+});
+
+test("audit 4: the close is tried before the resolve in a run; a resolved market whose close failed still needs its close", () => {
+  const { game, id } = resolvedWith("yes", { close: false });
+  assert.deepEqual(claim(game, WINDOW_END).jobs.map((j) => j.kind), ["close", "resolve"]);
+  const resolved = applyMarketDone(claim(game, WINDOW_END).game, { id, kind: "resolve", outcome: "yes" }, null, WINDOW_END, on(WINDOW_END)).game;
+  assert.equal(marketsDue(resolved, WINDOW_END + MARKET_RETRY_MS, on(WINDOW_END)), true, "close pending: still due");
 });

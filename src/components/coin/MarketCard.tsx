@@ -28,7 +28,8 @@ const SOL_RESERVE = "0.01";
 const BUY_CHIPS = ["0.05", "0.1"];
 const LABEL: Record<Side, string> = { yes: "Yes", no: "No" };
 
-const cents = (probability: number) => `${Math.round(probability * 100)}¢`;
+/** A share pays 1 SOL if it wins, so its price is in SOL: "0.62 SOL". */
+const solPrice = (price: number, decimals = 2) => `${price.toFixed(decimals)} SOL`;
 const percent = (probability: number) => `${Math.round(probability * 100)}%`;
 const shares = (amount: string) => compact(Number(amount));
 const held = (amount: string | undefined) => Number(amount ?? 0) > 0;
@@ -189,7 +190,8 @@ export function MarketCard(props: CardProps) {
       </div>
       <div className="mk-kv num">
         <span className="up">{percent(yes)} Yes</span>
-        <span className="mute">Vol {compact(Number(market.volumeSol))} SOL</span>
+        {/* Only when there is some: it counts swapped shares, so it starts at 0 and reads 0 once closed. */}
+        <span className="mute">{Number(market.volumeSol) > 0 ? `Vol ${compact(Number(market.volumeSol))} SOL` : ""}</span>
         <span className="down">{percent(no)} No</span>
       </div>
       {trading && canBet && (
@@ -205,7 +207,7 @@ export function MarketCard(props: CardProps) {
             >
               BUY {side.toUpperCase()}
               <br />
-              {cents(market.probability[side])}
+              {solPrice(market.probability[side])}
             </button>
           ))}
         </div>
@@ -345,7 +347,7 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
       </div>
       {preview && (
         <div className="mk-kv num mute pm-small">
-          <span>Avg price {cents(preview.averagePrice)}</span>
+          <span>Avg price {solPrice(preview.averagePrice, 3)}</span>
           <span>
             {LABEL[side]} {percent(preview.probabilityAfter)} after
           </span>

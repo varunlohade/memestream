@@ -44,12 +44,16 @@ export const AI_CHECK_MAX_TRIES = 3;
 /** Hard deadline: past this long after the result's flag window, an unfinished AI check ends as "couldn't tell", whatever the server's keys. */
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
 /**
- * On-chain markets (MEMESTREAM_MARKETS): a server step on a market (create, close trading,
- * resolve) that fails is tried again after this pause, longer than one step can take (60 s to
- * confirm each transaction), so a claim never starts a step that is still running. Creating gives up after this many tries
- * ("Market unavailable"; points bets stay open); closing and resolving keep trying.
+ * On-chain markets (MEMESTREAM_MARKETS): claiming a market's server steps (create, close trading,
+ * resolve) holds them this long, longer than a whole run can take (a create sends up to four
+ * transactions, each waiting up to 60 s to confirm), so no other server re-runs a step still in
+ * flight. A run that failed gives its claim back early: the steps are tried again after
+ * MARKET_FAILED_RETRY_MS. A server that died mid-run frees them when the claim runs out. Creating
+ * gives up after MARKET_CREATE_MAX_TRIES ("Market unavailable"; points bets stay open); closing and
+ * resolving keep trying.
  */
-export const MARKET_RETRY_MS = 90_000;
+export const MARKET_RETRY_MS = 5 * 60_000;
+export const MARKET_FAILED_RETRY_MS = 30_000;
 export const MARKET_CREATE_MAX_TRIES = 3;
 /**
  * Challenge window (UMA style), markets only: the streamer's YES, NO or cancel is only proposed;

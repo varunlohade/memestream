@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MarketRecord } from "@/lib/markets/record";
-import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_RETRY_MS, OVERTURN_REWARD } from "@/lib/predictions/rules";
+import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_FAILED_RETRY_MS, MARKET_RETRY_MS, OVERTURN_REWARD } from "@/lib/predictions/rules";
 import { type MarketDeps, MarketUnavailable, predictionsService } from "./service";
 import { memoryStore } from "./store";
 
@@ -154,21 +154,21 @@ test("a cancel proposes a refund: on chain after the challenge window; then the 
   assert.equal(calls.filter((c) => c.startsWith("redeem")).length, 1);
 });
 
-test("a failing create is retried after the pause, then the market is unavailable and unregistered", async () => {
+test("a failing create is retried after the short pause, then the market is unavailable and unregistered", async () => {
   const { calls, fail, deps } = fakeMarkets();
   fail.create = 99;
   const { clock, service, launch, look } = setup(deps);
   const id = await launch(5);
   assert.equal((await look()).live[0].market, "opening");
   for (let i = 1; i < MARKET_CREATE_MAX_TRIES; i++) {
-    clock.t += MARKET_RETRY_MS / 2;
+    clock.t += MARKET_FAILED_RETRY_MS / 2;
     await look();
     assert.equal(calls.length, i, "not before the pause");
-    clock.t += MARKET_RETRY_MS / 2;
+    clock.t += MARKET_FAILED_RETRY_MS / 2;
     await look();
   }
   assert.equal(calls.length, MARKET_CREATE_MAX_TRIES);
-  clock.t += MARKET_RETRY_MS;
+  clock.t += MARKET_FAILED_RETRY_MS;
   assert.equal((await look()).live[0].market, "failed");
   assert.equal(await service.market(COIN, id), null, "never registered, so it can't be traded");
 });

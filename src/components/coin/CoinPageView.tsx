@@ -157,7 +157,18 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
  * `initial` is rendered by the server; polling keeps it fresh and adds the wallet's holdings.
  * `predictions`: the server's MEMESTREAM_PREDICTIONS flag (free-points panel); off by default.
  */
-export function CoinPageView({ mint, initial, predictions = false }: { mint: string; initial: CoinDetail; predictions?: boolean }) {
+export function CoinPageView({
+  mint,
+  initial,
+  predictions = false,
+  network = { label: "Devnet", test: true },
+}: {
+  mint: string;
+  initial: CoinDetail;
+  predictions?: boolean;
+  /** The server's network label, and whether its SOL is test money (not mainnet). */
+  network?: { label: string; test: boolean };
+}) {
   const { address } = useWallet();
   const { data, refresh } = useCoin(mint, address, initial);
   const detail = data ?? initial;
@@ -190,7 +201,7 @@ export function CoinPageView({ mint, initial, predictions = false }: { mint: str
             <TradeList trades={trades} symbol={coin.symbol} />
           </div>
         </div>
-        {predictions && <Predictions mint={coin.mint} symbol={coin.symbol} streamUrl={coin.streamUrl} />}
+        {predictions && <Predictions mint={coin.mint} symbol={coin.symbol} streamUrl={coin.streamUrl} network={network} />}
       </div>
       <div className="side">
         <section className="p" aria-label="Price and graduation">

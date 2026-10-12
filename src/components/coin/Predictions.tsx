@@ -139,7 +139,17 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
   );
 }
 
-export function Predictions({ mint, symbol, streamUrl = null }: { mint: string; symbol: string; streamUrl?: string | null }) {
+export function Predictions({
+  mint,
+  symbol,
+  streamUrl = null,
+  network = { label: "Devnet", test: true },
+}: {
+  mint: string;
+  symbol: string;
+  streamUrl?: string | null;
+  network?: { label: string; test: boolean };
+}) {
   const { address, signIn: walletSignIn } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -455,7 +465,9 @@ export function Predictions({ mint, symbol, streamUrl = null }: { mint: string; 
         </p>
       )}
       <p className="pm-free">
-        {[...live, ...view.resolved].some((p) => p.market !== null && p.market !== "failed") ? "Points are free. Markets use real SOL." : "Free points. No money, no prizes."}
+        {[...live, ...view.resolved].some((p) => p.market !== null && p.market !== "failed")
+          ? `Points are free and only for fun. Markets use ${network.test ? `${network.label.toLowerCase()} SOL (test money)` : "real SOL"}.`
+          : "Free points. No money, no prizes."}
       </p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>

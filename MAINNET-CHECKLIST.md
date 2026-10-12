@@ -75,6 +75,27 @@ none of its parameters can change later, so all of them must be right first.
       toml, stream-json, uuid, jayson); no fix available upstream. Our server feeds them only our own
       RPC's responses and our own transaction bytes. Re-check before mainnet and bump when the SDK does.
 
+## Prediction markets: before mainnet
+
+MEMESTREAM_MARKETS stays off on mainnet until every box is ticked (security audits 2026-10-12).
+
+- [ ] **Admin paging:** a challenged, unresolved or AI-disputed market waits for an admin
+      (MEMESTREAM_ADMIN_WALLETS). Page an admin at once and answer well under 24 hours; the 24-hour
+      auto-void is the last resort only.
+- [ ] **Void at cost basis:** a void now pays 0.5 SOL per share, whatever each share cost, so an
+      underdog buyer profits. Refund each holder's cost basis instead, or let the proposal stand on
+      timeout, before real money.
+- [ ] **Scheduled sweep:** add the vercel.json cron for `/api/markets/close-due` (GET with
+      `Authorization: Bearer $MEMESTREAM_CRON_SECRET`), so trading closes at lockAt with nobody watching.
+- [ ] **MEMESTREAM_MARKET_SECRET never rotates:** it keys every question id and every pool's
+      position NFT; a new secret loses the way to close and redeem every existing market.
+- [ ] **External audit of the challenge economics:** bond size (100 points), the overturn reward,
+      who may challenge and decide, and how a streamer or a mod could still profit from a result.
+- [ ] **MetaDAO:** we only call its deployed conditional vault (BSL 1.1), never copy its source.
+      Mint names (metadata) stay off on mainnet: MetaDAO lets only its deployer pay for them.
+- [ ] **Legal review and geoblocking:** real-money prediction markets need a legal review and
+      blocking where they aren't allowed, before any mainnet market opens.
+
 ## After
 - [ ] Record the config address in the deploy env (`MEMESTREAM_CONFIG`) and in this file.
 - [ ] Launch one test coin with a small first buy, then graduate-path smoke test with small amounts.

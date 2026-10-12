@@ -9,7 +9,7 @@ import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
-import { applyMarketDone, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
+import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
@@ -599,7 +599,10 @@ export function predictionsService(deps: ServiceDeps) {
     if (claim.jobs.length === 0) return;
     const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
-    for (const job of claim.jobs) await marketStep(markets, mint, coin, claim.game, job);
+    const failed = new Set<string>();
+    for (const job of claim.jobs) if (!(await marketStep(markets, mint, coin, claim.game, job))) failed.add(job.id);
+    // A failed step gives the claim back early, so it's tried again soon (the claim itself outlasts any run).
+    for (const id of failed) await commitGame(mint, coin.creator, (g, env) => applyMarketTryFailed(g, id, now(), env));
     // A market both closed and resolved: the oracle takes its seed back (once more is harmless).
     const { game: after } = await readGame(mint, coin.creator, []);
     for (const id of new Set(claim.jobs.filter((j) => j.kind !== "create").map((j) => j.id))) {
@@ -610,29 +613,31 @@ export function predictionsService(deps: ServiceDeps) {
     }
   }
 
-  /** One market step on chain, then its success saved. A failure is logged and tried again after the pause. */
-  async function marketStep(markets: MarketDeps, mint: string, coin: CoinFacts, game: Game, job: MarketJob) {
+  /** One market step on chain, then its success saved. A failure is logged (false); it's tried again after a short pause. */
+  async function marketStep(markets: MarketDeps, mint: string, coin: CoinFacts, game: Game, job: MarketJob): Promise<boolean> {
     try {
       if (job.kind === "create") {
         const live = game.live.find((p) => p.id === job.id);
-        if (!live) return;
+        if (!live) return true;
         const created = await markets.create(mint, job.id, coin.symbol ?? "");
         const record: MarketRecord = { ...created, lockAt: live.lockAt, source: live.source ?? coin.streamUrl ?? "" };
         await commitMarketDone(mint, coin.creator, job, record);
-        return;
+        return true;
       }
       const record = await market(mint, job.id);
       if (!record) throw new Error("no registry entry");
       if (job.kind === "close") await markets.close(record);
       else await markets.resolve(record, job.outcome);
       await commitMarketDone(mint, coin.creator, job, null);
+      return true;
     } catch (error) {
       if (error instanceof MarketUnavailable) {
         console.warn(`predictions: market for prediction ${job.id} is unavailable (${error.message}); points bets stay open`);
         await commitGame(mint, coin.creator, (g, env) => applyMarketUnavailable(g, job.id, now(), env));
-        return;
+        return true;
       }
-      console.warn(`predictions: market ${job.kind} for prediction ${job.id} failed (${error instanceof Error ? error.message : "unknown error"}); it is tried again later`);
+      console.warn(`predictions: market ${job.kind} for prediction ${job.id} failed (${error instanceof Error ? error.message : "unknown error"}); it is tried again shortly`);
+      return false;
     }
   }
 
@@ -656,12 +661,19 @@ export function predictionsService(deps: ServiceDeps) {
   /**
    * The cron-safe sweep: for up to `limit` listed coins, runs the clock and every due market step now
    * (closing trading right at lockAt even if nobody is watching), then drops coins whose markets need
-   * nothing more. Coins past the limit wait for the next call (the list rotates).
+   * nothing more. The list rotates BEFORE the work, so a call cut short by a timeout still moves on:
+   * the next call starts with other coins.
    */
   async function sweepMarkets(limit: number): Promise<{ swept: number; listed: number }> {
     if (!deps.markets) return { swept: 0, listed: 0 };
-    const [openDoc] = await store.read([OPEN_MARKETS_KEY]);
-    const listed: string[] = openDoc.json ? JSON.parse(openDoc.json) : [];
+    const listed = await retryOnConflict(async () => {
+      const [doc] = await store.read([OPEN_MARKETS_KEY]);
+      const all: string[] = doc.json ? JSON.parse(doc.json) : [];
+      if (all.length <= 1) return all;
+      const rotated = [...all.slice(limit), ...all.slice(0, limit)];
+      const status = await store.commit({ docs: [{ key: OPEN_MARKETS_KEY, v: doc.v, json: JSON.stringify(rotated) }], moves: [], won: [] });
+      return status === "ok" ? all : RETRY;
+    });
     const batch = listed.slice(0, limit);
     const done = new Set<string>();
     for (const mint of batch) {
@@ -676,15 +688,16 @@ export function predictionsService(deps: ServiceDeps) {
         else console.warn(`predictions: the market sweep failed on ${mint} (${(error as Error).message})`);
       }
     }
-    await retryOnConflict(async () => {
-      const [doc] = await store.read([OPEN_MARKETS_KEY]);
-      const now: string[] = doc.json ? JSON.parse(doc.json) : [];
-      // The swept ones go to the back; finished ones leave; coins added meanwhile stay.
-      const next = [...now.filter((m) => !batch.includes(m)), ...batch.filter((m) => !done.has(m) && now.includes(m))];
-      if (JSON.stringify(next) === JSON.stringify(now)) return true;
-      const status = await store.commit({ docs: [{ key: OPEN_MARKETS_KEY, v: doc.v, json: JSON.stringify(next) }], moves: [], won: [] });
-      return status === "ok" ? true : RETRY;
-    });
+    if (done.size > 0) {
+      await retryOnConflict(async () => {
+        const [doc] = await store.read([OPEN_MARKETS_KEY]);
+        const now: string[] = doc.json ? JSON.parse(doc.json) : [];
+        const next = now.filter((m) => !done.has(m));
+        if (next.length === now.length) return true;
+        const status = await store.commit({ docs: [{ key: OPEN_MARKETS_KEY, v: doc.v, json: JSON.stringify(next) }], moves: [], won: [] });
+        return status === "ok" ? true : RETRY;
+      });
+    }
     return { swept: batch.length, listed: listed.length };
   }
 

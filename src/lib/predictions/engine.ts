@@ -45,6 +45,7 @@ import {
   MARKET_CHALLENGE_MS,
   MARKET_CREATE_MAX_TRIES,
   MARKET_DECISION_MS,
+  MARKET_FAILED_RETRY_MS,
   MARKET_RETRY_MS,
   OVERTURN_REWARD,
   MIN_BET,
@@ -494,6 +495,16 @@ export function applyMarketDone(state: Game, job: MarketJob, question: string | 
   });
 }
 
+/** A run whose step failed gives its claim back early: the market's due steps are tried again after MARKET_FAILED_RETRY_MS. */
+export function applyMarketTryFailed(state: Game, id: string, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, ({ game }) => {
+    const p = [...game.live, ...game.resolved].find((x) => x.id === id);
+    const m = p?.market;
+    const released = now - MARKET_RETRY_MS + MARKET_FAILED_RETRY_MS;
+    if (p && m && m.tries > 0 && m.at > released) p.market = { ...m, at: released };
+  });
+}
+
 /** A market that can never open (someone else made a pool at its address): give up now, no retries. */
 export function applyMarketUnavailable(state: Game, id: string, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, ({ game }) => {
@@ -940,6 +951,7 @@ function challengeResult(ctx: Ctx, actor: Actor, { id, reason, link }: ActionOf<
   const p = game.resolved.find((x) => x.id === id);
   const m = p?.market;
   if (!p || !m || m.step !== "open") throw new GameError("This result has no market to challenge");
+  requireViewer(game, actor, "challenge");
   if (m.decision) throw new GameError("This result is already decided");
   if (now >= challengeEndsAt(p, env)) throw new GameError("The challenge window is over");
   if (m.challenge) throw new GameError("This result is already challenged");
@@ -957,16 +969,19 @@ function challengeResult(ctx: Ctx, actor: Actor, { id, reason, link }: ActionOf<
 }
 
 /**
- * An admin (never the coin's own streamer) settles a market that waits for one, once, with its final
+ * An admin (never the coin's own streamer or a mod, never the challenger) settles a market that waits for one, once, with its final
  * outcome. A challenger's bond follows from it: the proposal upheld, the bond is lost; a refund, the
  * bond comes back; the other side, the bond comes back plus OVERTURN_REWARD.
  */
 function decideMarket(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"decide">) {
   const { game, now, env } = ctx;
-  if (!env.admins?.includes(actor.wallet) || actor.wallet === game.creator) throw new GameError("Only a memestream admin can decide a market");
+  if (!env.admins?.includes(actor.wallet)) throw new GameError("Only a memestream admin can decide a market");
+  // Never on their own coin (streamer or mod), and never on a challenge they made.
+  if (isStaff(game, actor.wallet)) throw new GameError("Admins can't decide markets on a coin they stream or mod");
   const p = game.resolved.find((x) => x.id === id);
   const m = p?.market;
   if (!p || !m || m.step !== "open" || (!m.challenge && !needsAdmin(p))) throw new GameError("Nothing to decide");
+  if (m.challenge?.by === actor.wallet) throw new GameError("Admins can't decide a challenge they made");
   if (m.decision) throw new GameError("This market is already decided");
   m.decision = { outcome, by: actor.wallet, at: now };
   const c = m.challenge;
