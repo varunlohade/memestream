@@ -17,6 +17,7 @@
     "check": "npm run typecheck && npm run lint && npm test && npm run test:surfpool && NEXT_DIST_DIR=.next-check npm run build && npm run check:bundle"
   },
   "dependencies": {
+    "@metadaoproject/futarchy": "0.7.4-alpha.3",
     "@meteora-ag/cp-amm-sdk": "^1.4.5",
     "@meteora-ag/dynamic-bonding-curve-sdk": "^1.5.13",
     "@solana/spl-token": "^0.4.15",
