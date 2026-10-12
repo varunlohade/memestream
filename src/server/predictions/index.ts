@@ -117,7 +117,7 @@ export function predictions(): { service: PredictionsService } | { error: string
     devSecret ??= randomBytes(32).toString("hex");
     secret = devSecret;
   }
-  const { prefix, waits, challengeMs } = testSettings();
+  const { prefix, challengeMs } = testSettings();
   let store;
   if (url && token) {
     // The SDK's default retries stay on: it re-sends a request whose fetch threw. Reads and ticks
@@ -147,7 +147,6 @@ export function predictions(): { service: PredictionsService } | { error: string
       return coin ? { creator: coin.creator, status: coin.status, streamUrl: coin.streamUrl, symbol: coin.symbol } : null;
     },
     holds,
-    waits,
   });
   return (cached = { service });
 }

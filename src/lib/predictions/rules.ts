@@ -1,7 +1,7 @@
 /**
- * Predictions: free points only. No money, no SOL, no tokens, no prizes. Points come from watching
- * streams; they can never be bought, sold or sent to another wallet. Pure rules and numbers shared
- * by the server, the browser and the tests.
+ * Predictions: free points only. No money, no SOL, no tokens, no prizes. Every wallet gets a
+ * one-time grant when it first signs in; points can never be bought, sold or sent to another
+ * wallet. Pure rules and numbers shared by the server, the browser and the tests.
  */
 
 export type Side = "yes" | "no";
@@ -10,18 +10,11 @@ export type Outcome = Side | "cancel";
 
 export const MINUTE_MS = 60_000;
 
-/** Watching: +2 points per minute, at most 600 a day; heartbeats closer than 50 s apart earn nothing. */
-export const POINTS_PER_MINUTE = 2;
-export const DAILY_WATCH_CAP = 600;
+/** A wallet's one-time grant on its first sign-in (at most MAX_GRANTS_PER_IP wallets per IP a day). */
+export const GRANT_POINTS = 1_000;
+/** The streamer's page beats once a minute while open (it marks "streamer here"); beats closer than 50 s are ignored. */
 export const HEARTBEAT_MS = MINUTE_MS;
 export const MIN_HEARTBEAT_GAP_MS = 50_000;
-/** A one-time starter grant, unlocked after 10 minutes of watching. */
-export const STARTER_POINTS = 200;
-export const STARTER_AFTER_MS = 10 * MINUTE_MS;
-/** Earning watch time (any coin, not over the per-IP cap) a wallet needs before its upvotes and bets count as "eligible". */
-export const ELIGIBLE_AFTER_MS = 15 * MINUTE_MS;
-/** Watch time a wallet needs to appear on a leaderboard. */
-export const LEADERBOARD_AFTER_MS = 30 * MINUTE_MS;
 
 /** Suggestions: 5 to 80 characters, cost 10 points (back when it goes live), expire after 20 minutes. */
 export const SUGGEST_COST = 10;
@@ -125,8 +118,8 @@ export const MAX_WON_ENTRIES = 100;
 export const MIN_HOLDING_COINS = 1;
 /** `coins` is a balance in UI units, e.g. "0.000001" or "1.5". */
 export const holdsEnough = (coins: string | null | undefined) => Number(coins ?? 0) >= MIN_HOLDING_COINS;
-/** Distinct wallets that may earn watch points from one IP per UTC day. */
-export const MAX_EARNING_WALLETS_PER_IP = 5;
+/** Distinct wallets that may get the sign-in grant from one IP per UTC day (the anti-farm rule). */
+export const MAX_GRANTS_PER_IP = 5;
 
 /** Leaderboard order: points high to low; ties by wallet, high to low (the same as Redis ZREVRANGE). */
 export const byPoints = (a: { wallet: string; points: number }, b: { wallet: string; points: number }) =>

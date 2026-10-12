@@ -1,3 +1,4 @@
+import { clientIp } from "@/server/rate-limit";
 import { withRpcGuard } from "@/server/rpc-guard";
 import { jsonBody, jsonError, ok } from "../../respond";
 import { gate, predictionsError } from "../respond";
@@ -7,8 +8,9 @@ const MAX_MESSAGE_CHARS = 1_000;
 const MAX_SIGNATURE_CHARS = 200;
 
 /**
- * POST /api/predictions/session { message, signature } -> { wallet, token, expiresAt }.
- * The wallet signed one message (nonce + expiry); later calls send the token instead.
+ * POST /api/predictions/session { message, signature } -> { wallet, token, expiresAt, granted }.
+ * The wallet signed one message (nonce + expiry); later calls send the token instead. A wallet's
+ * first sign-in gets the one-time points grant (`granted`), at most 5 wallets per IP a day.
  * Free points only: signing costs nothing and sends nothing.
  */
 export const POST = withRpcGuard({ name: "predictions-session", burst: 5, perSecond: 1 }, async (request: Request) => {
@@ -19,7 +21,7 @@ export const POST = withRpcGuard({ name: "predictions-session", burst: 5, perSec
     if (typeof message !== "string" || typeof signature !== "string" || message.length > MAX_MESSAGE_CHARS || signature.length > MAX_SIGNATURE_CHARS) {
       return jsonError("Sign the message to play", 400);
     }
-    return ok(await service.session(message, signature));
+    return ok(await service.session(message, signature, clientIp(request)));
   } catch (error) {
     return predictionsError(error);
   }

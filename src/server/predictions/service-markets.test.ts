@@ -73,7 +73,7 @@ function setup(markets: MarketDeps | null, closeWaitMs = 0) {
   };
   /** The streamer is here (a heartbeat) and launches a typed question (1-minute window unless given); the review approves it. */
   const launch = async (windowMin = 1) => {
-    await service.beat(STREAMER, COIN, "1.2.3.4");
+    await service.beat(STREAMER, COIN);
     await service.act(COIN, STREAMER, { kind: "launch", text: "Will he win this round?", windowMin });
     await settle();
     const view = await service.view(COIN, STREAMER);

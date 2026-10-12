@@ -3,7 +3,7 @@ import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import bs58 from "bs58";
 import { MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
-import { FLAG_WINDOW_MS, MAX_LIVE } from "@/lib/predictions/rules";
+import { FLAG_WINDOW_MS, GRANT_POINTS, MAX_LIVE } from "@/lib/predictions/rules";
 import { newProfile, utcDay } from "@/lib/predictions/watch";
 import { walletFromToken } from "./identity";
 import { gameKeys } from "./game-doc";
@@ -86,15 +86,15 @@ function setup(make: (clock: Clock) => PredictionStore, { autoReview = true } = 
           return view && raw.view(mint, wallet);
         },
       };
-  /** Test-only funding: points and watch time, written straight to the store. */
-  const fund = async (wallet: string, points: number, watchMinutes = 0) => {
-    const profile = { ...newProfile(), watchMs: watchMinutes * MIN, earningMs: watchMinutes * MIN, starter: watchMinutes >= 10 };
+  /** Test-only funding: points, and whether the wallet got its sign-in grant (eligible, on leaderboards), written straight to the store. */
+  const fund = async (wallet: string, points: number, granted = false) => {
+    const profile = { ...newProfile(), granted };
     const [doc] = await store.read([`watch:${wallet}`]);
     await store.commit({ docs: [{ key: `watch:${wallet}`, v: doc.v, json: JSON.stringify(profile) }], moves: [{ wallet, delta: points, floor: 0 }], won: [] });
   };
   const balance = async (wallet: string) => (await store.balances([wallet]))[0];
   /** The streamer watching their own coin (needed for crowd auto-launch). */
-  const streamerHere = () => service.beat(STREAMER, COIN, "10.0.0.1");
+  const streamerHere = () => service.beat(STREAMER, COIN);
   /** The oldest live prediction's id. */
   const liveId = async () => (await service.view(COIN, STREAMER)).live[0].id;
   return { store, clock, service, fund, balance, coins, nonHolders, streamerHere, jev, settle, liveId };
@@ -123,80 +123,72 @@ for (const [name, make] of STORES) {
     const { service } = setup(make);
     const me = keypair();
     const message = sessionMessage({ domain: DOMAIN, wallet: me.wallet, nonce: "00112233445566778899aabbccddeeff", expiresAt: T0 + MESSAGE_TTL_MS });
-    const session = await service.session(message, me.sign(message));
+    const session = await service.session(message, me.sign(message), "1.2.3.4");
     assert.equal(walletFromToken(session.token, T0, SECRET), me.wallet);
-    await assert.rejects(service.session(message, me.sign(message)), /already used/);
+    await assert.rejects(service.session(message, me.sign(message), "1.2.3.4"), /already used/);
     const elsewhere = sessionMessage({ domain: "evil.example", wallet: me.wallet, nonce: "ffeeddccbbaa99887766554433221100", expiresAt: T0 + MESSAGE_TTL_MS });
-    await assert.rejects(service.session(elsewhere, me.sign(elsewhere)), /another site/);
+    await assert.rejects(service.session(elsewhere, me.sign(elsewhere), "1.2.3.4"), /another site/);
   });
 
-  test(`${name}: heartbeats: parallel beats from one wallet count once; the starter unlocks at 10 minutes`, async () => {
+  /** Signs `me` in from `ip` with a fresh nonce. */
+  const signInFrom = (service: ReturnType<typeof setup>["service"], me: ReturnType<typeof keypair>, ip: string, n: number, now = T0) => {
+    const message = sessionMessage({ domain: DOMAIN, wallet: me.wallet, nonce: n.toString(16).padStart(32, "0"), expiresAt: now + MESSAGE_TTL_MS });
+    return service.session(message, me.sign(message), ip);
+  };
+
+  test(`${name}: the first sign-in grants ${GRANT_POINTS} points at once, once; parallel sign-ins grant once`, async () => {
+    const { service, balance } = setup(make);
+    const me = keypair();
+    const first = await Promise.all([1, 2, 3].map((n) => signInFrom(service, me, "1.2.3.4", n)));
+    assert.deepEqual(first.map((s) => s.granted).sort(), [0, 0, GRANT_POINTS]);
+    assert.equal(await balance(me.wallet), GRANT_POINTS);
+    assert.equal((await signInFrom(service, me, "5.6.7.8", 4)).granted, 0, "never twice");
+    const view = await service.view(COIN, me.wallet);
+    assert.deepEqual([view.me?.balance, view.me?.eligible], [GRANT_POINTS, true]);
+  });
+
+  test(`${name}: only 5 wallets per IP per day get the grant; the 6th signs in with none; another day it gets it`, async () => {
     const { service, clock, balance } = setup(make);
-    const results = await Promise.all(Array.from({ length: 10 }, () => service.beat("viewer", COIN, "1.2.3.4")));
-    assert.equal(results.filter((r) => r.accepted).length, 1);
-    assert.equal(await balance("viewer"), 2);
-    for (let i = 1; i < 10; i++) {
-      clock.t = T0 + i * MIN;
-      await service.beat("viewer", COIN, "1.2.3.4");
-    }
-    assert.equal(await balance("viewer"), 20 + 200);
-    const view = await service.view(COIN, "viewer");
-    assert.deepEqual([view.me?.watchMinutes, view.me?.starterInMinutes], [10, null]);
-  });
-
-  test(`${name}: heartbeats count only on a memestream coin that is trading or graduated`, async () => {
-    const { service, coins, balance } = setup(make);
-    await assert.rejects(service.beat("viewer", "not-a-coin", "1.2.3.4"), /Coin not found/);
-    coins.set("full", { creator: STREAMER, status: "graduating" });
-    assert.deepEqual(await service.beat("viewer", "full", "1.2.3.4"), { accepted: false, points: 0 });
-    coins.set("done", { creator: STREAMER, status: "graduated" });
-    assert.deepEqual(await service.beat("viewer", "done", "1.2.3.4"), { accepted: true, points: 2 });
-    assert.equal(await balance("viewer"), 2);
-  });
-
-  test(`${name}: only 5 wallets per IP per day earn watch points; the 6th earns 0 silently; the next day resets`, async () => {
-    const { service, clock, balance } = setup(make);
-    const wallets = ["w1", "w2", "w3", "w4", "w5", "w6"];
-    for (const w of wallets) assert.equal((await service.beat(w, COIN, "9.9.9.9")).accepted, true);
-    assert.deepEqual(await Promise.all(wallets.map(balance)), [2, 2, 2, 2, 2, 0]);
-    assert.equal((await service.beat("w6", COIN, "8.8.8.8")).points, 0, "too soon after its last beat");
-    clock.t = T0 + MIN;
-    assert.equal((await service.beat("w1", COIN, "9.9.9.9")).points, 2, "the first five keep earning");
+    const wallets = Array.from({ length: 6 }, () => keypair());
+    for (const [i, w] of wallets.entries()) await signInFrom(service, w, "9.9.9.9", i + 1);
+    assert.deepEqual(await Promise.all(wallets.map((w) => balance(w.wallet))), [1, 1, 1, 1, 1, 0].map((g) => g * GRANT_POINTS));
+    assert.equal((await service.view(COIN, wallets[5].wallet)).me?.eligible, false, "no grant: not eligible");
     clock.t = Date.parse("2026-10-10T00:01:00.000Z");
-    assert.equal((await service.beat("w6", COIN, "9.9.9.9")).points, 2, "a new day");
+    assert.equal((await signInFrom(service, wallets[5], "9.9.9.9", 7, clock.t)).granted, GRANT_POINTS, "a new day");
   });
 
-  test(`${name}: a wallet over the per-IP cap can't watch its way to eligible upvotes`, async () => {
-    const { service, clock } = setup(make);
-    const wallets = ["w1", "w2", "w3", "w4", "w5", "sybil"];
-    for (let i = 0; i < 15; i++) {
-      clock.t = T0 + i * MIN;
-      for (const w of wallets) await service.beat(w, COIN, "9.9.9.9");
-    }
-    const [earner, sybil] = await Promise.all([service.view(COIN, "w1"), service.view(COIN, "sybil")]);
-    assert.deepEqual([earner.me?.watchMinutes, earner.me?.eligible], [15, true]);
-    assert.deepEqual([sybil.me?.watchMinutes, sybil.me?.eligible], [15, false]);
-    await service.act(COIN, "w1", { kind: "suggest", text: "Will the streamer eat a banana?" });
-    await assert.rejects(service.act(COIN, "sybil", { kind: "upvote", id: "1" }), /Watch 15 minutes to upvote/);
-  });
-
-  test(`${name}: IPv6: the 5-wallet cap counts a whole /64 as one IP`, async () => {
+  test(`${name}: IPv6: the 5-wallet grant cap counts a whole /64 as one IP`, async () => {
     const { service, balance, store } = setup(make);
-    const wallets = ["w1", "w2", "w3", "w4", "w5", "w6"];
-    for (const [i, w] of wallets.entries()) assert.equal((await service.beat(w, COIN, `2001:db8:1:2::${i + 1}`)).accepted, true);
-    assert.deepEqual(await Promise.all(wallets.map(balance)), [2, 2, 2, 2, 2, 0]);
-    assert.equal((await service.beat("w7", COIN, "2001:db8:1:3::1")).points, 2, "another /64 is another IP");
+    const wallets = Array.from({ length: 6 }, () => keypair());
+    for (const [i, w] of wallets.entries()) await signInFrom(service, w, `2001:db8:1:2::${i + 1}`, i + 1);
+    assert.deepEqual(await Promise.all(wallets.map((w) => balance(w.wallet))), [1, 1, 1, 1, 1, 0].map((g) => g * GRANT_POINTS));
+    assert.equal((await signInFrom(service, keypair(), "2001:db8:1:3::1", 9)).granted, GRANT_POINTS, "another /64 is another IP");
     const hash = createHmac("sha256", SECRET).update("ip:2001:db8:1:2::/64").digest("base64url").slice(0, 22);
     const [doc] = await store.read([`ip:${hash}:${utcDay(T0)}`]);
-    assert.deepEqual(JSON.parse(doc.json!), wallets.slice(0, 5), "stored under the labelled (\"ip:\") keyed hash of the /64");
+    assert.deepEqual(JSON.parse(doc.json!), wallets.slice(0, 5).map((w) => w.wallet), "stored under the labelled (\"ip:\") keyed hash of the /64");
+  });
+
+  test(`${name}: only the streamer's beat counts (it marks them here); viewers' beats do nothing and earn nothing`, async () => {
+    const { service, coins, clock, balance } = setup(make);
+    assert.deepEqual(await service.beat("viewer", COIN), { accepted: false });
+    assert.equal(await balance("viewer"), 0);
+    const beats = await Promise.all(Array.from({ length: 5 }, () => service.beat(STREAMER, COIN)));
+    assert.equal(beats.filter((b) => b.accepted).length, 1, "parallel beats count once");
+    assert.equal((await service.view(COIN, null)).streamerHere, true);
+    assert.deepEqual(await service.beat(STREAMER, COIN), { accepted: false }, "too soon after the last");
+    clock.t = T0 + MIN;
+    assert.deepEqual(await service.beat(STREAMER, COIN), { accepted: true });
+    await assert.rejects(service.beat(STREAMER, "not-a-coin"), /Coin not found/);
+    coins.set("full", { creator: STREAMER, status: "graduating" });
+    assert.deepEqual(await service.beat(STREAMER, "full"), { accepted: false });
   });
 
   test(`${name}: the whole flow: holders suggest and upvote; the crowd launches only while the streamer is here`, async () => {
     const { service, clock, fund, balance, nonHolders, streamerHere } = setup(make);
     const viewers = ["v1", "v2", "v3", "v4", "v5", "v6"];
-    for (const v of viewers) await fund(v, 1_000, 40);
-    await fund("asker", 100, 40);
-    await fund("outsider", 100, 40);
+    for (const v of viewers) await fund(v, 1_000, true);
+    await fund("asker", 100, true);
+    await fund("outsider", 100, true);
     nonHolders.add("outsider");
 
     await assert.rejects(service.act(COIN, "outsider", { kind: "suggest", text: "Will the streamer eat a banana?" }), /Hold at least 1 of this coin/);
@@ -368,11 +360,11 @@ for (const [name, make] of STORES) {
     assert.deepEqual([await balance("a"), await balance("b")], [500, 500]);
   });
 
-  test(`${name}: leaderboards list only wallets with 30+ minutes watched; unknown coins are refused`, async () => {
+  test(`${name}: leaderboards list only wallets that got the sign-in grant; unknown coins are refused`, async () => {
     const { service, clock, fund, liveId } = setup(make);
-    await fund("watcher", 500, 30);
-    await fund("drive-by", 500, 5);
-    await fund("loser", 500, 30);
+    await fund("watcher", 500, true);
+    await fund("drive-by", 500, false);
+    await fund("loser", 500, true);
     await service.act(COIN, STREAMER, { kind: "launch", text: "Will chat win this round?", windowMin: 1 });
     const id = await liveId();
     await service.act(COIN, "watcher", { kind: "bet", id, side: "yes", amount: 100 });
@@ -382,7 +374,7 @@ for (const [name, make] of STORES) {
     await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
     clock.t += FLAG_WINDOW_MS;
     const view = await service.view(COIN, "loser");
-    assert.deepEqual(view.leaderboard.stream, [{ wallet: "watcher", points: 50 }], "drive-by won more but watched 5 minutes; losers aren't on the top line");
+    assert.deepEqual(view.leaderboard.stream, [{ wallet: "watcher", points: 50 }], "drive-by won more but never got the grant (over its IP's cap); losers aren't on the top line");
     assert.deepEqual(view.leaderboard.allTime, [{ wallet: "watcher", points: 50 }]);
     assert.deepEqual(view.leaderboard.me.stream, { points: -150, rank: 2 });
     await assert.rejects(service.view("not-a-coin", null), /Coin not found/);
@@ -462,7 +454,7 @@ for (const [name, make] of STORES) {
   test(`${name}: review: a suggestion is under review for its asker only (no upvotes); approval shows it to everyone`, async () => {
     const { service, fund, settle, jev } = setup(make, { autoReview: false });
     await fund("asker", 100);
-    await fund("other", 100, 30);
+    await fund("other", 100, true);
     const mine = (await service.act(COIN, "asker", { kind: "suggest", text: Q }))!;
     assert.deepEqual(mine.queue.map((s) => [s.text, s.status, s.mine]), [[Q, "review", true]]);
     const others = await service.view(COIN, "other");

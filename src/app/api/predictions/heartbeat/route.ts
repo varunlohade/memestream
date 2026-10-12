@@ -1,14 +1,12 @@
 import { isBase58Of } from "@/lib/base58";
-import { clientIp } from "@/server/rate-limit";
 import { withRpcGuard } from "@/server/rpc-guard";
 import { jsonBody, jsonError, ok } from "../../respond";
 import { gate, predictionsError, signedInWallet } from "../respond";
 
 /**
- * POST /api/predictions/heartbeat { mint } (session token) -> { accepted, points }.
- * Sent every 60 s while a coin page is visible: one minute watched on that coin, 2 free points
- * (600 a day at most). It counts only on a memestream coin that is trading or graduated; beats
- * closer than 50 s earn nothing, and only 5 wallets per IP a day earn. The server decides.
+ * POST /api/predictions/heartbeat { mint } (session token) -> { accepted }.
+ * Sent every 60 s by the streamer's own coin page: it marks them "here" (the crowd's questions go
+ * live only then). Anyone else's beat does nothing; nobody earns points from it.
  */
 export const POST = withRpcGuard({ name: "predictions-heartbeat", burst: 20, perSecond: 2 }, async (request: Request) => {
   const service = gate();
@@ -18,7 +16,7 @@ export const POST = withRpcGuard({ name: "predictions-heartbeat", burst: 20, per
   try {
     const { mint } = await jsonBody(request);
     if (typeof mint !== "string" || !isBase58Of(mint, 32)) return jsonError("Not a valid coin address", 400);
-    return ok(await service.beat(wallet, mint, clientIp(request)));
+    return ok(await service.beat(wallet, mint));
   } catch (error) {
     return predictionsError(error);
   }

@@ -63,15 +63,16 @@ npm run e2e:predictions:local
 - It builds the app, starts it on a free local port against devnet, and plays a full round through the real routes and the real Upstash Redis.
 - Every run uses its own Redis key prefix (`memestream:pm-e2e:<run id>:`) and deletes only those keys at the end.
 - Every run launches a fresh coin. 4 viewer wallets live in `.keys/e2e-viewer-N.json` and get about 0.05 devnet SOL each from `.keys/partner.json`.
-- It prints one PASS or FAIL line per step and exits non-zero on any failure. One run takes about 8 to 10 minutes (the build, then about 7 to 8 minutes of play; public devnet RPC limits slow some calls).
+- It prints one PASS or FAIL line per step and exits non-zero on any failure. One run takes about 6 to 8 minutes (the build, then the bet windows; public devnet RPC limits slow some calls). There is no watch-time wait: the first sign-in grants the points.
 - If you stop a run early, delete its keys: `E2E_CLEANUP_ONLY=1 MEMESTREAM_PREDICTIONS_PREFIX=<its prefix> npx tsx scripts/predictions-e2e.mts` (with the Upstash env loaded).
-- Test-only speed-ups (`MEMESTREAM_PREDICTIONS_FAST=1`: starter points after 1 minute, upvotes count after 2) work only outside Vercel production.
+- The first sign-in of a wallet grants 1,000 points at once, for at most 5 wallets per IP a day; the run checks that a 6th wallet gets none.
 - Against a server you started yourself: `BASE_URL=... MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<id>: KV_REST_API_URL=... KV_REST_API_TOKEN=... npx tsx scripts/predictions-e2e.mts`. The server must use the same prefix.
 
 ### b. By hand on the live site (2 wallets)
 - [ ] **Streamer** wallet: open your coin page and sign in to predictions (one signature, no SOL).
 - [ ] **Viewer** wallet (holds at least 1 of the coin): open the same coin in another browser and sign in.
-- [ ] Keep both pages open. Viewers get points only from watching: the 200 starter points come after about 10 minutes. Upvotes count after 15 minutes.
+- [ ] The viewer's first sign-in shows "Your points: 1,000" at once. Holders can suggest and upvote right away.
+- [ ] Keep the streamer's page open: it marks the streamer "here", which the crowd's questions need.
 - [ ] Streamer: type a question and launch it at once. Pick the 1-minute window. You don't need a viewer's suggestion.
 - [ ] Viewer: bet on YES or NO (at most half your points).
 - [ ] Streamer: try to bet. It says streamers can't bet on their own coin.

@@ -3,8 +3,8 @@
  * movements it causes. No I/O, so every rule is unit-tested here; the store then commits the new
  * state and the point movements in one atomic step (and refuses if anything changed meanwhile).
  *
- * Flow: holders of the coin suggest YES/NO questions (10 points, back when it goes live) and
- * upvote them (free). While the streamer is watching their own coin (heartbeat in the last
+ * Flow: signed-in holders of the coin suggest YES/NO questions (10 points, back when it goes live)
+ * and upvote them (free). While the streamer is watching their own coin (heartbeat in the last
  * 5 minutes) and "Crowd picks questions" is on, the top suggestion with 3+ upvotes goes live by
  * itself while a live slot is free; the streamer or a mod can also launch one, or their own question.
  * Up to MAX_LIVE live predictions at a time, 20 per stream. Viewers bet on a side of each until it
@@ -205,8 +205,9 @@ export type Action =
   | { kind: "decide"; id: string; outcome: MarketOutcome };
 
 /**
- * Who acts and what the server knows about them: watch-time eligibility, whether they hold the
- * coin (the sybil-resistant signal for suggesting and upvoting), and their current balance.
+ * Who acts and what the server knows about them: eligibility (they got the sign-in grant, which
+ * is capped per IP), whether they hold the coin (the sybil-resistant signal for suggesting and
+ * upvoting), and their current balance.
  */
 export type Actor = {
   wallet: string;
@@ -832,7 +833,6 @@ function suggest(ctx: Ctx, actor: Actor, text: string) {
 function upvote({ game }: Ctx, actor: Actor, id: string) {
   requireViewer(game, actor, "upvote");
   if (!actor.holder) throw new GameError(`Hold at least ${MIN_HOLDING_COINS} of this coin to upvote`);
-  if (!actor.eligible) throw new GameError("Watch 15 minutes to upvote");
   const s = findSuggestion(game, id);
   if (s.asker === actor.wallet) throw new GameError("You can't upvote your own suggestion");
   if (hasUpvoted(s, actor.wallet)) throw new GameError("You already upvoted this");

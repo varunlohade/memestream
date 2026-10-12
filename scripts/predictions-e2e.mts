@@ -1,8 +1,8 @@
 /**
  * DEVNET ONLY: one full predictions game (free points, no money) against a running memestream
  * server, through its real HTTP routes, with real devnet coins and the server's real Upstash Redis.
- * The server must use a test key prefix (MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<run>:) and
- * MEMESTREAM_PREDICTIONS_FAST=1; `npm run e2e:predictions:local` sets both and runs this.
+ * The server must use a test key prefix (MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<run>:);
+ * `npm run e2e:predictions:local` sets it and runs this.
  *
  * Run:  BASE_URL=http://localhost:3000 MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<run>: \
  *       KV_REST_API_URL=... KV_REST_API_TOKEN=... npx tsx scripts/predictions-e2e.mts
@@ -18,7 +18,7 @@ import { Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/w
 import { Redis } from "@upstash/redis";
 import bs58 from "bs58";
 import { MESSAGE_TTL_MS, newNonce, sessionMessage } from "../src/lib/predictions/message";
-import { type Bet, payouts, type Side, STARTER_POINTS, SUGGEST_COST } from "../src/lib/predictions/rules";
+import { type Bet, GRANT_POINTS, payouts, type Side, SUGGEST_COST } from "../src/lib/predictions/rules";
 import { sleep } from "../src/lib/poll";
 import { connectToDevnet } from "./devnet";
 import { readKeypair, readOrCreateKeypair } from "./keys";
@@ -36,7 +36,6 @@ const BUY_SOL = "0.002";
 const API_GAP_MS = 600;
 const SIGN_IN_GAP_MS = 1_100;
 const RPC_GAP_MS = 400;
-const BEAT_GAP_MS = 52_000;
 
 if (!BASE_URL && process.env.E2E_CLEANUP_ONLY !== "1") throw new Error("Set BASE_URL, e.g. http://localhost:3000");
 if (!/^memestream:pm-e2e:[\w-]+:$/.test(PREFIX)) throw new Error("Set MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<run id>: (the same one the server uses)");
@@ -153,10 +152,10 @@ async function waitForHoldings(mint: string, wallet: Keypair, min: number) {
 // Predictions players
 // ---------------------------------------------------------------------------------------------
 
-type Player = { name: string; keypair: Keypair; wallet: string; token: string };
+type Player = { name: string; keypair: Keypair; wallet: string; token: string; granted: number };
 type View = {
   now: number;
-  me: { balance: number; eligible: boolean; watchMinutes: number; holder: boolean | null; notice?: string | null } | null;
+  me: { balance: number; eligible: boolean; holder: boolean | null; notice?: string | null } | null;
   live: { id: string; text: string; lockAt: number; yes: number; no: number; bettors: number; myBet: { side: string; amount: number } | null }[];
   queue: { id: string; text: string; upvotes: number; mine: boolean; status?: string }[];
   resolved: { id: string; outcome: string; disputed: boolean; my: { bet: number; payout: number; flagged: boolean } | null }[];
@@ -274,8 +273,8 @@ async function run() {
   for (const [name, keypair] of [["streamer", creator], ...viewers.map((v, i) => [`viewer${i + 1}`, v] as const), ["non-holder", outsider]] as const) {
     const signed = signIn(keypair);
     replay ??= signed;
-    const s = await must(`sign-in: ${name} signs the session message`, () => ok<{ wallet: string; token: string }>("POST", "/api/predictions/session", { body: signed, gapMs: SIGN_IN_GAP_MS }), (r) => r.wallet.slice(0, 6));
-    players.push({ name, keypair, wallet: s.wallet, token: s.token });
+    const s = await must(`sign-in: ${name} signs the session message`, () => ok<{ wallet: string; token: string; granted: number }>("POST", "/api/predictions/session", { body: signed, gapMs: SIGN_IN_GAP_MS }), (r) => `${r.wallet.slice(0, 6)}, +${r.granted} points`);
+    players.push({ name, keypair, wallet: s.wallet, token: s.token, granted: s.granted });
   }
   const replayed = await http("POST", "/api/predictions/session", { body: replay, gapMs: SIGN_IN_GAP_MS });
   check("sign-in: the same signed message again is refused (replay)", replayed.status === 400 && String(replayed.json.error).includes("already used"), `${replayed.status} "${String(replayed.json.error)}"`);
@@ -288,18 +287,17 @@ async function run() {
   pass("prefix: the server stores under the test prefix", `${nonceKeys.length} nonce keys`);
 
   const [streamer, v1, v2, v3, v4, outsiderP] = players;
-  const watchers = [streamer, v1, v2, v3, v4];
 
-  // Heartbeats: with FAST the starter grant comes after 1 minute watched (one beat).
-  for (const [i, r] of (await Promise.all(watchers.map(beat))).entries()) {
-    const p = watchers[i];
-    check(`heartbeat 1: ${p.name}`, r.status === 200 && r.json.accepted === true && r.json.points === 2 + STARTER_POINTS, `accepted ${String(r.json.accepted)}, +${String(r.json.points)} points`);
-  }
-  const tooSoon = await beat(v1);
-  check("heartbeat: a second beat within 50 s earns nothing", tooSoon.status === 200 && tooSoon.json.accepted === false && tooSoon.json.points === 0, JSON.stringify(tooSoon.json));
+  // The first sign-in grants points at once: the first 5 wallets from one IP today; the 6th gets none.
+  check("grant: the streamer and 4 viewers each get the sign-in grant", [streamer, v1, v2, v3, v4].every((p) => p.granted === GRANT_POINTS), [streamer, v1, v2, v3, v4].map((p) => p.granted).join(", "));
+  check("grant: a 6th wallet from the same IP gets none (the anti-farm cap)", outsiderP.granted === 0, `${outsiderP.granted}`);
   const startBalances = await balances([v1, v2, v3, v4]);
-  check("starter points: every viewer has 202 (2 + 200 starter)", startBalances.every((b) => b === 2 + STARTER_POINTS), startBalances.join(", "));
-  const firstBeatsAt = Date.now();
+  check(`grant: every viewer starts with ${GRANT_POINTS}`, startBalances.every((b) => b === GRANT_POINTS), startBalances.join(", "));
+  // The streamer's beat marks them here (the crowd's questions go live only then); a viewer's does nothing.
+  const streamerBeat = await beat(streamer);
+  check("heartbeat: the streamer's beat counts", streamerBeat.status === 200 && streamerBeat.json.accepted === true, JSON.stringify(streamerBeat.json));
+  const viewerBeat = await beat(v1);
+  check("heartbeat: a viewer's beat does nothing", viewerBeat.status === 200 && viewerBeat.json.accepted === false, JSON.stringify(viewerBeat.json));
 
   // Suggest: costs 10, holders only, never staff.
   const question = `Will the streamer win the next game? (${symbol})`;
@@ -314,18 +312,8 @@ async function run() {
   if (!approved) throw new Fatal("jev review");
   await refused("suggest: a non-holder can't suggest", outsiderP, { kind: "suggest", text: "Will this be refused today?" }, "Hold at least");
   await refused("suggest: the streamer can't suggest on their own coin", streamer, { kind: "suggest", text: "Will this be refused today?" }, "can't suggest");
-  await refused("upvote: not eligible before 2 minutes watched (FAST)", v2, { kind: "upvote", id: suggestion.id }, "Watch");
-
-  // Second beats: 2 minutes watched, so upvotes count (FAST eligibility).
-  const wait = firstBeatsAt + BEAT_GAP_MS - Date.now();
-  console.log(`      waiting ${Math.ceil(wait / 1000)} s for the next heartbeat`);
-  await sleep(wait);
-  for (const [i, r] of (await Promise.all(watchers.map(beat))).entries()) {
-    const p = watchers[i];
-    check(`heartbeat 2: ${p.name}`, r.status === 200 && r.json.accepted === true && r.json.points === 2, `accepted ${String(r.json.accepted)}, +${String(r.json.points)} points`);
-  }
   const v2View = await view(v2);
-  check("eligible: viewers are eligible after 2 minutes watched", v2View.me!.eligible === true && v2View.me!.watchMinutes === 2, `eligible ${v2View.me!.eligible}, ${v2View.me!.watchMinutes} min`);
+  check("eligible: a granted viewer is eligible at once (no watch time)", v2View.me!.eligible === true, `eligible ${v2View.me!.eligible}`);
 
   // Upvotes: the third launches the suggestion by itself while the streamer is present.
   await must("upvote: viewer2", () => actOk(v2, { kind: "upvote", id: suggestion.id }));
@@ -337,7 +325,7 @@ async function run() {
   if (!crowdLive) throw new Fatal("crowd launch");
   const id1 = crowdLive.id;
   const v1AfterLaunch = await balance(v1);
-  check("suggest: the 10 points come back when it goes live", v1AfterLaunch === startBalances[0] + 2, `${v1AfterLaunch}`);
+  check("suggest: the 10 points come back when it goes live", v1AfterLaunch === startBalances[0], `${v1AfterLaunch}`);
 
   // Bets on both sides; staff can't bet; a bettor can't resolve.
   const round1: Bet[] = [

@@ -25,6 +25,7 @@ import { marketKeysFromId } from "../src/lib/markets/pool";
 import type { MarketRecord, MarketView } from "../src/lib/markets/record";
 import { buildRedeemTx } from "../src/lib/markets/settle";
 import { MESSAGE_TTL_MS, newNonce, sessionMessage } from "../src/lib/predictions/message";
+import { GRANT_POINTS } from "../src/lib/predictions/rules";
 import type { PredictionsView } from "../src/lib/predictions/view";
 import { sleep } from "../src/lib/poll";
 import { redisStore } from "../src/server/predictions/store";
@@ -108,7 +109,7 @@ async function topUp(from: Keypair, wallets: { keypair: Keypair; min: number; ta
   return `top-ups ${await connection.sendTransaction(tx, [from])}`;
 }
 
-type SessionReply = { wallet: string; token: string; expiresAt: number };
+type SessionReply = { wallet: string; token: string; expiresAt: number; granted: number };
 
 /** Screenshots of the card as `wallet` sees it; with `session`, signed in to predictions too (the page reads it from localStorage). */
 function shot(state: string, mint: string, wallet: string, session?: SessionReply) {
@@ -149,11 +150,10 @@ async function run() {
 
   const session = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(creator) });
   await http("POST", "/api/predictions/heartbeat", { token: session.token, body: { mint } });
-  // The viewer signs in and watches a minute (MEMESTREAM_PREDICTIONS_FAST): starter points for a challenge bond.
+  // The viewer's first sign-in grants points at once: enough for a challenge bond.
   const viewerSession = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(viewer) });
   const adminSession = await ok<SessionReply>("POST", "/api/predictions/session", { body: signIn(adminKey) });
-  const beat = await http("POST", "/api/predictions/heartbeat", { token: viewerSession.token, body: { mint } });
-  check("points: the viewer's first minute watched earns the starter points", beat.status === 200 && Number(beat.json.points) > 100, `+${String(beat.json.points)} points`);
+  check("points: the viewer's first sign-in grants points at once", viewerSession.granted === GRANT_POINTS, `+${viewerSession.granted} points`);
   const view = () => ok<PredictionsView>("GET", coinPath, { token: session.token });
   const text = `Will chat say gg before the round ends? (${Date.now().toString(36).slice(-4)})`;
   const SOURCE = "https://liquipedia.net/counterstrike/Main_Page";

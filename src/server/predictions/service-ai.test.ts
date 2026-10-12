@@ -72,7 +72,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     while (deferred.length) await Promise.all(deferred.splice(0).map((task) => task()));
   };
   const fund = async (wallet: string) => {
-    const profile = { ...newProfile(), watchMs: 40 * MIN, earningMs: 40 * MIN, starter: true };
+    const profile = { ...newProfile(), granted: true };
     const [doc] = await store.read([`watch:${wallet}`]);
     await store.commit({ docs: [{ key: `watch:${wallet}`, v: doc.v, json: JSON.stringify(profile) }], moves: [{ wallet, delta: 1_000, floor: 0 }], won: [] });
   };

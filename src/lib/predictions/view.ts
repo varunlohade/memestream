@@ -39,10 +39,8 @@ export type PredictionsView = {
   me: {
     wallet: string;
     balance: number;
-    watchMinutes: number;
+    /** Got the sign-in grant: its bets count toward the asker reward, and it can be on leaderboards. */
     eligible: boolean;
-    /** Minutes left until the starter grant, or null once it is unlocked. */
-    starterInMinutes: number | null;
     role: "streamer" | "mod" | null;
     hasSuggestion: boolean;
     /** Holds at least 1 whole coin (needed to suggest and upvote); null if unknown or staff. */

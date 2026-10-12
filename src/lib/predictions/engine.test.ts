@@ -104,15 +104,15 @@ test("suggest: the 10 points come back when it goes live; expiry after 20 minute
   expired.run({ kind: "suggest", text: "Will chat win this round?" }, "asker", T0 + 21 * MIN);
 });
 
-test("upvote: free; holders with 15 minutes watched only; once each, never your own", () => {
+test("upvote: free; holders only (no watch time needed); once each, never your own", () => {
   const w = world({ a: 100 }, ["a", "b", "outsider"], ["outsider"]);
   w.run({ kind: "suggest", text: "Will I eat a banana?" }, "a", T0);
   refused(() => w.run({ kind: "upvote", id: "1" }, "outsider", T0), /Hold at least 1 of this coin/);
-  refused(() => w.run({ kind: "upvote", id: "1" }, "newcomer", T0), /Watch 15 minutes/);
+  w.run({ kind: "upvote", id: "1" }, "newcomer", T0); // not eligible, still a holder: fine
   refused(() => w.run({ kind: "upvote", id: "1" }, "a", T0), /your own/);
   w.run({ kind: "upvote", id: "1" }, "b", T0);
   refused(() => w.run({ kind: "upvote", id: "1" }, "b", T0), /already upvoted/);
-  assert.deepEqual([w.game.suggestions[0].upvoters, w.game.suggestions[0].upvotes], [["b"], 1]);
+  assert.deepEqual([w.game.suggestions[0].upvoters, w.game.suggestions[0].upvotes], [["newcomer", "b"], 2]);
   assert.equal(w.bal.get("b") ?? 0, 0, "upvotes cost nothing");
   refused(() => w.run({ kind: "upvote", id: "9" }, "b", T0), /gone/);
 });

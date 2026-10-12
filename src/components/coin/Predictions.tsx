@@ -5,9 +5,10 @@
  * MEMESTREAM_MARKETS also on, each live prediction gets an on-chain market (MarketCard): its card
  * replaces the points bet box, and the points game stays for suggestions and the leaderboard.
  *
- * The wallet signs one message to start a session; after that the session token identifies it.
- * While the page is visible, a heartbeat every 60 s earns watch points. The server decides
- * everything (points, limits, who may do what); this panel only shows the state and sends actions.
+ * The wallet signs one message to start a session (its first one brings the points grant); after
+ * that the session token identifies it. The streamer's own page beats once a minute (it marks them
+ * "here"). The server decides everything (points, limits, who may do what); this panel only shows
+ * the state and sends actions.
  */
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useWallet } from "@/components/wallet/WalletProvider";
@@ -26,7 +27,6 @@ import {
   LINK_MAX,
   QUESTION_MAX,
   type Side,
-  STARTER_POINTS,
   SUGGEST_COST,
 } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
@@ -144,11 +144,14 @@ export function Predictions({
   symbol,
   streamUrl = null,
   network = { label: "Devnet", test: true },
+  markets = false,
 }: {
   mint: string;
   symbol: string;
   streamUrl?: string | null;
   network?: { label: string; test: boolean };
+  /** On-chain markets are on (MEMESTREAM_MARKETS). */
+  markets?: boolean;
 }) {
   const { address, signIn: walletSignIn } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
@@ -193,9 +196,10 @@ export function Predictions({
     return () => clearInterval(timer);
   }, [mint, authHeaders, pollMs]);
 
-  // Watch points: one heartbeat a minute while this page is visible (the server ignores faster ones).
+  // The streamer's presence: one beat a minute while their own coin's page is visible.
+  const isStreamer = Boolean(session) && view?.me?.role === "streamer";
   useEffect(() => {
-    if (!session) return;
+    if (!isStreamer) return;
     const beat = () => {
       if (document.hidden) return;
       postWithAuth("/api/predictions/heartbeat", { mint }, authHeaders()).catch(() => undefined);
@@ -203,7 +207,7 @@ export function Predictions({
     beat();
     const timer = setInterval(beat, HEARTBEAT_MS);
     return () => clearInterval(timer);
-  }, [session, authHeaders, mint]);
+  }, [isStreamer, authHeaders, mint]);
 
   const signIn = async () => {
     if (!address || !walletSignIn) return;
@@ -300,9 +304,6 @@ export function Predictions({
         </div>
       )}
       {!address && <p className="mute pm-small">Connect a wallet to play.</p>}
-      {me && !staff && me.starterInMinutes !== null && (
-        <p className="mute pm-small num">Watch {me.starterInMinutes} more minutes for {STARTER_POINTS} starter points.</p>
-      )}
 
       {live.map((p) =>
         p.id === openLive ? (
@@ -394,7 +395,6 @@ export function Predictions({
               className={`mbtn ${notHolder ? "off" : "pm-uv"}`}
               disabled={busy || !viewer || notHolder || s.mine || s.upvoted}
               onClick={() => act({ kind: "upvote", id: s.id })}
-              title={me && !me.eligible ? "Watch 15 minutes to upvote" : undefined}
             >
               {s.upvoted ? "Upvoted" : s.mine ? "Yours" : "Upvote"}
             </button>
@@ -465,9 +465,8 @@ export function Predictions({
         </p>
       )}
       <p className="pm-free">
-        {[...live, ...view.resolved].some((p) => p.market !== null && p.market !== "failed")
-          ? `Points are free and only for fun. Markets use ${network.test ? `${network.label.toLowerCase()} SOL (test money)` : "real SOL"}.`
-          : "Free points. No money, no prizes."}
+        Points are free and only for fun.
+        {markets ? ` Markets use ${network.test ? `${network.label.toLowerCase()} SOL (test money)` : "real SOL"}.` : ""}
       </p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>
@@ -592,7 +591,7 @@ function ordinal(n: number) {
 function headlineFor(me: PredictionsView["me"]) {
   if (me?.role === "streamer") return "You can't bet on your own coin";
   if (me?.role === "mod") return "Mods can't bet on this coin";
-  return me ? `Your points ${fmt(me.balance)}. You earn points by watching.` : "You earn points by watching.";
+  return me ? `Your points: ${fmt(me.balance)}` : "";
 }
 
 /** A question every review check failed on: staff approve or remove it by hand. */

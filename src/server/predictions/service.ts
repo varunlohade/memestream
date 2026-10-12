@@ -12,14 +12,13 @@ import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, 
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
-import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, MarketStepView, PredictionsView, Standing } from "@/lib/predictions/view";
-import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
+import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
 import { GAME_KEY_COUNT, gameKeys, loadGame } from "./game-doc";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
-import { REAL_WAITS, type Waits } from "./test-settings";
 
 export type CoinFacts = { creator: string; status: "trading" | "graduating" | "graduated"; streamUrl?: string | null; symbol?: string };
 
@@ -78,8 +77,6 @@ export type ServiceDeps = {
    * that closes it right at lockAt, instead of waiting for the next view. 0 turns the timer off (tests).
    */
   closeWaitMs?: number;
-  /** Watch time before the starter grant and before eligibility (shorter only in test runs). */
-  waits?: Waits;
 };
 
 /** Too many concurrent writers on one coin: the caller should answer "busy, try again". */
@@ -282,7 +279,6 @@ const RETRY = Symbol("retry");
 export function predictionsService(deps: ServiceDeps) {
   const { store, now } = deps;
   const attempts = deps.attempts ?? DEFAULT_COMMIT_ATTEMPTS;
-  const waits = deps.waits ?? REAL_WAITS;
   /** The coin's environment for the engine; markets follow the server flag. */
   const envOf = (presenceJson: string | null, extra: Partial<Env> = {}): Env => ({
     ...parseEnv(presenceJson),
@@ -315,43 +311,50 @@ export function predictionsService(deps: ServiceDeps) {
     return coin;
   }
 
-  /** Signs a wallet in: checks its signed message (domain, expiry, signature), uses the nonce once, returns a session token. */
-  async function session(message: string, signature: string) {
+  /**
+   * Signs a wallet in: checks its signed message (domain, expiry, signature), uses the nonce once,
+   * returns a session token. A wallet's first sign-in also gets the one-time grant, in the same
+   * commit, if its IP hasn't had MAX_GRANTS_PER_IP wallets granted today (else a later sign-in can).
+   */
+  async function session(message: string, signature: string, ip: string) {
     const t = now();
     const verified = verifySessionMessage(message, signature, t, deps.domain);
     if (!verified.ok) throw new GameError(verified.error);
     const { wallet, nonce } = verified.request;
-    const used = await store.commit({ docs: [], moves: [], won: [], nonce: { key: `nonce:${wallet}:${nonce}`, ttlMs: MESSAGE_TTL_MS * 2 } });
-    if (used === "replay") throw new GameError("That signature was already used. Sign in again.");
-    return { wallet, ...issueToken(wallet, t, deps.secret) };
+    const ipKey = ipDayKey(deps.secret, ip, t);
+    const granted = await retryOnConflict(async () => {
+      const [watchDoc, ipDoc] = await store.read([watchKey(wallet), ipKey]);
+      const wallets: string[] = ipDoc.json ? JSON.parse(ipDoc.json) : [];
+      const result = grant(parseProfile(watchDoc.json), wallets.includes(wallet) || wallets.length < MAX_GRANTS_PER_IP);
+      const docs: Commit["docs"] = [];
+      if (result.points > 0) {
+        docs.push({ key: watchKey(wallet), v: watchDoc.v, json: JSON.stringify(result.profile) });
+        if (!wallets.includes(wallet)) docs.push({ key: ipKey, v: ipDoc.v, json: JSON.stringify([...wallets, wallet]), ttlMs: DAY_MS });
+      }
+      const moves = result.points > 0 ? [{ wallet, delta: result.points, floor: 0 }] : [];
+      const status = await store.commit({ docs, moves, won: [], nonce: { key: `nonce:${wallet}:${nonce}`, ttlMs: MESSAGE_TTL_MS * 2 } });
+      if (status === "replay") throw new GameError("That signature was already used. Sign in again.");
+      return status === "ok" ? result.points : RETRY;
+    });
+    return { wallet, ...issueToken(wallet, t, deps.secret), granted };
   }
 
   /**
-   * One minute watched on `mint` (if not too soon after the last). Counts only on a memestream
-   * coin that is trading or graduated. Only the first 5 wallets from one IP each UTC day earn
-   * points; later ones earn 0, silently. The streamer's own beat also marks them present.
+   * The streamer's page beats once a minute while open: that marks them "here" (the crowd's
+   * questions go live only then) and starts a new stream after 2+ hours away. Anyone else's beat,
+   * or one too soon after the last, does nothing. Viewers earn nothing from watching.
    */
-  async function beat(wallet: string, mint: string, ip: string) {
+  async function beat(wallet: string, mint: string) {
     const coin = await facts(mint);
-    if (coin.status === "graduating") return { accepted: false, points: 0 };
+    if (wallet !== coin.creator || coin.status === "graduating") return { accepted: false };
     const t = now();
-    const ipKey = ipDayKey(deps.secret, ip, t);
-    const streamer = wallet === coin.creator;
     return retryOnConflict(async () => {
-      const [watchDoc, ipDoc, presenceDoc] = await store.read([watchKey(wallet), ipKey, presenceKey(mint)]);
-      const wallets: string[] = ipDoc.json ? JSON.parse(ipDoc.json) : [];
-      const earning = wallets.includes(wallet) || wallets.length < MAX_EARNING_WALLETS_PER_IP;
-      const result = heartbeat(parseProfile(watchDoc.json), t, earning, waits.starterAfterMs);
-      if (!result.accepted) return { accepted: false, points: 0 };
-      const docs: Commit["docs"] = [{ key: watchKey(wallet), v: watchDoc.v, json: JSON.stringify(result.profile) }];
-      if (earning && !wallets.includes(wallet)) docs.push({ key: ipKey, v: ipDoc.v, json: JSON.stringify([...wallets, wallet]), ttlMs: DAY_MS });
-      if (streamer) {
-        const presence = nextPresence(parsePresence(presenceDoc.json), t);
-        docs.push({ key: presenceKey(mint), v: presenceDoc.v, json: JSON.stringify(presence), ttlMs: 2 * STREAM_GAP_MS });
-      }
-      const moves = result.points > 0 ? [{ wallet, delta: result.points, floor: 0 }] : [];
-      const status = await store.commit({ docs, moves, won: [] });
-      return status === "ok" ? { accepted: true, points: result.points } : RETRY;
+      const [presenceDoc] = await store.read([presenceKey(mint)]);
+      const last = parsePresence(presenceDoc.json);
+      if (last && t - last.at < MIN_HEARTBEAT_GAP_MS) return { accepted: false };
+      const docs: Commit["docs"] = [{ key: presenceKey(mint), v: presenceDoc.v, json: JSON.stringify(nextPresence(last, t)), ttlMs: 2 * STREAM_GAP_MS }];
+      const status = await store.commit({ docs, moves: [], won: [] });
+      return status === "ok" ? { accepted: true } : RETRY;
     });
   }
 
@@ -377,7 +380,7 @@ export function predictionsService(deps: ServiceDeps) {
     await retryOnConflict(async () => {
       const { game, save, extra: [watchDoc, presenceDoc] } = await readGame(mint, creator, [watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
-      const eligible = isEligible(parseProfile(watchDoc.json), waits.eligibleAfterMs);
+      const eligible = isEligible(parseProfile(watchDoc.json));
       const result = apply(game, action, { wallet, eligible, holder, balance, shares }, now(), envOf(presenceDoc.json, { aiCheck }));
       const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
@@ -749,9 +752,7 @@ export function predictionsService(deps: ServiceDeps) {
     return {
       wallet,
       balance,
-      watchMinutes: Math.floor(profile.watchMs / MINUTE_MS),
-      eligible: isEligible(profile, waits.eligibleAfterMs),
-      starterInMinutes: profile.starter ? null : Math.max(0, Math.ceil((waits.starterAfterMs - profile.watchMs) / MINUTE_MS)),
+      eligible: isEligible(profile),
       role: wallet === game.creator ? "streamer" : game.mods.includes(wallet) ? "mod" : null,
       hasSuggestion: game.suggestions.some((s) => s.asker === wallet),
       holder,
