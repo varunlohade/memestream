@@ -6,6 +6,7 @@ import { Sprite, useTexture } from "@/components/pixel/Pixel";
 import { useSearch } from "@/components/search";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { shortAddress } from "@/lib/format";
+import { Logo } from "./Logo";
 import { PageTexture } from "./PageTexture";
 
 /** Wallet chip with a disclosure panel: pick a wallet to connect, or disconnect. */
@@ -113,7 +114,7 @@ export function TopBar({ network }: { network: string }) {
     <header className="top" style={texture}>
       <PageTexture />
       <Link href="/" className="brand" aria-label="memestream home">
-        <Sprite name="coin" />
+        <Logo size={36} />
         <span className="wm">memestream</span>
         <span className="net">{network}</span>
       </Link>
