@@ -13,6 +13,7 @@ import bs58 from "bs58";
 import { MESSAGE_TTL_MS, newNonce, sessionMessage } from "../src/lib/predictions/message";
 import { COIN_DECIMALS } from "../src/lib/api-types";
 import { fractionOf } from "../src/lib/format";
+import { OUTCOME_DECIMALS } from "../src/lib/markets/pool";
 import { sleep } from "../src/lib/poll";
 import { connectToDevnet } from "./devnet";
 import { readKeypair, readOrCreateKeypair } from "./keys";
@@ -30,7 +31,7 @@ const TOKEN_PROGRAMS = [TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID];
 const USAGE = `usage: npx tsx scripts/sim.mts <command>
   fund <name> <sol> | who | buy <name> <TICKER|mint> <sol> | sell <name> <TICKER|mint> <percent>
   signin <name> | suggest <name> <TICKER> "<question>" | upvote <name> <TICKER> <questionId>
-  bet <name> <TICKER> <marketId> yes|no <sol> | sellbet <name> <TICKER> <marketId> yes|no <shares>
+  bet <name> <TICKER> <marketId> yes|no <sol> | sellbet <name> <TICKER> <marketId> yes|no <shares|N%>
   challenge <name> <TICKER> <marketId> "<reason>" | redeem <name> <TICKER> <marketId> | markets <TICKER>
   streamer: golive dave "<name>" <TICKER> <streamUrl> | launch dave <TICKER> "<question>"|<queueId>
             resolve dave <TICKER> <predictionId> yes|no|cancel
@@ -72,7 +73,7 @@ async function http(method: "GET" | "POST", path: string, opts: { token?: string
       continue;
     }
     if (res.status === 409 && json.duplicate) throw new Stop(`409: ${error}${json.pendingSignature ? ` ${solscan(String(json.pendingSignature))}` : ""}`);
-    if (res.status !== 200) throw new Stop(`${method} ${path}: ${res.status} ${error}`);
+    if (res.status !== 200) throw new Stop(`${error || "request failed"} (${res.status} from ${method} ${path.split("?")[0]})`);
     return json;
   }
 }
@@ -152,7 +153,7 @@ function sessionFor(u: ReturnType<typeof user>): string {
   return s.token;
 }
 
-type Prediction = { id: string; text: string; lockAt: number | null; yes?: number; no?: number; bettors?: number; market: string | null; outcome?: string; verdict?: { status: string } | null };
+type Prediction = { id: string; text: string; lockAt: number | null; yes?: number; no?: number; bettors?: number; market: string | null; outcome?: string; verdict?: { status: string; proposed?: string | null; finalAt?: number | null } | null };
 type View = { live: Prediction[]; queue: { id: string; text: string; upvotes: number; status: string }[]; resolved: Prediction[] };
 
 async function act(u: ReturnType<typeof user>, mint: string, body: Record<string, unknown>) {
@@ -277,17 +278,34 @@ async function main(args: string[]): Promise<string> {
     case "sellbet": {
       const u = user(rest[0]);
       const coin = await resolveMint(rest[1]);
-      const [, , predictionId, side, amount] = rest;
+      const [, , predictionId, side, given] = rest;
       if (side !== "yes" && side !== "no") throw new Stop("Side must be yes or no.");
+      let amount = given;
+      if (command === "sellbet" && given?.endsWith("%")) {
+        const share = Number(given.slice(0, -1));
+        if (!(share > 0 && share <= 100)) throw new Stop("Give a percent from 1 to 100.");
+        const have = (await odds(coin.mint, predictionId, u.wallet)).position?.[side] ?? "0";
+        amount = fractionOf(have, share, OUTCOME_DECIMALS);
+        if (!(Number(amount) > 0)) throw new Stop(`${u.name} holds no ${side.toUpperCase()} shares on #${predictionId}.`);
+      }
       if (!(Number(amount) > 0)) throw new Stop("Give a positive amount.");
       const action = command === "bet" ? "buy" : "sell";
-      const { sig } = await sendViaApp(connection, "market", u, { mint: coin.mint, predictionId, side, action, amount });
+      const { sig } = await sendViaApp(connection, "market", u, { mint: coin.mint, predictionId, side, action, amount }).catch((e: unknown) => {
+        if (e instanceof Stop && /No market for this prediction/.test(e.message)) throw new Stop(`${e.message}. The market may still be opening (about 30 s after launch): run markets ${rest[1]}.`);
+        throw e;
+      });
       return `${command} ${u.name} ${coin.symbol}#${predictionId} ${side.toUpperCase()} ${amount}${action === "buy" ? " SOL" : " shares"} confirmed ${solscan(sig)}`;
     }
 
     case "redeem": {
       const u = user(rest[0]);
       const coin = await resolveMint(rest[1]);
+      const v = (await http("GET", `/api/predictions/coin/${coin.mint}`)) as unknown as View;
+      const p = v.resolved.find((x) => x.id === rest[2]);
+      if (!p) throw new Stop(`redeem: #${rest[2]} is not resolved yet; nothing to redeem.`);
+      const status = p.verdict?.status;
+      if (status === "proposed") throw new Stop(`redeem: #${rest[2]} is not final yet (proposed ${p.verdict?.proposed?.toUpperCase()}, final ${p.verdict?.finalAt ? new Date(p.verdict.finalAt).toISOString() : "later"} unless challenged).`);
+      if (status === "disputed") throw new Stop(`redeem: #${rest[2]} is not final yet (disputed; the admin decides).`);
       const { sig } = await sendViaApp(connection, "market-redeem", u, { mint: coin.mint, predictionId: rest[2] });
       return `redeem ${u.name} ${coin.symbol}#${rest[2]} confirmed ${solscan(sig)}`;
     }
@@ -308,8 +326,8 @@ async function main(args: string[]): Promise<string> {
       const fromQueue = /^[1-9][0-9]*$/.test(what);
       const v = (await act(u, coin.mint, fromQueue ? { kind: "launch", id: what } : { kind: "launch", text: what })) as unknown as View;
       const hit = (v.live ?? []).find((p) => (fromQueue ? p.id === what : p.text === what));
-      const lock = hit?.lockAt ? `, betting closes ${new Date(hit.lockAt).toISOString()}` : "";
-      return `launch ${u.name} ${coin.symbol} ok${hit ? ` id ${hit.id} market ${hit.market ?? "none"}${lock}` : ""} (no transaction)`;
+      const lock = hit?.lockAt ? `, betting closes in ${Math.round((hit.lockAt - Date.now()) / 1000)} s` : "";
+      return `launch ${u.name} ${coin.symbol} ok${hit ? ` id ${hit.id} market ${hit.market ?? "none"}${lock}` : ", the AI is reviewing it: run markets in ~20 s for its id"} (no transaction)`;
     }
 
     case "resolve": {
@@ -331,7 +349,9 @@ async function main(args: string[]): Promise<string> {
           const o = await odds(coin.mint, p.id);
           price = ` YES ${pct(o.probability.yes)} NO ${pct(o.probability.no)}`;
         }
-        parts.push(`live #${p.id} "${p.text}" market ${p.market ?? "none"}${price} points ${p.yes}/${p.no}`);
+        const left = p.lockAt ? Math.round((p.lockAt - Date.now()) / 1000) : null;
+        const closes = left === null ? "" : left > 0 ? ` betting closes in ${left} s` : " betting closed";
+        parts.push(`live #${p.id} "${p.text}" market ${p.market ?? "none"}${price}${closes}`);
       }
       for (const p of v.resolved) parts.push(`resolved #${p.id} "${p.text}" ${p.outcome} market ${p.market ?? "none"}${p.verdict ? ` ${p.verdict.status}` : ""}`);
       for (const q of v.queue) parts.push(`queue #${q.id} "${q.text}" ${q.upvotes} up (${q.status})`);
