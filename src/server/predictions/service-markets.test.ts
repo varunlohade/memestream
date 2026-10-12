@@ -168,3 +168,12 @@ test("a failing close is retried until it goes through", async () => {
   assert.equal((await look()).live[0].market, "closed");
   assert.deepEqual(calls.filter((c) => c.startsWith("close")), [`close ${id}`, `close ${id}`, `close ${id}`]);
 });
+
+test("the streamer and mods count as staff for market bets; viewers don't", async () => {
+  const { deps } = fakeMarkets();
+  const { service } = setup(deps);
+  await service.act(COIN, STREAMER, { kind: "mod", wallet: "mod1", add: true });
+  assert.equal(await service.staffOf(COIN, STREAMER), true);
+  assert.equal(await service.staffOf(COIN, "mod1"), true);
+  assert.equal(await service.staffOf(COIN, "viewer"), false);
+});

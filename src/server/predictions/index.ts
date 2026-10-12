@@ -45,12 +45,17 @@ function marketDeps(): MarketDeps | null {
   };
 }
 
-/** The registered market of a coin's prediction (only markets the oracle created); throws a user error if there's none. */
-export async function registeredMarket(mint: string, predictionId: string): Promise<MarketRecord> {
+/**
+ * The registered market of a coin's prediction (only markets the oracle created); throws a user
+ * error if there's none. With `bettor`, also refuses the coin's streamer and mods (they resolve it).
+ */
+export async function registeredMarket(mint: string, predictionId: string, bettor?: string): Promise<MarketRecord> {
   if (!isBase58Of(mint, 32) || !isPredictionId(predictionId)) throw new UserError("No market for this prediction");
   const ready = marketsEnabled() ? predictions() : null;
-  const record = ready && "service" in ready ? await ready.service.market(mint, predictionId) : null;
+  if (!ready || !("service" in ready)) throw new UserError("No market for this prediction");
+  const record = await ready.service.market(mint, predictionId);
   if (!record) throw new UserError("No market for this prediction");
+  if (bettor !== undefined && (await ready.service.staffOf(mint, bettor))) throw new UserError("Streamers and mods can't bet on their own coin's predictions");
   return record;
 }
 

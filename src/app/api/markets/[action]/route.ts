@@ -15,7 +15,7 @@ const RPC_CALLS: Record<MarketAction, number> = { odds: 6, preview: 5, trade: 6,
 export const POST = withRpcGuard({ name: "markets", burst: 10, perSecond: 1 }, async (request: Request, { params }: RouteContext<"/api/markets/[action]">, guard) => {
   try {
     const parsed = parseMarketRequest((await params).action, await jsonBody(request));
-    const record = await registeredMarket(parsed.req.mint, parsed.req.predictionId);
+    const record = await registeredMarket(parsed.req.mint, parsed.req.predictionId, parsed.action === "trade" ? parsed.req.wallet : undefined);
     if (!(await guard.spend(RPC_CALLS[parsed.action]))) return busy();
     switch (parsed.action) {
       case "odds":

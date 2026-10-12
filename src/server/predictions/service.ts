@@ -492,6 +492,14 @@ export function predictionsService(deps: ServiceDeps) {
     return doc.json ? (JSON.parse(doc.json) as MarketRecord) : null;
   }
 
+  /** The coin's streamer or one of its mods: they resolve its predictions, so they may not bet on its markets either. */
+  async function staffOf(mint: string, wallet: string): Promise<boolean> {
+    const coin = await facts(mint);
+    if (wallet === coin.creator) return true;
+    const { game } = await readGame(mint, coin.creator, []);
+    return isStaff(game, wallet);
+  }
+
   /** Claims every due market step (so no other server starts it), then runs them one by one: they all sign as the oracle. */
   async function marketRun(mint: string, coin: CoinFacts) {
     const markets = deps.markets;
@@ -630,7 +638,7 @@ export function predictionsService(deps: ServiceDeps) {
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market };
+  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market, staffOf };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;

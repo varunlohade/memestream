@@ -1,7 +1,9 @@
 "use client";
 /**
- * Predictions panel (free points only: no money, no prizes; points can't be bought, sold or sent).
- * Shown on the coin page only when the server's MEMESTREAM_PREDICTIONS flag is on.
+ * Predictions panel (free points: no money, no prizes; points can't be bought, sold or sent).
+ * Shown on the coin page only when the server's MEMESTREAM_PREDICTIONS flag is on. With
+ * MEMESTREAM_MARKETS also on, each live prediction gets an on-chain market (MarketCard): its card
+ * replaces the points bet box, and the points game stays for suggestions and the leaderboard.
  *
  * The wallet signs one message to start a session; after that the session token identifies it.
  * While the page is visible, a heartbeat every 60 s earns watch points. The server decides
@@ -28,6 +30,7 @@ import {
 } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
+import { MarketCard } from "./MarketCard";
 
 const POLL_MS = 5_000;
 /** Faster while the viewer waits on a question under review, so its approval shows within seconds. */
@@ -67,6 +70,8 @@ const postWithAuth = <T,>(url: string, body: unknown, auth: HeadersInit) =>
 
 const fmt = (n: number) => n.toLocaleString("en-US");
 const sideLabel = (side: Side) => (side === "yes" ? "Yes" : "No");
+/** A prediction whose on-chain market exists: its card replaces the points bet. */
+const marketUp = (step: PredictionsView["live"][number]["market"]) => step === "open" || step === "closed" || step === "resolved";
 
 function countdown(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -287,8 +292,10 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
         p.id === openLive ? (
           <LiveCard
             key={p.id}
+            mint={mint}
             live={p}
             now={now}
+            canBet={Boolean(address) && staff === null}
             viewer={viewer}
             staff={staff !== null}
             busy={busy}
@@ -399,16 +406,25 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
       {viewer && notHolder && <p className="mute pm-small">Hold at least {MIN_HOLDING_COINS} ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
-      {view.resolved.slice(0, RESOLVED_SHOWN).map((r) => (
-        <ResolvedRow key={r.id} result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} />
-      ))}
+      {view.resolved.slice(0, RESOLVED_SHOWN).map((r) =>
+        marketUp(r.market) ? (
+          // Remounted when the market's step changes, so it reads the result once it's resolved.
+          <MarketCard key={`${r.id}:${r.market}`} mint={mint} predictionId={r.id} text={r.text} now={now} canBet={false} poll={false}>
+            <ResolvedRow result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} bare />
+          </MarketCard>
+        ) : (
+          <ResolvedRow key={r.id} result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} />
+        ),
+      )}
 
       {error && (
         <p className="notice err" role="alert">
           {error}
         </p>
       )}
-      <p className="pm-free">Free points. No money, no prizes.</p>
+      <p className="pm-free">
+        {[...live, ...view.resolved].some((p) => p.market !== null && p.market !== "failed") ? "Points are free. Markets use real SOL." : "Free points. No money, no prizes."}
+      </p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>
   );
@@ -418,8 +434,10 @@ type LiveView = PredictionsView["live"][number];
 
 /** A live prediction, open: countdown, pools (tap a side to bet), and the bet box or, for staff, the resolve buttons. */
 function LiveCard(props: {
+  mint: string;
   live: LiveView;
   now: number | null;
+  canBet: boolean;
   viewer: boolean;
   staff: boolean;
   busy: boolean;
@@ -430,6 +448,27 @@ function LiveCard(props: {
 }) {
   const { live, now, viewer, staff, busy, amount } = props;
   const locked = now !== null && now >= live.lockAt;
+  const resolve = staff ? <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} /> : null;
+  if (marketUp(live.market)) {
+    return (
+      <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll>
+        {resolve}
+      </MarketCard>
+    );
+  }
+  if (live.market === "opening") {
+    return (
+      <div className="pm-live">
+        <div className="pm-livehead">
+          {locked ? <span className="pm-otag pm-oc pm-closedtag">Closed</span> : <span className="pm-livetag">Live</span>}
+          <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
+        </div>
+        <div className="pm-q pm-big">{live.text}</div>
+        <p className="mute pm-small">Opening market…</p>
+        {resolve}
+      </div>
+    );
+  }
   return (
     <div className="pm-live">
       <div className="pm-livehead">
@@ -437,12 +476,13 @@ function LiveCard(props: {
         <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
       </div>
       <div className="pm-q pm-big">{live.text}</div>
+      {live.market === "failed" && <p className="mute pm-small">Market unavailable. Bet points instead.</p>}
       <div className="pm-pools">
         <SidePool side="yes" pools={live} onClick={viewer && !locked ? () => props.onBet("yes") : undefined} disabled={busy} />
         <SidePool side="no" pools={live} onClick={viewer && !locked ? () => props.onBet("no") : undefined} disabled={busy} />
       </div>
       {staff ? (
-        <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />
+        resolve
       ) : (
         <div className="pm-bet num">
           <input
@@ -485,11 +525,15 @@ function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; on
         {live.myBet && <span className="mute pm-by"> Your bet: {fmt(live.myBet.amount)} on {sideLabel(live.myBet.side)}</span>}
       </span>
       <span className="mute num">{now === null ? "" : locked ? "Closed" : `${countdown(live.lockAt - now)} left`}</span>
-      <div className="slot pm-pool num">
-        <b className="pm-fy" style={{ width: `${yes}%` }} />
-        <span>Yes {yes}%</span>
-        <span>No {total > 0 ? 100 - yes : 0}%</span>
-      </div>
+      {live.market && live.market !== "failed" ? (
+        <span className="mute pm-small">{live.market === "opening" ? "Opening market…" : "Market: tap to trade"}</span>
+      ) : (
+        <div className="slot pm-pool num">
+          <b className="pm-fy" style={{ width: `${yes}%` }} />
+          <span>Yes {yes}%</span>
+          <span>No {total > 0 ? 100 - yes : 0}%</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -553,7 +597,8 @@ function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
   return { text: `You lost ${fmt(my.bet - my.payout)}`, cls: "mute" };
 }
 
-function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void }) {
+/** `bare`: inside its market's card, which already shows the question and the result. */
+function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void; bare?: boolean }) {
   const result = betOutcome(r.my, r.outcome);
   const { role, wallet } = r.resolvedBy;
   const by = role === "auto" ? "auto-cancelled" : wallet ? `${role} ${shortAddress(wallet)}` : role;
@@ -561,10 +606,9 @@ function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResul
   return (
     <div className="pm-rr num">
       <span className="pm-q" title={`Resolved ${at} by ${by}`}>
-        {r.text}
+        {!bare && r.text}
         <span className="mute pm-by">
-          {" "}
-          {at}, {by}
+          {bare ? `Resolved ${at}, ${by}` : ` ${at}, ${by}`}
         </span>
         <AiTag ai={r.ai} />
       </span>

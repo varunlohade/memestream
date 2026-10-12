@@ -316,6 +316,25 @@ span.pm-flag { text-decoration: none; }
 .pm-lb > span { display: inline-flex; align-items: center; gap: 12px; }
 .pm-lbtoggle { background: none; border: 0; padding: 0; font-size: 22px; }
 .pm-sep { display: inline-block; width: 6px; height: 6px; background: #5A5A62; flex: none; }
+/* Prediction market card (design A: the Polymarket card). */
+.mk .pm-livehead { gap: 12px; flex-wrap: wrap; }
+.mk-bar { height: 16px; display: flex; border: 3px solid #000; margin: 10px 0; background: #111; }
+.mk-bar b { display: block; height: 100%; }
+.mk-y { background: #3DDC6A; }
+.mk-n { background: #E5484D; }
+.mk-kv { display: flex; justify-content: space-between; gap: 10px; font-size: 24px; margin: 6px 0; flex-wrap: wrap; }
+.mk-big { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 14px 0; }
+.mk-big .mbtn { height: 84px; font-size: 22px; line-height: 1.2; }
+.mbtn.mk-no { background: #E5484D; color: #fff; }
+.mbtn.mk-no:disabled, .mk-big .mbtn:disabled { background: #3A3A3A; color: #c8c8c8; }
+.mk-big .mbtn[aria-pressed="true"] { outline: 4px solid var(--xp); outline-offset: -8px; }
+.mk-box { display: grid; gap: 10px; margin: 0 0 12px; padding: 14px; border: 4px solid #000; background: #232327; }
+.mk-box .tabs .mbtn { height: 48px; font-size: 16px; }
+.mk-box .amt input { font-size: 30px; }
+.mk-confirm { height: 56px; font-size: 18px; }
+.mk-result { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 10px 0; flex-wrap: wrap; }
+.mk-result .mbtn { height: 52px; font-size: 18px; padding: 0 22px; }
+.mk .pm-rr { border-top: 4px solid rgba(255,255,255,.07); margin-top: 8px; padding-top: 8px; }
 @media (max-width: 640px) {
   .pm-row { grid-template-columns: 1fr auto; }
   .pm-row > :last-child { grid-column: 1 / -1; }

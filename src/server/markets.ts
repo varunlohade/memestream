@@ -23,7 +23,7 @@ import { lpPositionsOf } from "@/lib/damm/positions";
 import { formatUnits, lamportsToSol, parseUnits, solToLamports } from "@/lib/dbc/units";
 import type { BuiltTx } from "@/lib/dbc/tx";
 import { buildCreateMarketTxs, buildMarketMetadataTx } from "@/lib/markets/create";
-import { isPredictionId, type MarketOdds, MIN_MARKET_SECRET_CHARS, type Outcome, type Side } from "@/lib/markets/math";
+import { isPredictionId, MIN_MARKET_SECRET_CHARS, type Outcome, type Side } from "@/lib/markets/math";
 import {
   loadMarketPools,
   MARKET_FEE_BPS,
@@ -35,7 +35,7 @@ import {
   OUTCOME_DECIMALS,
   verifyMarketPools,
 } from "@/lib/markets/pool";
-import type { MarketRecord } from "@/lib/markets/record";
+import type { MarketPosition, MarketRecord, MarketView } from "@/lib/markets/record";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "@/lib/markets/settle";
 import { type MarketOrder, prepareMarketTrade, quoteMarketTrade } from "@/lib/markets/trade";
 import { fetchQuestion, type QuestionState } from "@/lib/markets/vault";
@@ -176,19 +176,6 @@ function volumeLamports(pools: MarketPools): BN {
 /** Token account amount (u64 @64), or 0 if the account doesn't exist. */
 const tokenAmount = (data: Buffer | undefined) => new BN(data && data.length >= 72 ? data.readBigUInt64LE(64).toString() : "0");
 const toTokens = (amount: BN) => formatUnits(amount, OUTCOME_DECIMALS);
-
-export type MarketPosition = { yes: string; no: string; sol: string };
-export type MarketView = MarketOdds & {
-  trading: boolean;
-  resolved: boolean;
-  payoutNumerators: number[] | null;
-  lockAt: number;
-  volumeSol: string;
-  /** The most SOL a buy of each side can spend right now (the pool's stock limit). */
-  maxBuySol: Record<Side, string>;
-  /** The wallet's YES, NO and SOL, when a wallet was given. */
-  position: MarketPosition | null;
-};
 
 async function positionOf(keys: MarketKeys, wallet: PublicKey): Promise<MarketPosition> {
   const accounts = [...SIDES.map((side) => getAssociatedTokenAddressSync(keys.mints[side], wallet)), wallet];

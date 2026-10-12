@@ -30,7 +30,7 @@ export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, 
         return ok(await buildClaimPoolFeesForWallet(parsed.req));
       // Markets: only registered ones (the oracle made them), so the lookup comes before the build.
       case "market":
-        return ok(await buildMarketTradeForWallet(await registeredMarket(parsed.req.mint, parsed.req.predictionId), parsed.req, Date.now()));
+        return ok(await buildMarketTradeForWallet(await registeredMarket(parsed.req.mint, parsed.req.predictionId, parsed.req.wallet), parsed.req, Date.now()));
       case "market-redeem":
         return ok(await buildMarketRedeemForWallet(await registeredMarket(parsed.req.mint, parsed.req.predictionId), parsed.req.wallet));
     }
