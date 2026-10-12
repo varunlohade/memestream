@@ -153,5 +153,35 @@ You see "Your points: 1,000". A viewer must hold at least 1 of the coin to sugge
     - The card shows **Disputed: under review** and "A holder challenged it".
     - Viewer (admin `BxfZ…`): press **Final YES** (or **Final NO**, or **Void** for a 50/50 refund).
 11. Both: the card shows **Final: YES**.
-12. Winner: press **Redeem #N** → approve. It turns to **Redeemed**; each winning share paid 1 SOL.
+12. Winner: the card shows **You won N SOL**. Press **Redeem #N** → approve. It turns to **Redeemed**; each winning share paid 1 SOL.
     On **Void**, every share pays 0.5 SOL.
+
+#### Payouts
+
+- Before you buy: in the buy box, under **You get ≈ N YES shares**, check
+  **If YES wins, you get ≈ N SOL (+X%)**. Each winning share pays 1 SOL, so N SOL = N shares and
+  X% = (shares − SOL in) ÷ SOL in. The Sell tab doesn't show this line.
+- After the final result, the card shows one line:
+  - Winner: **You won N SOL** and a **Redeem #N** button.
+  - Loser: **Your NO shares pay 0. YES won.** (or **Your YES shares pay 0. NO won.**). No button.
+  - Void: **Refund: N SOL (0.5 per share)** and **Redeem #N**.
+  - No shares: **You held no shares**.
+- While betting is open, the card shows one muted line: **Fee 0.3% per trade: 80% to the market's
+  starting liquidity (memestream), 20% to Meteora. The streamer earns on the coin, not on markets.**
+  The pool's own fee settings say this: a flat 0.3% to the liquidity provider (the oracle's position,
+  seeded by memestream), and Meteora's protocol keeps 20% of it.
+
+**Worked example (round 5 on devnet, read from the chain).** Viewer A (`2WVQ…uq74`) bet on YES, and
+YES won. Nobody bought NO, so the other side was the pool's starting liquidity: memestream's
+0.05 SOL seed, as 0.05 YES and 0.05 NO.
+
+| Step | Transaction | SOL | YES shares |
+|---|---|---|---|
+| Buy YES | `4sZi…FYPw` | 0.005 in | +0.009544883 |
+| Sell half | `yws7…H1CP` | 0.002535623 back | −0.004772442 |
+| Redeem | `5yo2…goNV` | 0.004772441 back | −0.004772441 |
+
+A put in 0.005 SOL, sold half for 0.002535623 SOL, and redeemed 0.004772441 SOL. That is
+0.007308064 SOL back, a profit of 0.002308064 SOL (+46%). At the buy, the box would have shown
+"If YES wins, you get ≈ 0.00954 SOL (+91%)". Each transaction also cost a 0.000005 SOL network fee.
+The buy paid 0.00297688 SOL rent for two token accounts, and the redeem returned it.
