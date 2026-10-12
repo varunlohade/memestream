@@ -103,9 +103,9 @@ runs on Meteora's real programs in `test/integration/mainnet-config.surfpool.ts`
 
 ## Traction
 
-**Devnet, as of [date time IST]; mostly our own testing:** [N] coins launched on our config, [N]
-trades, [N] SOL volume, [N] graduations to DAMM v2, [N] SOL in creator fees claimed, [N] prediction
-markets created.
+**Devnet, as of 12 Oct 2026, 17:22 IST; mostly our own testing:** 23 coins launched on our config,
+68 trades, 2.38 SOL volume, 8 graduations to DAMM v2, 0.0071 SOL in creator fees claimed (8 claims),
+8 trading wallets, 7 prediction markets created (devnet SOL).
 
 _[Mainnet numbers: coins launched, trades, SOL volume, graduations, streamer earnings]_
 

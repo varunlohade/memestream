@@ -34,14 +34,16 @@ Meteora DBC listing: https://superteam.fun/earn/listing/meteora-dbc
 
 ## Traction
 
-Devnet, as of [date time IST]; mostly our own testing: [N] coins launched on our config, [N] trades,
-[N] SOL volume, [N] graduations to DAMM v2, [N] SOL in creator fees claimed, [N] prediction markets
-created. Without coins from our two test wallets: [N] coins, [N] trades, [N] SOL volume,
-[N] graduations.
+Devnet, as of 12 Oct 2026, 17:22 IST; mostly our own testing: 23 coins launched on our config, 68 trades,
+2.38 SOL volume, 8 graduations to DAMM v2, 0.0071 SOL in creator fees claimed (8 claims), 8 trading
+wallets, 7 prediction markets created (devnet SOL). Without the 21 coins from our test wallets: 2 coins, 8
+trades, 0.20 SOL volume, 1 graduation, no creator fees claimed yet.
 
-How we counted: a read-only script lists every DBC pool on our config, reads each pool's and each
-graduated DAMM v2 pool's transactions, and counts swaps and creator fee claims. Markets count the
-oracle's transactions to the MetaDAO vault program.
+How we counted (read-only, public devnet RPC): a script lists every DBC pool on our config, reads
+every transaction of each pool and each graduated DAMM v2 pool, and counts swaps (with their SOL)
+and creator fee claims. Markets: the oracle's successful transactions to the MetaDAO vault program
+that ran InitializeQuestion and InitializeConditionalVault (7 each). Our test wallets created 21 of
+the 23 coins; the other 2 came from one other wallet.
 
 ## How it uses DBC
 
