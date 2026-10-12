@@ -61,7 +61,8 @@ export type TradePreview = { spent: string; received: string; minimumReceived: s
  * A transaction for the wallet: base64 bytes, already partial-signed by any server-made keypairs.
  * `blockhash` is the one the server built it with; once it's invalid the tx can never land.
  */
-export type PreparedTx = { transaction: string; blockhash: string };
+/** `intent` names this build for the double-pay check; the status poll sends it back. */
+export type PreparedTx = { transaction: string; blockhash: string; intent?: string };
 
 /** "market" and "market-redeem": a bet or a redemption in a prediction's on-chain market (MEMESTREAM_MARKETS). */
 export type TxAction = "launch" | "trade" | "claim" | "graduate" | "claim-lp" | "market" | "market-redeem";
