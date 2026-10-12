@@ -1,13 +1,13 @@
 /** Read-side of the app: lists coins, one coin's detail, its recent trades, a wallet's holdings. */
 import "server-only";
 import { deriveDammV2PoolAuthority, deriveDbcPoolAuthority, type DynamicBondingCurveClient, type PoolConfig } from "@meteora-ag/dynamic-bonding-curve-sdk";
-import { getAssociatedTokenAddressSync } from "@solana/spl-token";
+import { AccountLayout, getAssociatedTokenAddressSync, TOKEN_PROGRAM_ID } from "@solana/spl-token";
 import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 import type { CoinDetail, CoinView, HolderView, Holdings, TapeItem, TradeView } from "@/lib/api-types";
 import { loadConfig, type PoolView, toPoolView } from "@/lib/dbc/pool";
 import { fetchDammPools, graduatedPoolAddress, isCoinSolPool, withGraduatedPool } from "@/lib/damm/pool";
-import { mintSupply, toHolders } from "@/lib/holders";
+import { mintSupply, OWNER_AMOUNT_SLICE, slicedOwnerAmount, tokenAccountOwner, toHolders } from "@/lib/holders";
 import { lpPositionsOf, unclaimedPoolFees } from "@/lib/damm/positions";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
@@ -227,6 +227,14 @@ async function readCoinAndTrades(mint: string): Promise<CoinAndTrades | null> {
 const HOLDERS_CACHE_MS = 30_000;
 /** getTokenLargestAccounts, then one getMultipleAccountsInfo for the mint (supply) and those accounts (owners). */
 const HOLDERS_RPC_CALLS = 2;
+/**
+ * Some RPCs refuse getTokenLargestAccounts (public devnet answers 429 for that method alone). Then
+ * one owner+amount scan of the mint's token accounts replaces it, after the mint read: one more call.
+ */
+const HOLDERS_FALLBACK_RPC_CALLS = 1;
+/** After a refusal, skip getTokenLargestAccounts for a while (web3.js retries a 429 for ~8 s first). */
+const LARGEST_REFUSED_MS = 10 * 60_000;
+let largestRefusedAt = -Infinity;
 const holderListCache = new Map<string, { at: number; value: HolderView[] }>();
 const holderListInFlight = new Map<string, Promise<HolderView[]>>();
 
@@ -254,16 +262,35 @@ export async function getHolders(mint: string): Promise<HolderView[] | null> {
 async function readHolders(coin: CoinView): Promise<HolderView[]> {
   const { connection } = getChain();
   const mintKey = new PublicKey(coin.mint);
-  const largest = (await connection.getTokenLargestAccounts(mintKey)).value;
-  const [mintInfo, ...accounts] = await connection.getMultipleAccountsInfo([mintKey, ...largest.map((a) => a.address)]);
+  const roles = { curve: deriveDbcPoolAuthority().toBase58(), pool: deriveDammV2PoolAuthority().toBase58(), streamer: coin.creator };
+  const tryLargest = Date.now() - largestRefusedAt >= LARGEST_REFUSED_MS;
+  const largest = !tryLargest
+    ? null
+    : await connection.getTokenLargestAccounts(mintKey).then(
+          (r) => r.value,
+          (error: Error) => {
+            console.warn("getTokenLargestAccounts refused; scanning the mint's token accounts:", error.message);
+            largestRefusedAt = Date.now();
+            return null;
+          },
+        );
+  if (largest) {
+    const [mintInfo, ...accounts] = await connection.getMultipleAccountsInfo([mintKey, ...largest.map((a) => a.address)]);
+    const supply = mintSupply(mintInfo?.data ?? null);
+    const balances = largest.map((a, i) => ({ owner: tokenAccountOwner(accounts[i]?.data ?? null), amount: BigInt(a.amount) }));
+    return supply === null ? [] : toHolders(balances, supply, roles);
+  }
+  // The refused call used one of the two calls drawn; the scan and the mint read need one more.
+  if (tryLargest && !(await takeRpcBudget(HOLDERS_FALLBACK_RPC_CALLS))) throw new BusyError();
+  const [mintInfo, scanned] = await Promise.all([
+    connection.getAccountInfo(mintKey),
+    connection.getProgramAccounts(TOKEN_PROGRAM_ID, {
+      dataSlice: OWNER_AMOUNT_SLICE,
+      filters: [{ dataSize: AccountLayout.span }, { memcmp: { offset: 0, bytes: coin.mint } }],
+    }),
+  ]);
   const supply = mintSupply(mintInfo?.data ?? null);
-  if (supply === null) return [];
-  return toHolders(
-    largest.map((a) => ({ address: a.address.toBase58(), amount: a.amount })),
-    accounts.map((info) => info?.data ?? null),
-    supply,
-    { curve: deriveDbcPoolAuthority().toBase58(), pool: deriveDammV2PoolAuthority().toBase58(), streamer: coin.creator },
-  );
+  return supply === null ? [] : toHolders(scanned.map(({ account }) => slicedOwnerAmount(account.data)), supply, roles);
 }
 
 /** Our config's launch fee in SOL ("0" = free). The config is fixed on-chain, so it's read once. */
