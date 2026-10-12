@@ -52,3 +52,29 @@ Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 - [ ] Open /coin/ with a random address: you get "Not found".
 
 If anything looks wrong, note the step number and what you saw, and send it to steve.
+
+## 9. Test predictions (free points, no money)
+
+### a. Automated: one command
+```bash
+vercel env pull .env.e2e.local --environment=development   # once: the Upstash URL and token (git-ignored; never commit or share it)
+npm run e2e:predictions:local
+```
+- It builds the app, starts it on a free local port against devnet, and plays a full round through the real routes and the real Upstash Redis.
+- Every run uses its own Redis key prefix (`memestream:pm-e2e:<run id>:`) and deletes only those keys at the end.
+- Every run launches a fresh coin. 4 viewer wallets live in `.keys/e2e-viewer-N.json` and get about 0.05 devnet SOL each from `.keys/partner.json`.
+- It prints one PASS or FAIL line per step and exits non-zero on any failure. One run takes about 8 to 10 minutes (the build, then about 7 to 8 minutes of play; public devnet RPC limits slow some calls).
+- If you stop a run early, delete its keys: `E2E_CLEANUP_ONLY=1 MEMESTREAM_PREDICTIONS_PREFIX=<its prefix> npx tsx scripts/predictions-e2e.mts` (with the Upstash env loaded).
+- Test-only speed-ups (`MEMESTREAM_PREDICTIONS_FAST=1`: starter points after 1 minute, upvotes count after 2) work only outside Vercel production.
+- Against a server you started yourself: `BASE_URL=... MEMESTREAM_PREDICTIONS_PREFIX=memestream:pm-e2e:<id>: KV_REST_API_URL=... KV_REST_API_TOKEN=... npx tsx scripts/predictions-e2e.mts`. The server must use the same prefix.
+
+### b. By hand on the live site (2 wallets)
+- [ ] **Streamer** wallet: open your coin page and sign in to predictions (one signature, no SOL).
+- [ ] **Viewer** wallet (holds at least 1 of the coin): open the same coin in another browser and sign in.
+- [ ] Keep both pages open. Viewers get points only from watching: the 200 starter points come after about 10 minutes. Upvotes count after 15 minutes.
+- [ ] Streamer: type a question and launch it at once. Pick the 1-minute window. You don't need a viewer's suggestion.
+- [ ] Viewer: bet on YES or NO (at most half your points).
+- [ ] Streamer: try to bet. It says streamers can't bet on their own coin.
+- [ ] After the minute, the streamer resolves. The viewer's points go up on a win, or the stake is gone on a loss.
+- [ ] Viewer: flag the result. It shows as flagged.
+- [ ] Launch a second question and resolve it as Cancel. The viewer gets the stake back.
