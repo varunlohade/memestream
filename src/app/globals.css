@@ -148,14 +148,14 @@ button.unv { cursor: help; }
 
 /* Coin page. */
 /* pump.fun layout: header row; left the big stream, chart and tabs; right the trade box and panels. */
-.cp { display: grid; grid-template-columns: minmax(0, 1fr) 420px; grid-template-areas: "head head" "main side"; gap: 20px 28px; padding: 24px 40px 40px; max-width: 1480px; margin: 0 auto; }
+.cp { display: grid; grid-template-columns: minmax(0, 1fr) 420px; grid-template-areas: "head head" "main side"; gap: 14px 28px; padding: 14px 40px 40px; max-width: 1480px; margin: 0 auto; }
 .cp-head { grid-area: head; display: flex; gap: 16px; align-items: center; min-width: 0; }
 .cp-thumb { width: 72px; height: 72px; padding: 6px; flex: none; position: relative; overflow: hidden; }
 .cp-id { min-width: 0; }
 .cp-id h1 { font-size: 32px; text-shadow: 3px 3px 0 #000; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-by { font-size: 26px; color: var(--mute); min-width: 0; overflow-wrap: anywhere; }
 .cp-cap { font-size: 26px; color: var(--up); margin-top: 4px; }
-.cp-main { grid-area: main; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.cp-main { grid-area: main; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .cp-side { grid-area: side; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
 .cp-trade { display: flex; flex-direction: column; gap: 20px; }
 .cp-chart { height: 280px; padding: 16px; }
@@ -217,10 +217,9 @@ button.unv { cursor: help; }
   .cp-main, .cp-side { display: contents; }
   .cp-stream { order: 1; }
   .cp-head { order: 2; }
-  .cp-trade { order: 3; }
-  .cp-curve { order: 4; }
-  .cp-chart { order: 5; }
-  .cp-tabs { order: 6; }
+  .cp-tabs { order: 3; }
+  .cp-trade { order: 4; }
+  .cp-curve { order: 5; }
   .cp-holders { order: 7; }
 }
 @media (max-width: 640px) {

@@ -5,7 +5,8 @@
  * stands still (scroll by hand) under reduced motion. Hidden when there are no coins.
  */
 import Link from "next/link";
-import { useLayoutEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
+import { Suspense, useLayoutEffect, useRef, useState } from "react";
 import { Sprite } from "@/components/pixel/Pixel";
 import { usePolledTape } from "@/components/hooks";
 import type { TapeItem } from "@/lib/api-types";
@@ -56,7 +57,23 @@ function Items({ items, copy }: { items: TapeItem[]; copy?: boolean }) {
   );
 }
 
+/** The scrolling tape, everywhere but coin pages (there the predictions come first, near the top). */
 export function TickerTape() {
+  // The path is only known at request time, so it streams in (the tape is not part of the prerender).
+  return (
+    <Suspense fallback={null}>
+      <TapeOffCoinPages />
+    </Suspense>
+  );
+}
+
+function TapeOffCoinPages() {
+  const path = usePathname();
+  if (path?.startsWith("/coin/")) return null;
+  return <Tape />;
+}
+
+function Tape() {
   const { data } = usePolledTape();
   const items = data?.items ?? [];
   const first = useRef<HTMLDivElement>(null);

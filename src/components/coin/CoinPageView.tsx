@@ -239,7 +239,8 @@ export function CoinPageView({
   const points = useMemo(() => priceSeries(detail.trades), [detail.trades]);
   const { data: holderData } = useHolders(mint);
   const holders = holderData?.holders ?? null;
-  const [tab, setTab] = useState<CoinTab>("trades");
+  // Predictions are the main product: their tab is first and open by default.
+  const [tab, setTab] = useState<CoinTab>(predictions ? "predictions" : "trades");
   const stone = useTexture("stone", 6);
   // A link to /coin/<mint>#predictions (the home page's live row) opens the predictions tab.
   useEffect(() => {
@@ -256,7 +257,7 @@ export function CoinPageView({
   }, [predictions]);
 
   const { coin, trades, holdings } = detail;
-  const tabs: CoinTab[] = predictions ? ["trades", "predictions", "holders"] : ["trades", "holders"];
+  const tabs: CoinTab[] = predictions ? ["predictions", "trades", "holders"] : ["trades", "holders"];
 
   return (
     <div className="cp">
@@ -282,11 +283,8 @@ export function CoinPageView({
         <div className="cp-stream">
           <StreamEmbed coin={coin} />
         </div>
-        <section className="p cp-chart" aria-label="Price chart">
-          {points.length > 0 ? <PriceChart points={points} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
-        </section>
         <div className="cp-tabs" id="predictions">
-          <div className="sort" role="group" aria-label="Trades, predictions and holders">
+          <div className="sort" role="group" aria-label="Predictions, trades and holders">
             {tabs.map((key) => (
               <button
                 type="button"
@@ -301,9 +299,14 @@ export function CoinPageView({
             ))}
           </div>
           {tab === "trades" && (
-            <section className="p" aria-label="Recent trades">
-              <TradeList trades={trades} symbol={coin.symbol} />
-            </section>
+            <>
+              <section className="p cp-chart" aria-label="Price chart">
+                {points.length > 0 ? <PriceChart points={points} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
+              </section>
+              <section className="p" aria-label="Recent trades">
+                <TradeList trades={trades} symbol={coin.symbol} />
+              </section>
+            </>
           )}
           {/* Kept mounted while hidden, so its sign-in and open prediction survive a tab switch. */}
           {predictions && (
