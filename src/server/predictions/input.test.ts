@@ -47,12 +47,12 @@ test("prediction ids past 9999 still parse, so a busy coin's later predictions c
   assert.equal(parseAction({ kind: "bet", id: "1234567890", side: "yes", amount: 10 }), null, "bounded at 9 digits");
 });
 
-test("challenge and decide: ids, a reason, an optional link, and only known decisions", () => {
+test("challenge and decide: ids, a reason, an optional link, and only known outcomes", () => {
   assert.deepEqual(parseAction({ kind: "challenge", id: "4", reason: "He lost" }), { kind: "challenge", id: "4", reason: "He lost" });
   assert.deepEqual(parseAction({ kind: "challenge", id: "4", reason: "He lost", link: "https://x.example" }), { kind: "challenge", id: "4", reason: "He lost", link: "https://x.example" });
   assert.equal(parseAction({ kind: "challenge", id: "4" }), null);
   assert.equal(parseAction({ kind: "challenge", id: "x", reason: "He lost" }), null);
-  assert.deepEqual(parseAction({ kind: "decide", id: "4", decision: "void" }), { kind: "decide", id: "4", decision: "void" });
-  assert.equal(parseAction({ kind: "decide", id: "4", decision: "pay me" }), null);
+  assert.deepEqual(parseAction({ kind: "decide", id: "4", outcome: "refund" }), { kind: "decide", id: "4", outcome: "refund" });
+  assert.equal(parseAction({ kind: "decide", id: "4", outcome: "pay me" }), null);
   assert.deepEqual(parseAction({ kind: "launch", text: "Will it rain?", windowMin: 5, source: "https://weather.example" }), { kind: "launch", text: "Will it rain?", windowMin: 5, source: "https://weather.example" });
 });

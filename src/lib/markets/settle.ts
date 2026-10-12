@@ -8,13 +8,12 @@
  * refuses bets from the prediction's lockAt (server/markets.ts). Before resolution a holder of both
  * sides can still merge YES + NO back into SOL (vault.ts).
  */
-import { CpAmm } from "@meteora-ag/cp-amm-sdk";
+import { CpAmm, derivePositionAddress, derivePositionNftAccount, type PositionState } from "@meteora-ag/cp-amm-sdk";
 import { createAssociatedTokenAccountIdempotentInstruction, createCloseAccountInstruction, getAssociatedTokenAddressSync, NATIVE_MINT } from "@solana/spl-token";
 import { type Connection, type PublicKey, Transaction } from "@solana/web3.js";
 import BN from "bn.js";
 import { InputError } from "../dbc/errors";
 import { built, type BuiltTx } from "../dbc/tx";
-import { lpPositionsOf } from "../damm/positions";
 import { type Outcome, payoutNumerators, type Side } from "./math";
 import type { MarketKeys, MarketPool } from "./pool";
 import { unwrapSolIx } from "./create";
@@ -25,40 +24,43 @@ export const CLOSE_SLIPPAGE_BPS = 100;
 const atLeast = (amount: BN) => amount.muln(10_000 - CLOSE_SLIPPAGE_BPS).divn(10_000);
 
 /**
- * One transaction per position the oracle still has in the market's pool: claims its fees, removes
- * all liquidity and closes the position (its rent comes back). The oracle gets YES + NO back, which
- * it redeems after resolution. Minimums come from a fresh withdraw quote, less CLOSE_SLIPPAGE_BPS: a
- * price pushed around between the quote and the close makes the close fail (and the server tries
- * again) rather than fill worse.
+ * Closes trading: one transaction that takes the oracle's own position (the one its secret-derived
+ * NFT made, provenance.ts) out of the pool, claims its fees and closes it (its rent comes back). The
+ * oracle gets YES + NO back, which it redeems after resolution. Only that position: anyone can open
+ * other positions naming the oracle as owner (empty ones too), and those must never block a close.
+ * Nothing to close (already closed, or empty): no transaction. Minimums come from a fresh withdraw
+ * quote, less CLOSE_SLIPPAGE_BPS: a price pushed around between the quote and the close makes the
+ * close fail (and the server tries again) rather than fill worse.
  */
-export async function buildCloseTradingTxs(connection: Connection, keys: MarketKeys, pool: MarketPool): Promise<BuiltTx[]> {
+export async function buildCloseTradingTxs(connection: Connection, keys: MarketKeys, pool: MarketPool, positionNft: PublicKey): Promise<BuiltTx[]> {
   const cpAmm = new CpAmm(connection);
-  const txs: BuiltTx[] = [];
-  for (const p of await lpPositionsOf(connection, pool.address, keys.oracle)) {
-    const quote = cpAmm.getWithdrawQuote({
-      liquidityDelta: p.positionState.unlockedLiquidity,
-      minSqrtPrice: pool.state.sqrtMinPrice,
-      maxSqrtPrice: pool.state.sqrtMaxPrice,
-      sqrtPrice: pool.state.sqrtPrice,
-      collectFeeMode: pool.state.collectFeeMode,
-      tokenAAmount: pool.state.tokenAAmount,
-      tokenBAmount: pool.state.tokenBAmount,
-      liquidity: pool.state.liquidity,
-    });
-    const tx = await cpAmm.removeAllLiquidityAndClosePosition({
-      owner: keys.oracle,
-      position: p.position,
-      positionNftAccount: p.positionNftAccount,
-      poolState: pool.state,
-      positionState: p.positionState,
-      tokenAAmountThreshold: atLeast(quote.outAmountA),
-      tokenBAmountThreshold: atLeast(quote.outAmountB),
-      vestings: [],
-      currentPoint: pool.currentPoint,
-    });
-    txs.push(built(tx, keys.oracle));
-  }
-  return txs;
+  const position = derivePositionAddress(positionNft);
+  const info = await connection.getAccountInfo(position);
+  if (!info) return [];
+  const positionState = cpAmm._program.coder.accounts.decode("position", info.data) as PositionState;
+  if (!positionState.pool.equals(pool.address) || positionState.unlockedLiquidity.isZero()) return [];
+  const quote = cpAmm.getWithdrawQuote({
+    liquidityDelta: positionState.unlockedLiquidity,
+    minSqrtPrice: pool.state.sqrtMinPrice,
+    maxSqrtPrice: pool.state.sqrtMaxPrice,
+    sqrtPrice: pool.state.sqrtPrice,
+    collectFeeMode: pool.state.collectFeeMode,
+    tokenAAmount: pool.state.tokenAAmount,
+    tokenBAmount: pool.state.tokenBAmount,
+    liquidity: pool.state.liquidity,
+  });
+  const tx = await cpAmm.removeAllLiquidityAndClosePosition({
+    owner: keys.oracle,
+    position,
+    positionNftAccount: derivePositionNftAccount(positionNft),
+    poolState: pool.state,
+    positionState,
+    tokenAAmountThreshold: atLeast(quote.outAmountA),
+    tokenBAmountThreshold: atLeast(quote.outAmountB),
+    vestings: [],
+    currentPoint: pool.currentPoint,
+  });
+  return [built(tx, keys.oracle)];
 }
 
 /** Oracle only, once: YES [1,0], NO [0,1], or a refund [1,1] when disputed or cancelled. */

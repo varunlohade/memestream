@@ -9,11 +9,11 @@ import { isIPv6 } from "node:net";
 import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
-import { applyMarketDone, applyMarketUnavailable, challengeEndsAt, marketFinal, type MarketJob, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
+import { applyMarketDone, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MINUTE_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
-import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
+import type { LeaderRow, MarketStepView, PredictionsView, Standing } from "@/lib/predictions/view";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
 import { GAME_KEY_COUNT, gameKeys, loadGame } from "./game-doc";
@@ -36,6 +36,8 @@ export type MarketDeps = {
   resolve: (record: MarketRecord, outcome: MarketOutcome) => Promise<unknown>;
   /** Whether `wallet` holds any YES or NO of the market (one budgeted read). */
   holdsShares: (record: MarketRecord, wallet: string) => Promise<boolean>;
+  /** The oracle redeems the YES/NO its liquidity came back as (nothing held: nothing sent). */
+  redeemOracle: (record: MarketRecord) => Promise<unknown>;
 };
 
 /** The AI check's two steps; each throws if its model fails (timeout, error, malformed answer). */
@@ -89,6 +91,8 @@ const watchKey = (wallet: string) => `watch:${wallet}`;
 const presenceKey = (mint: string) => `presence:${mint}`;
 /** A market the oracle created: the registry trades, odds and redeems are limited to. */
 const marketKey = (mint: string, predictionId: string) => `market:${mint}:${predictionId}`;
+/** Coins with a market that still needs a server step: the close-due sweep's list (a few dozen at most). */
+const OPEN_MARKETS_KEY = "markets:open";
 /** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
 type Presence = { at: number; since?: number };
 const DEFAULT_COMMIT_ATTEMPTS = 12;
@@ -186,7 +190,7 @@ function liveView(game: Game, wallet: string | null): PredictionsView["live"] {
       no: live.no,
       bettors: live.bettors,
       myBet: myBet ? { side: myBet.side, amount: myBet.amount } : null,
-      market: live.market?.step ?? null,
+      market: marketStepView(live.market),
       source: live.source ?? null,
     };
   });
@@ -232,20 +236,26 @@ function myResult(p: Summary, wallet: string | null, now: number): ResolvedView[
   return { bet, payout, flagged: flagged === 1, canFlag: now < p.resolvedAt + FLAG_WINDOW_MS };
 }
 
-/** A market's place in its challenge window; the challenge itself only for admins. */
+/** A market's place in its challenge window; why it waits and the challenge itself only for admins. */
 function verdictView(p: Summary, now: number, env: Env, admin: boolean): PredictionsView["resolved"][number]["verdict"] {
   const m = p.market;
   if (!m || m.step === "opening" || m.step === "failed") return null;
   const final = marketFinal(p, now, env);
   const c = m.challenge;
+  const waits = needsAdmin(p);
+  const disputed = !m.decision && (c !== undefined || waits !== null);
   return {
-    status: final ? "final" : c ? "disputed" : "proposed",
-    finalAt: c || p.outcome === "cancel" ? null : challengeEndsAt(p, env),
+    status: final ? "final" : disputed ? "disputed" : "proposed",
+    proposed: proposedOutcome(p),
+    finalAt: disputed || final ? null : challengeEndsAt(p, env),
     final,
-    decision: m.decision?.kind ?? null,
+    why: admin && disputed ? (c ? "challenge" : (waits?.why ?? null)) : null,
     challenge: admin && c ? { by: c.by, at: c.at, reason: c.reason, link: c.link ?? null, bond: c.bond } : null,
   };
 }
+
+/** The market's step as the view shows it: "closed" once trading closed and before it resolves. */
+const marketStepView = (m: MarketState | undefined): MarketStepView => (!m ? null : m.step === "open" && m.closed ? "closed" : m.step);
 
 function resolvedView(game: Game, wallet: string | null, staff: boolean, now: number, env: Env, admin: boolean): PredictionsView["resolved"] {
   return game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
@@ -258,7 +268,7 @@ function resolvedView(game: Game, wallet: string | null, staff: boolean, now: nu
     ai: p.check ? "checking" : (p.ai?.verdict ?? null),
     flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,
     my: myResult(p, wallet, now),
-    market: p.market?.step ?? null,
+    market: marketStepView(p.market),
     source: p.source ?? null,
     launchedAt: p.window?.[0] ?? null,
     lockAt: p.window?.[1] ?? null,
@@ -590,6 +600,14 @@ export function predictionsService(deps: ServiceDeps) {
     const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     for (const job of claim.jobs) await marketStep(markets, mint, coin, claim.game, job);
+    // A market both closed and resolved: the oracle takes its seed back (once more is harmless).
+    const { game: after } = await readGame(mint, coin.creator, []);
+    for (const id of new Set(claim.jobs.filter((j) => j.kind !== "create").map((j) => j.id))) {
+      const m = after.resolved.find((p) => p.id === id)?.market;
+      if (m?.step !== "resolved" || !m.closed) continue;
+      const record = await market(mint, id);
+      if (record) await markets.redeemOracle(record).catch((error: Error) => console.warn(`predictions: the oracle's redeem for prediction ${id} failed (${error.message}); scripts/markets-recover.mts can finish it`));
+    }
   }
 
   /** One market step on chain, then its success saved. A failure is logged and tried again after the pause. */
@@ -618,18 +636,57 @@ export function predictionsService(deps: ServiceDeps) {
     }
   }
 
-  /** Saves a market step's success; a create also registers the market, in the same commit. */
+  /** Saves a market step's success; a create also registers the market and lists the coin for the close-due sweep, in the same commit. */
   const commitMarketDone = (mint: string, creator: string, job: MarketJob, record: MarketRecord | null) =>
     retryOnConflict(async () => {
-      const registry = record ? [marketKey(mint, job.id)] : [];
-      const { game, save, extra: [presenceDoc, registryDoc] } = await readGame(mint, creator, [presenceKey(mint), ...registry]);
+      const registry = record ? [marketKey(mint, job.id), OPEN_MARKETS_KEY] : [];
+      const { game, save, extra: [presenceDoc, registryDoc, openDoc] } = await readGame(mint, creator, [presenceKey(mint), ...registry]);
       const result = applyMarketDone(game, job, record?.question ?? null, now(), envOf(presenceDoc.json));
       if (!result.changed) return true;
       const docs = save(result.game);
-      if (record) docs.push({ key: marketKey(mint, job.id), v: registryDoc.v, json: JSON.stringify(record) });
+      if (record) {
+        docs.push({ key: marketKey(mint, job.id), v: registryDoc.v, json: JSON.stringify(record) });
+        const open: string[] = openDoc.json ? JSON.parse(openDoc.json) : [];
+        if (!open.includes(mint)) docs.push({ key: OPEN_MARKETS_KEY, v: openDoc.v, json: JSON.stringify([...open, mint]) });
+      }
       const status = await store.commit({ docs, ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
+
+  /**
+   * The cron-safe sweep: for up to `limit` listed coins, runs the clock and every due market step now
+   * (closing trading right at lockAt even if nobody is watching), then drops coins whose markets need
+   * nothing more. Coins past the limit wait for the next call (the list rotates).
+   */
+  async function sweepMarkets(limit: number): Promise<{ swept: number; listed: number }> {
+    if (!deps.markets) return { swept: 0, listed: 0 };
+    const [openDoc] = await store.read([OPEN_MARKETS_KEY]);
+    const listed: string[] = openDoc.json ? JSON.parse(openDoc.json) : [];
+    const batch = listed.slice(0, limit);
+    const done = new Set<string>();
+    for (const mint of batch) {
+      try {
+        const coin = await facts(mint);
+        await ticked(mint, coin);
+        await runMarketsOnce(mint, coin);
+        const { game } = await readGame(mint, coin.creator, []);
+        if (!hasPendingMarkets(game)) done.add(mint);
+      } catch (error) {
+        if (error instanceof UnknownCoinError) done.add(mint);
+        else console.warn(`predictions: the market sweep failed on ${mint} (${(error as Error).message})`);
+      }
+    }
+    await retryOnConflict(async () => {
+      const [doc] = await store.read([OPEN_MARKETS_KEY]);
+      const now: string[] = doc.json ? JSON.parse(doc.json) : [];
+      // The swept ones go to the back; finished ones leave; coins added meanwhile stay.
+      const next = [...now.filter((m) => !batch.includes(m)), ...batch.filter((m) => !done.has(m) && now.includes(m))];
+      if (JSON.stringify(next) === JSON.stringify(now)) return true;
+      const status = await store.commit({ docs: [{ key: OPEN_MARKETS_KEY, v: doc.v, json: JSON.stringify(next) }], moves: [], won: [] });
+      return status === "ok" ? true : RETRY;
+    });
+    return { swept: batch.length, listed: listed.length };
+  }
 
   /** Only wallets with 30+ minutes watched appear on leaderboards. */
   async function eligibleLeaders(candidates: LeaderRow[]): Promise<LeaderRow[]> {
@@ -725,7 +782,7 @@ export function predictionsService(deps: ServiceDeps) {
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market, staffOf };
+  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market, staffOf, sweepMarkets };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;

@@ -437,11 +437,10 @@ export function Predictions({ mint, symbol, streamUrl = null }: { mint: string; 
             source={r.source ?? streamUrl}
             betWindow={r.launchedAt !== null && r.lockAt !== null ? [r.launchedAt, r.lockAt] : null}
             verdict={r.verdict}
-            proposed={r.outcome}
             signedIn={Boolean(me)}
             admin={me?.admin ?? false}
             onChallenge={(reason, link) => act({ kind: "challenge", id: r.id, reason, ...(link.trim() ? { link: link.trim() } : {}) })}
-            onDecide={(decision) => void act({ kind: "decide", id: r.id, decision })}
+            onDecide={(outcome) => void act({ kind: "decide", id: r.id, outcome })}
           >
             <ResolvedRow result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} bare />
           </MarketCard>

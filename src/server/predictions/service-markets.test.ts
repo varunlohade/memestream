@@ -42,6 +42,9 @@ function fakeMarkets() {
       if (fail.resolve-- > 0) throw new Error("devnet said no");
     },
     holdsShares: async (_record, wallet) => holders.has(wallet),
+    redeemOracle: async (record) => {
+      calls.push(`redeem ${record.predictionId}`);
+    },
   };
   return { calls, fail, deps, holders };
 }
@@ -126,13 +129,13 @@ test("markets on: create once after review, registered with its lockAt; close at
   clock.t += MARKET_CHALLENGE_MS;
   const done = await look();
   assert.equal(done.resolved[0].market, "resolved");
-  assert.deepEqual(calls.slice(2), [`resolve ${id} yes`]);
+  assert.deepEqual(calls.slice(2), [`resolve ${id} yes`, `redeem ${id}`], "then the oracle redeems its seed");
   clock.t += 10 * MIN;
   await look();
-  assert.equal(calls.length, 3, "each step ran once");
+  assert.equal(calls.length, 4, "each step ran once");
 });
 
-test("a cancelled prediction's market resolves as a refund", async () => {
+test("a cancel proposes a refund: on chain after the challenge window; then the oracle redeems its seed, once", async () => {
   const { calls, deps } = fakeMarkets();
   const { clock, service, launch, look } = setup(deps);
   const id = await launch();
@@ -142,7 +145,13 @@ test("a cancelled prediction's market resolves as a refund", async () => {
   await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "cancel" });
   clock.t += FLAG_WINDOW_MS;
   await look();
-  assert.equal(calls.at(-1), `resolve ${id} refund`);
+  assert.ok(!calls.some((c) => c.startsWith("resolve")), "a cancel waits out the window like YES or NO");
+  clock.t += MARKET_CHALLENGE_MS;
+  await look();
+  assert.deepEqual(calls.slice(-2), [`resolve ${id} refund`, `redeem ${id}`], "closed and resolved: the oracle redeems");
+  clock.t += 10 * MIN;
+  await look();
+  assert.equal(calls.filter((c) => c.startsWith("redeem")).length, 1);
 });
 
 test("a failing create is retried after the pause, then the market is unavailable and unregistered", async () => {
@@ -236,7 +245,7 @@ test("the view shows the proposal, final at the window's end; then final", async
   clock.t = r.verdict!.finalAt!;
   const done = (await look()).resolved[0];
   assert.deepEqual([done.verdict?.status, done.verdict?.final, done.market], ["final", "yes", "resolved"]);
-  assert.equal(calls.at(-1), `resolve ${id} yes`);
+  assert.deepEqual(calls.slice(-2), [`resolve ${id} yes`, `redeem ${id}`]);
 });
 
 test("a holder's challenge takes the bond through the ledger; only admins see the reason; an overturn pays back bond + reward", async () => {
@@ -254,9 +263,27 @@ test("a holder's challenge takes the bond through the ledger; only admins see th
   clock.t += MARKET_CHALLENGE_MS;
   await look();
   assert.ok(!calls.some((c) => c.startsWith("resolve")), "no resolve while disputed");
-  await assert.rejects(service.act(COIN, STREAMER, { kind: "decide", id, decision: "uphold" }), /Only a memestream admin/);
-  await service.act(COIN, ADMIN, { kind: "decide", id, decision: "overturn" });
+  await assert.rejects(service.act(COIN, STREAMER, { kind: "decide", id, outcome: "yes" }), /Only a memestream admin/);
+  await service.act(COIN, ADMIN, { kind: "decide", id, outcome: "no" });
   await look();
-  assert.equal(calls.at(-1), `resolve ${id} no`);
+  assert.deepEqual(calls.slice(-2), [`resolve ${id} no`, `redeem ${id}`]);
   assert.equal((await service.view(COIN, "holder")).me?.balance, 300 + OVERTURN_REWARD);
+});
+
+test("the close-due sweep closes trading at lockAt with nobody watching, and drops coins whose markets are done", async () => {
+  const { calls, deps } = fakeMarkets();
+  const { clock, store, service, launch, look } = setup(deps);
+  const id = await launch();
+  const { lockAt } = (await look()).live[0];
+  const listed = async () => JSON.parse((await store.read(["markets:open"]))[0].json ?? "[]") as string[];
+  assert.deepEqual(await listed(), [COIN], "a created market lists its coin");
+  clock.t = lockAt;
+  assert.deepEqual(await service.sweepMarkets(10), { swept: 1, listed: 1 });
+  assert.equal(calls.at(-1), `close ${id}`, "closed by the sweep, no view needed");
+  await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+  clock.t += MARKET_CHALLENGE_MS;
+  await service.sweepMarkets(10);
+  assert.deepEqual(calls.slice(-2), [`resolve ${id} yes`, `redeem ${id}`]);
+  assert.deepEqual(await listed(), [], "nothing left to do: the coin leaves the list");
+  assert.deepEqual(await service.sweepMarkets(10), { swept: 0, listed: 0 });
 });

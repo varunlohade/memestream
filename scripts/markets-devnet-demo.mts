@@ -31,6 +31,8 @@ const SEED = "0.02";
 const BET = "0.005";
 
 const connection = await connectToDevnet();
+/** Finds the market's addresses and the oracle's position; to resume a market, pass the secret it was made with. */
+const secret = process.env.MEMESTREAM_MARKET_SECRET ?? randomBytes(32).toString("hex");
 const oracle = readKeypair(".keys/partner.json");
 const viewer = readKeypair(".keys/e2e-viewer-1.json");
 const sol = async (who: Keypair) => (await connection.getBalance(who.publicKey)) / LAMPORTS_PER_SOL;
@@ -48,7 +50,6 @@ async function market(): Promise<MarketKeys> {
     return marketKeysFromId(connection, question.questionId, oracle.publicKey);
   }
   // A throwaway coin address: the market only uses it to derive its question id.
-  const secret = randomBytes(32).toString("hex");
   const keys = marketKeys(connection, secret, Keypair.generate().publicKey, "1", oracle.publicKey);
   const names = { yes: { name: "$DEMO #1 YES", symbol: "YES", uri: "" }, no: { name: "$DEMO #1 NO", symbol: "NO", uri: "" } };
   const created = await buildCreateMarketTxs(connection, keys, solToLamports(SEED), positionNftFor(secret, keys.questionId));
@@ -77,7 +78,7 @@ if ((await lpPositionsOf(connection, keys.pool, oracle.publicKey)).length > 0) {
     const sell = await prepareMarketTrade(connection, keys, await pool(), viewer.publicKey, { side: "yes", action: "sell", amount: (await yesHeld()).divn(2) }, 100);
     step("sell YES", await sendAndConfirm(connection, sell, [viewer]));
   }
-  for (const tx of await buildCloseTradingTxs(connection, keys, await pool())) step("close", await sendAndConfirm(connection, tx, [oracle]));
+  for (const tx of await buildCloseTradingTxs(connection, keys, await pool(), positionNftFor(secret, keys.questionId).publicKey)) step("close", await sendAndConfirm(connection, tx, [oracle]));
 }
 if ((await lpPositionsOf(connection, keys.pool, oracle.publicKey)).length > 0) throw new Error("The oracle still has liquidity in the pool");
 

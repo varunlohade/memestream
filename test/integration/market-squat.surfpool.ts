@@ -17,7 +17,10 @@ import BN from "bn.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 import { built } from "../../src/lib/dbc/tx";
-import { unwrapSolIx, wrapSolIxs } from "../../src/lib/markets/create";
+import { solToLamports } from "../../src/lib/dbc/units";
+import { buildCreateMarketTxs, unwrapSolIx, wrapSolIxs } from "../../src/lib/markets/create";
+import { positionNftFor } from "../../src/lib/markets/provenance";
+import { buildCloseTradingTxs } from "../../src/lib/markets/settle";
 import { ACTIVATION_TYPE, COLLECT_FEE_MODE, loadMarketPool, type MarketKeys, marketKeys, marketKeysFromId, marketPoolFees, PRICE_RANGE, verifyMarketPool } from "../../src/lib/markets/pool";
 import { initializeMarketIxs, splitIxs } from "../../src/lib/markets/vault";
 
@@ -137,4 +140,21 @@ test("a gift squat (our range, fee and mode, another start price, our oracle as 
   assert.ok(pool);
   assert.doesNotThrow(() => verifyMarketPool(keys, pool), "the gift squat copies every pool parameter we check");
   await refused(keys, "43", /wasn't made by memestream/);
+});
+
+test("audit H1: an empty position opened in the oracle's name can't block closing trading", async () => {
+  const keys = marketKeys(connection, SECRET, coinMint, "44", oracle.publicKey);
+  for (const tx of await buildCreateMarketTxs(connection, keys, solToLamports("0.5"), positionNftFor(SECRET, keys.questionId))) await sendAndConfirm(connection, tx, [oracle]);
+  // create_position doesn't need the owner's signature.
+  const nft = Keypair.generate();
+  const tx = await new CpAmm(connection).createPosition({ owner: oracle.publicKey, payer: attacker.publicKey, pool: keys.pool, positionNft: nft.publicKey });
+  await sendAndConfirm(connection, built(tx, attacker.publicKey, [nft]), [attacker]);
+  const pool = await loadMarketPool(connection, keys);
+  assert.ok(pool);
+  const closes = await buildCloseTradingTxs(connection, keys, pool, positionNftFor(SECRET, keys.questionId).publicKey);
+  assert.equal(closes.length, 1, "only our own position is closed");
+  for (const close of closes) await sendAndConfirm(connection, close, [oracle]);
+  const after = await loadMarketPool(connection, keys);
+  assert.ok(after?.state.liquidity.isZero(), "our liquidity is out; the empty one doesn't matter");
+  assert.deepEqual(await buildCloseTradingTxs(connection, keys, after!, positionNftFor(SECRET, keys.questionId).publicKey), [], "nothing more to close");
 });

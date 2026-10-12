@@ -72,7 +72,8 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
     at: T0,
     question: wallet("question", 0),
     challenge: { by: wallet("challenger", 0), at: T0, reason: "r".repeat(CHALLENGE_REASON_MAX), link: `https://x.example/${"l".repeat(LINK_MAX - 18)}`, bond: CHALLENGE_BOND },
-    decision: { kind: "overturn" as const, by: wallet("admin", 0), at: T0 },
+    closed: true,
+    decision: { outcome: "refund" as const, by: wallet("admin", 0), at: T0 },
   };
   const source = `https://source.example/${"s".repeat(LINK_MAX - 23)}`;
   const marketed = { market, source, window: [T0, T0] as [number, number] };

@@ -54,6 +54,7 @@ const pool = async (keys: MarketKeys) => {
   assert.ok(loaded, "the pool exists");
   return loaded;
 };
+const ourNft = (keys: MarketKeys) => positionNftFor(SECRET, keys.questionId).publicKey;
 const sumsToOne = (p: MarketPool) => {
   const { yes, no } = marketOdds(p).probability;
   assert.ok(Math.abs(yes + no - 1) < 1e-12, `YES ${yes} + NO ${no} = 1`);
@@ -86,7 +87,7 @@ async function trade(keys: MarketKeys, wallet: Keypair, order: MarketOrder) {
 }
 
 async function closeAndResolve(keys: MarketKeys, outcome: "yes" | "no" | "refund") {
-  const closes = await buildCloseTradingTxs(connection, keys, await pool(keys));
+  const closes = await buildCloseTradingTxs(connection, keys, await pool(keys), ourNft(keys));
   assert.equal(closes.length, 1, "one close for the one pool");
   for (const tx of closes) await sendAndConfirm(connection, tx, [oracle]);
   await sendAndConfirm(connection, await buildResolveTx(connection, keys, outcome), [oracle]);
@@ -165,8 +166,8 @@ test("a market lives: seed one YES/NO pool, bet bigger than the seed, sell back,
   });
 
   await step("closing trading takes the oracle's liquidity out", async () => {
-    for (const tx of await buildCloseTradingTxs(connection, keys, await pool(keys))) await sendAndConfirm(connection, tx, [oracle]);
-    assert.deepEqual(await buildCloseTradingTxs(connection, keys, await pool(keys)), [], "nothing left to close");
+    for (const tx of await buildCloseTradingTxs(connection, keys, await pool(keys), ourNft(keys))) await sendAndConfirm(connection, tx, [oracle]);
+    assert.deepEqual(await buildCloseTradingTxs(connection, keys, await pool(keys), ourNft(keys)), [], "nothing left to close");
     await assert.rejects(Promise.resolve().then(async () => quoteMarketTrade(await pool(keys), { side: "yes", action: "buy", amount: solToLamports("0.01") }, 100)));
   });
 
@@ -258,7 +259,8 @@ test("the server runs a market: the oracle creates, closes and resolves; wallets
   const aliceBefore = await balance(alice);
   assert.equal(await signAndSend(await server.buildMarketRedeemForWallet(record, alice.publicKey.toBase58()), alice), "confirmed");
   assert.ok((await balance(alice)) - aliceBefore > Number(solToLamports("1")), "alice's YES paid more than her 1 SOL bet");
-  await server.redeemOracleTokens(record);
+  assert.ok(await server.redeemOracleTokens(record), "the oracle redeems what its liquidity came back as");
+  assert.equal(await server.redeemOracleTokens(record), null, "and a second time sends nothing");
 
   // A record that doesn't match what our oracle would make is refused.
   await assert.rejects(server.getMarket({ ...record, oracle: Keypair.generate().publicKey.toBase58() }, null, now), /No market/);

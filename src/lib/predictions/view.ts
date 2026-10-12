@@ -8,15 +8,18 @@ import type { Outcome, Side } from "./rules";
 export type MarketStepView = "opening" | "open" | "closed" | "resolved" | "failed" | null;
 
 /**
- * Where a resolved prediction's market stands in its challenge window (markets only):
- * "proposed" (the streamer's result, final at `finalAt` unless challenged), "disputed" (a holder
- * challenged it; an admin decides), or "final" (`final` is what the market pays).
+ * Where a resolved prediction's market stands (markets only): "proposed" (the streamer's result,
+ * final at `finalAt` unless challenged), "disputed" (challenged, or waiting for an admin because
+ * nobody resolved it or the AI check disagreed), or "final" (`final` is what the market pays).
  */
 export type MarketVerdictView = {
   status: "proposed" | "disputed" | "final";
+  /** The streamer's proposal: a cancel proposes a refund. */
+  proposed: Side | "refund";
   finalAt: number | null;
   final: Side | "refund" | null;
-  decision: "uphold" | "overturn" | "void" | null;
+  /** Why it waits for an admin, for admins only. */
+  why: "challenge" | "unresolved" | "ai" | null;
   /** The challenge, for admins only (null for everyone else). */
   challenge: { by: string; at: number; reason: string; link: string | null; bond: number } | null;
 } | null;

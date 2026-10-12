@@ -3,7 +3,7 @@ import { isBase58Of } from "@/lib/base58";
 import type { Action } from "@/lib/predictions/engine";
 import { isOutcome, isSide } from "@/lib/predictions/rules";
 
-const DECISIONS = ["uphold", "overturn", "void"] as const;
+const DECISIONS = ["yes", "no", "refund"] as const;
 const optionalText = (value: unknown) => (typeof value === "string" ? value : undefined);
 
 const isId = (value: unknown): value is string => typeof value === "string" && /^[1-9][0-9]{0,8}$/.test(value);
@@ -38,8 +38,8 @@ export function parseAction(body: Record<string, unknown>): Action | null {
       return isId(body.id) && typeof body.reason === "string" ? { kind: "challenge", id: body.id, reason: body.reason, ...(link ? { link } : {}) } : null;
     }
     case "decide":
-      return isId(body.id) && DECISIONS.includes(body.decision as (typeof DECISIONS)[number])
-        ? { kind: "decide", id: body.id, decision: body.decision as (typeof DECISIONS)[number] }
+      return isId(body.id) && DECISIONS.includes(body.outcome as (typeof DECISIONS)[number])
+        ? { kind: "decide", id: body.id, outcome: body.outcome as (typeof DECISIONS)[number] }
         : null;
     default:
       return null;

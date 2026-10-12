@@ -359,7 +359,7 @@ export async function closeMarketTrading(record: MarketRecord): Promise<string[]
   const keys = keysOf(record);
   const close = async () => {
     const { pool } = await loadVerified(keys, false);
-    return sendAllAsOracle(await buildCloseTradingTxs(getChain().connection, keys, pool));
+    return sendAllAsOracle(await buildCloseTradingTxs(getChain().connection, keys, pool, positionNftFor(marketSecret(), keys.questionId).publicKey));
   };
   try {
     return await close();
@@ -379,8 +379,15 @@ export async function resolveMarket(record: MarketRecord, outcome: Outcome): Pro
   return signature;
 }
 
-/** The oracle redeems the YES/NO its liquidity came back as. */
-export async function redeemOracleTokens(record: MarketRecord): Promise<string> {
-  const [signature] = await sendAllAsOracle([await buildRedeemTx(getChain().connection, keysOf(record), oraclePublicKey())]);
+/** The oracle redeems the YES/NO its liquidity came back as; null if it holds none (redeemed already). */
+export async function redeemOracleTokens(record: MarketRecord): Promise<string | null> {
+  let built: BuiltTx;
+  try {
+    built = await buildRedeemTx(getChain().connection, keysOf(record), oraclePublicKey());
+  } catch (error) {
+    if (error instanceof InputError && /holds no YES or NO/.test(error.message)) return null;
+    throw error;
+  }
+  const [signature] = await sendAllAsOracle([built]);
   return signature;
 }

@@ -45,17 +45,19 @@ export const AI_CHECK_MAX_TRIES = 3;
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
 /**
  * On-chain markets (MEMESTREAM_MARKETS): a server step on a market (create, close trading,
- * resolve) that fails is tried again after this pause. Creating gives up after this many tries
+ * resolve) that fails is tried again after this pause, longer than one step can take (60 s to
+ * confirm each transaction), so a claim never starts a step that is still running. Creating gives up after this many tries
  * ("Market unavailable"; points bets stay open); closing and resolving keep trying.
  */
-export const MARKET_RETRY_MS = 45_000;
+export const MARKET_RETRY_MS = 90_000;
 export const MARKET_CREATE_MAX_TRIES = 3;
 /**
- * Challenge window (UMA style), markets only: the streamer's YES/NO is only proposed; it goes
- * on chain this long after, unless a holder challenges it with a points bond. A challenge is
- * settled by an admin (MEMESTREAM_ADMIN_WALLETS): uphold (the bond is lost), overturn (the other
- * side wins; the bond comes back plus a reward) or void (refund [1,1]; the bond comes back). No
- * decision within MARKET_DECISION_MS: void.
+ * Challenge window (UMA style), markets only: the streamer's YES, NO or cancel is only proposed;
+ * it goes on chain this long after, unless a holder challenges it with a points bond. An admin
+ * (MEMESTREAM_ADMIN_WALLETS, never the coin's streamer) then decides the outcome; the bond is lost
+ * if the proposal stands, comes back on a refund, and comes back plus a reward if the other side
+ * wins. Markets nobody resolved, or where the AI check disagreed, also wait for an admin. No
+ * decision within MARKET_DECISION_MS: void (refund) as a last resort.
  */
 export const MARKET_CHALLENGE_MS = 2 * 60 * MINUTE_MS;
 export const MARKET_DECISION_MS = 24 * 60 * MINUTE_MS;

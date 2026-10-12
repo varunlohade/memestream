@@ -12,7 +12,7 @@ import { isBase58Of } from "@/lib/base58";
 import { isPredictionId } from "@/lib/markets/math";
 import type { MarketRecord } from "@/lib/markets/record";
 import { getCoinDetail } from "@/server/coins";
-import { closeMarketTrading, createMarket, MarketUnavailableError, resolveMarket, walletHoldsShares } from "@/server/markets";
+import { closeMarketTrading, createMarket, MarketUnavailableError, redeemOracleTokens, resolveMarket, walletHoldsShares } from "@/server/markets";
 import { UserError } from "@/server/errors";
 import { aiCheckFromEnv } from "./ai-check";
 import { reviewFromEnv } from "./review";
@@ -57,6 +57,7 @@ function marketDeps(): MarketDeps | null {
     close: (record) => oneAtATime(() => closeMarketTrading(record)),
     resolve: (record, outcome) => oneAtATime(() => resolveMarket(record, outcome)),
     holdsShares: walletHoldsShares,
+    redeemOracle: (record) => oneAtATime(() => redeemOracleTokens(record)),
   };
 }
 
