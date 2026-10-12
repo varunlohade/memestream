@@ -10,7 +10,7 @@ const perWallet = sharedLimiter("predictions-wallet", 10, 1);
 
 /**
  * GET /api/predictions/coin/<mint> (optional session token) -> the coin's predictions: the live
- * one, the queue, recent results, leaderboards, and the signed-in wallet's own points and bets.
+ * ones, the queue, recent results, leaderboards, and the signed-in wallet's own points and bets.
  * The coin's streamer comes from the cached, RPC-budgeted coin read.
  */
 export const GET = withRpcGuard({ name: "predictions-coin", burst: 30, perSecond: 3 }, async (request: Request, { params }: RouteContext<"/api/predictions/coin/[mint]">) => {

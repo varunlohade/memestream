@@ -6,9 +6,10 @@
  * Flow: holders of the coin suggest YES/NO questions (10 points, back when it goes live) and
  * upvote them (free). While the streamer is watching their own coin (heartbeat in the last
  * 5 minutes) and "Crowd picks questions" is on, the top suggestion with 3+ upvotes goes live by
- * itself when nothing is live; the streamer or a mod can also launch one, or their own question.
- * One live prediction at a time, 20 per stream. Viewers bet on a side until it locks; the streamer
- * or a mod resolves YES/NO/Cancel; winners split the losing pool (parimutuel, no house fee).
+ * itself while a live slot is free; the streamer or a mod can also launch one, or their own question.
+ * Up to MAX_LIVE live predictions at a time, 20 per stream. Viewers bet on a side of each until it
+ * locks; the streamer or a mod resolves each YES/NO/Cancel; winners split that prediction's losing
+ * pool (parimutuel, no house fee).
  * A result counts for leaderboards and the asker reward only after its flag window, if not disputed.
  */
 import {
@@ -30,6 +31,7 @@ import {
   MAX_BET,
   MAX_BETTORS,
   MAX_HISTORY,
+  MAX_LIVE,
   MAX_MODS,
   MAX_NOTICES,
   MAX_PREDICTIONS_PER_STREAM,
@@ -79,7 +81,7 @@ export type FrameNote = { kind: FrameKind; at: number; text: string | null };
 export type AiVerdict = "agree" | "disagree" | "unclear";
 /** An AI check waiting for its verdict: runs started so far, when the last one started, the frames grabbed earlier. */
 export type AiCheck = { tries: number; at: number; frames: FrameNote[] };
-/** The prediction that is live now: open for bets until `lockAt`, then waiting for a result. */
+/** A live prediction: open for bets until `lockAt`, then waiting for a result. */
 export type Prediction = {
   id: string;
   text: string;
@@ -136,7 +138,8 @@ export type Game = {
   stream: number | null;
   launched: number;
   suggestions: Suggestion[];
-  live: Prediction | null;
+  /** Live predictions, oldest first: at most MAX_LIVE. */
+  live: Prediction[];
   /** Results, newest first: the last MAX_HISTORY, plus any still in their flag window. */
   resolved: Summary[];
   /** Net points won from bets on this stream, per wallet (top 100 only). */
@@ -151,11 +154,11 @@ export type Action =
   | { kind: "tick" }
   | { kind: "suggest"; text: string }
   | { kind: "upvote"; id: string }
-  | { kind: "bet"; side: Side; amount: number }
+  | { kind: "bet"; id: string; side: Side; amount: number }
   | { kind: "launch"; id?: string; text?: string; windowMin?: number }
   | { kind: "remove"; id: string }
   | { kind: "approve"; id: string }
-  | { kind: "resolve"; outcome: Outcome }
+  | { kind: "resolve"; id: string; outcome: Outcome }
   | { kind: "flag"; id: string }
   | { kind: "mod"; wallet: string; add: boolean }
   | { kind: "crowd"; on: boolean };
@@ -202,7 +205,7 @@ export const newGame = (creator: string): Game => ({
   stream: null,
   launched: 0,
   suggestions: [],
-  live: null,
+  live: [],
   resolved: [],
   won: {},
   pending: null,
@@ -272,7 +275,7 @@ export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVe
   });
 }
 
-/** A frame to grab and describe for the live prediction. */
+/** A frame to grab and describe for a live prediction. */
 export type CaptureTarget = { id: string; text: string; kind: FrameKind };
 /** A result to check: its question, the streamer's outcome, the frames grabbed before, and which run this is. */
 export type CheckTarget = { id: string; text: string; outcome: Side; frames: FrameNote[]; tries: number };
@@ -282,7 +285,7 @@ const capturesFor = (live: Prediction, now: number): FrameKind[] =>
   (["launch", "lock"] as const).filter((kind) => (kind === "launch" || now >= live.lockAt) && !live.frames?.some((f) => f.kind === kind));
 /** Whether a frame grab or an AI check is due now. */
 export const aiDue = (game: Game, now: number, env: Env) =>
-  (Boolean(env.aiCheck) && game.live !== null && capturesFor(game.live, now).length > 0) || game.resolved.some((p) => p.check && checkDue(p.check, now));
+  (Boolean(env.aiCheck) && game.live.some((live) => capturesFor(live, now).length > 0)) || game.resolved.some((p) => p.check && checkDue(p.check, now));
 
 /**
  * Claims every due frame grab (launch; lock once betting closes) and AI check run, like
@@ -292,8 +295,7 @@ export function startAi(state: Game, now: number, env: Env): Result & { captures
   const captures: CaptureTarget[] = [];
   const checks: CheckTarget[] = [];
   const result = run(state, now, env, ({ game }) => {
-    const live = game.live;
-    if (env.aiCheck && live) {
+    for (const live of env.aiCheck ? game.live : []) {
       for (const kind of capturesFor(live, now)) {
         live.frames = [...(live.frames ?? []), { kind, at: now, text: null }];
         captures.push({ id: live.id, text: live.text, kind });
@@ -311,7 +313,7 @@ export function startAi(state: Game, now: number, env: Env): Result & { captures
 /** A grabbed frame's description (null: no frame). Only fills a claimed, empty note; anything else is left alone. */
 export function applyFrame(state: Game, target: CaptureTarget, text: string | null, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, ({ game }) => {
-    const notes = game.live?.id === target.id ? game.live.frames : game.resolved.find((p) => p.id === target.id)?.check?.frames;
+    const notes = game.live.find((p) => p.id === target.id)?.frames ?? game.resolved.find((p) => p.id === target.id)?.check?.frames;
     const note = notes?.find((f) => f.kind === target.kind && f.text === null);
     if (note && text) note.text = text.slice(0, FRAME_NOTE_MAX);
   });
@@ -409,7 +411,7 @@ function approveReview(ctx: Ctx, target: ReviewTarget) {
   const p = game.pending;
   if (!p || p.id !== target.id || p.text !== target.text) return;
   game.pending = null;
-  if (game.live || game.launched >= MAX_PREDICTIONS_PER_STREAM) return notify(ctx, STAFF, "Not launched: no slot was free");
+  if (game.live.length >= MAX_LIVE || game.launched >= MAX_PREDICTIONS_PER_STREAM) return notify(ctx, STAFF, "Not launched: no slot was free");
   launch(ctx, { id: p.id, text: p.text }, p.by, p.windowMin);
 }
 
@@ -430,7 +432,7 @@ function rejectReview(ctx: Ctx, target: ReviewTarget, text: string, refund: bool
 
 /** A locked prediction nobody resolved cancels by itself: full refunds. */
 function autoCancelUnresolved(ctx: Ctx) {
-  if (ctx.game.live && ctx.now >= autoCancelAt(ctx.game.live)) settle(ctx, "cancel", AUTO);
+  for (const p of ctx.game.live.filter((x) => ctx.now >= autoCancelAt(x))) settle(ctx, p, "cancel", AUTO);
 }
 
 /** An AI check whose every run failed, or that passed its hard deadline, ends as "couldn't tell". */
@@ -453,14 +455,17 @@ function closeFlagWindows(ctx: Ctx) {
   game.resolved = game.resolved.filter((p, i) => p.open || i < MAX_HISTORY);
 }
 
-/** The crowd picks: only while the streamer is here and has crowd picks on. */
+/** The crowd picks, into every free live slot: only while the streamer is here and has crowd picks on. */
 function launchCrowdPick(ctx: Ctx) {
   const { game, now } = ctx;
-  if (game.live || game.pending || !game.crowdPicks || !streamerPresent(ctx.env, now) || game.launched >= MAX_PREDICTIONS_PER_STREAM) return;
-  const top = [...game.suggestions]
-    .filter((s) => !s.review && s.upvotes >= AUTO_LAUNCH_UPVOTES)
-    .sort((a, b) => b.upvotes - a.upvotes || a.at - b.at || Number(a.id) - Number(b.id))[0];
-  if (top) launch(ctx, top, CROWD, DEFAULT_WINDOW_MIN);
+  if (game.pending || !game.crowdPicks || !streamerPresent(ctx.env, now)) return;
+  while (game.live.length < MAX_LIVE && game.launched < MAX_PREDICTIONS_PER_STREAM) {
+    const top = [...game.suggestions]
+      .filter((s) => !s.review && s.upvotes >= AUTO_LAUNCH_UPVOTES)
+      .sort((a, b) => b.upvotes - a.upvotes || a.at - b.at || Number(a.id) - Number(b.id))[0];
+    if (!top) return;
+    launch(ctx, top, CROWD, DEFAULT_WINDOW_MIN);
+  }
 }
 
 function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: string, windowMin: number) {
@@ -476,7 +481,7 @@ function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: 
     id = from.id ?? String(game.nextId++);
   }
   game.launched += 1;
-  game.live = {
+  game.live.push({
     id,
     text: from.text,
     asker,
@@ -487,13 +492,12 @@ function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: 
     yes: 0,
     no: 0,
     bettors: 0,
-  };
+  });
 }
 
-/** Pays out at once; winnings for leaderboards and the asker reward wait for the flag window. */
-function settle(ctx: Ctx, outcome: Outcome, by: string) {
+/** Pays out live prediction `p` at once; winnings for leaderboards and the asker reward wait for the flag window. */
+function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string) {
   const { game, now } = ctx;
-  const p = game.live!;
   const bets = Object.entries(p.bets).map(([wallet, b]) => ({ wallet, side: b.side, amount: b.amount }));
   const paid = payouts(bets, outcome);
   const results: FlagWindow["results"] = {};
@@ -504,7 +508,7 @@ function settle(ctx: Ctx, outcome: Outcome, by: string) {
   }
   const eligible = Object.values(p.bets).filter((b) => b.eligible).length;
   const { id, text, asker, yes, no, bettors } = p;
-  game.live = null;
+  game.live = game.live.filter((x) => x !== p);
   const summary: Summary = { id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } };
   // A YES/NO result gets an AI check when the coin's stream has frames; a cancel needs none.
   if (outcome !== "cancel" && ctx.env.aiCheck) summary.check = { tries: 0, at: now, frames: p.frames ?? [] };
@@ -554,7 +558,7 @@ function act(ctx: Ctx, action: PlayerAction, actor: Actor) {
     case "approve":
       return approveByHand(ctx, actor, action.id);
     case "resolve":
-      return resolve(ctx, actor, action.outcome);
+      return resolve(ctx, actor, action);
     case "flag":
       return flagResult(ctx, actor, action.id);
     case "mod":
@@ -619,10 +623,17 @@ function upvote({ game }: Ctx, actor: Actor, id: string) {
   s.upvotes += 1;
 }
 
-function bet(ctx: Ctx, actor: Actor, { side, amount }: ActionOf<"bet">) {
+/** A live prediction by id. */
+const findLive = (game: Game, id: string) => game.live.find((p) => p.id === id);
+
+/**
+ * "At most half your points" is checked on the balance at bet time, which already counts this
+ * wallet's bets on the other live predictions; the store re-checks it atomically.
+ */
+function bet(ctx: Ctx, actor: Actor, { id, side, amount }: ActionOf<"bet">) {
   const { game, now } = ctx;
   requireViewer(game, actor, "bet");
-  const p = game.live;
+  const p = findLive(game, id);
   if (!p || now >= p.lockAt) throw new GameError("Betting is closed");
   if (!Number.isInteger(amount) || amount < MIN_BET || amount > MAX_BET) throw new GameError(`Bet ${MIN_BET} to ${MAX_BET} points`);
   const mine = p.bets[actor.wallet];
@@ -640,7 +651,7 @@ function bet(ctx: Ctx, actor: Actor, { side, amount }: ActionOf<"bet">) {
 function launchByStaff(ctx: Ctx, actor: Actor, action: ActionOf<"launch">) {
   const { game } = ctx;
   requireStaff(game, actor);
-  if (game.live) throw new GameError("A prediction is already live");
+  if (game.live.length >= MAX_LIVE) throw new GameError(`${MAX_LIVE} predictions are already live`);
   if (game.pending) throw new GameError("A question is under review");
   requireLaunchesLeft(game);
   const windowMin = action.windowMin ?? DEFAULT_WINDOW_MIN;
@@ -673,13 +684,14 @@ function approveByHand(ctx: Ctx, actor: Actor, id: string) {
   approveReview(ctx, stuck);
 }
 
-function resolve(ctx: Ctx, actor: Actor, outcome: Outcome) {
+function resolve(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"resolve">) {
   const { game, now } = ctx;
   requireStaff(game, actor);
-  if (!game.live) throw new GameError("Nothing to resolve");
-  if (now < game.live.lockAt) throw new GameError("Betting is still open");
-  if (Object.hasOwn(game.live.bets, actor.wallet)) throw new GameError("You have a bet on this one, so you can't resolve it");
-  settle(ctx, outcome, actor.wallet);
+  const p = findLive(game, id);
+  if (!p) throw new GameError("Nothing to resolve");
+  if (now < p.lockAt) throw new GameError("Betting is still open");
+  if (Object.hasOwn(p.bets, actor.wallet)) throw new GameError("You have a bet on this one, so you can't resolve it");
+  settle(ctx, p, outcome, actor.wallet);
 }
 
 function flagResult({ game, now }: Ctx, actor: Actor, id: string) {
@@ -702,6 +714,6 @@ function changeMods({ game }: Ctx, actor: Actor, { wallet, add }: ActionOf<"mod"
   }
   if (wallet === game.creator || game.mods.includes(wallet)) return;
   if (game.mods.length >= MAX_MODS) throw new GameError(`At most ${MAX_MODS} mods`);
-  if (game.live && Object.hasOwn(game.live.bets, wallet)) throw new GameError("That wallet has a bet on the live prediction");
+  if (game.live.some((p) => Object.hasOwn(p.bets, wallet))) throw new GameError("That wallet has a bet on a live prediction");
   game.mods.push(wallet);
 }

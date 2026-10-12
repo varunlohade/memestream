@@ -15,14 +15,14 @@ export function parseAction(body: Record<string, unknown>): Action | null {
     case "flag":
       return isId(body.id) ? { kind: body.kind, id: body.id } : null;
     case "bet":
-      return isSide(body.side) && typeof body.amount === "number" ? { kind: "bet", side: body.side, amount: body.amount } : null;
+      return isId(body.id) && isSide(body.side) && typeof body.amount === "number" ? { kind: "bet", id: body.id, side: body.side, amount: body.amount } : null;
     case "launch": {
       const windowMin = typeof body.windowMin === "number" ? body.windowMin : undefined;
       if (isId(body.id)) return { kind: "launch", id: body.id, windowMin };
       return typeof body.text === "string" ? { kind: "launch", text: body.text, windowMin } : null;
     }
     case "resolve":
-      return isOutcome(body.outcome) ? { kind: "resolve", outcome: body.outcome } : null;
+      return isId(body.id) && isOutcome(body.outcome) ? { kind: "resolve", id: body.id, outcome: body.outcome } : null;
     case "mod":
       return typeof body.wallet === "string" && isBase58Of(body.wallet, 32) && typeof body.add === "boolean"
         ? { kind: "mod", wallet: body.wallet, add: body.add }

@@ -37,8 +37,8 @@ test("a coin's game document at full caps stays under 256 KB", () => {
   // One full result in its flag window, built by the engine: every bettor bet the most and flagged it.
   game = step(game, { kind: "launch", text: question(0), windowMin: BET_WINDOWS_MIN[0] }, STREAMER, T0);
   game = applyReview(game, game.pending!, { approved: true }, T0).game;
-  for (const [i, b] of bettors.entries()) game = step(game, { kind: "bet", side: i % 2 ? "yes" : "no", amount: MAX_BET }, b, T0);
-  game = step(game, { kind: "resolve", outcome: "yes" }, STREAMER, T0 + MIN);
+  for (const [i, b] of bettors.entries()) game = step(game, { kind: "bet", id: game.live[0].id, side: i % 2 ? "yes" : "no", amount: MAX_BET }, b, T0);
+  game = step(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, STREAMER, T0 + MIN);
   for (const b of bettors) game = step(game, { kind: "flag", id: game.resolved[0].id }, b, T0 + MIN);
   const open = game.resolved[0];
 
@@ -67,7 +67,7 @@ test("a coin's game document at full caps stays under 256 KB", () => {
     review: { tries: REVIEW_MAX_TRIES, at: T0 + 10 * MIN },
   }));
   const bets = Object.fromEntries(bettors.map((b) => [b, { side: "yes" as const, amount: MAX_BET, eligible: false }]));
-  game.live = { id: "3000", text: question(2), asker: wallet("asker", 0), launchedAt: T0, lockAt: T0, launchedBy: wallet("mod", 0), bets, yes: MAX_BET * MAX_BETTORS, no: 0, bettors: MAX_BETTORS, frames };
+  game.live = [{ id: "3000", text: question(2), asker: wallet("asker", 0), launchedAt: T0, lockAt: T0, launchedBy: wallet("mod", 0), bets, yes: MAX_BET * MAX_BETTORS, no: 0, bettors: MAX_BETTORS, frames }];
   game.won = Object.fromEntries(Array.from({ length: MAX_WON_ENTRIES }, (_, i) => [wallet("winner", i), -1_000_000]));
   game.nextId = 1_000_000;
   // A staff question under review, and every "Not approved" note at its longest.

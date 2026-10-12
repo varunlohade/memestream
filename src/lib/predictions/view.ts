@@ -27,6 +27,7 @@ export type PredictionsView = {
     /** A short "Not approved: ..." note about this wallet's question (staff: about a typed question), shown for a few minutes. */
     notice: string | null;
   } | null;
+  /** Live predictions, oldest first (at most MAX_LIVE). */
   live: {
     id: string;
     text: string;
@@ -37,7 +38,7 @@ export type PredictionsView = {
     no: number;
     bettors: number;
     myBet: { side: Side; amount: number } | null;
-  } | null;
+  }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;
   /** Waiting suggestions this viewer can see; `queue` lists the top ones only. */

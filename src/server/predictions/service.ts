@@ -6,7 +6,7 @@
  */
 import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
-import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, newGame, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
+import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
@@ -14,6 +14,7 @@ import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PRE
 import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
+import { parseGame } from "./game-doc";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
 import { REAL_WAITS, type Waits } from "./test-settings";
@@ -112,11 +113,6 @@ function nextPresence(last: Presence | null, now: number): Presence {
   return { at: now, since };
 }
 
-const parseGame = (json: string | null, streamer: string): Game => {
-  const game: Game = json ? { ...newGame(streamer), ...JSON.parse(json) } : newGame(streamer);
-  game.creator = streamer;
-  return game;
-};
 const parseProfile = (json: string | null): Profile => (json ? { ...newProfile(), ...JSON.parse(json) } : newProfile());
 const parsePresence = (json: string | null): Presence | null => (json ? JSON.parse(json) : null);
 const parseEnv = (json: string | null): Env => {
@@ -145,20 +141,20 @@ const standing = (board: LeaderRow[], wallet: string, fallback: number | undefin
 const topWinners = (board: LeaderRow[]) => board.filter((l) => l.points > 0).slice(0, LEADERS_SHOWN);
 
 function liveView(game: Game, wallet: string | null): PredictionsView["live"] {
-  const live = game.live;
-  if (!live) return live;
-  const myBet = wallet ? live.bets[wallet] : undefined;
-  return {
-    id: live.id,
-    text: live.text,
-    launchedAt: live.launchedAt,
-    lockAt: live.lockAt,
-    autoCancelAt: autoCancelAt(live),
-    yes: live.yes,
-    no: live.no,
-    bettors: live.bettors,
-    myBet: myBet ? { side: myBet.side, amount: myBet.amount } : null,
-  };
+  return game.live.map((live) => {
+    const myBet = wallet ? live.bets[wallet] : undefined;
+    return {
+      id: live.id,
+      text: live.text,
+      launchedAt: live.launchedAt,
+      lockAt: live.lockAt,
+      autoCancelAt: autoCancelAt(live),
+      yes: live.yes,
+      no: live.no,
+      bettors: live.bettors,
+      myBet: myBet ? { side: myBet.side, amount: myBet.amount } : null,
+    };
+  });
 }
 
 /** Waiting suggestions this viewer can see: approved ones, their own under review, and stuck ones for staff. */

@@ -17,6 +17,7 @@ import {
   BET_WINDOWS_MIN,
   DEFAULT_WINDOW_MIN,
   HEARTBEAT_MS,
+  MAX_LIVE,
   MIN_HOLDING_COINS,
   multiplier,
   type Outcome,
@@ -141,6 +142,8 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   const [question, setQuestion] = useState("");
   const [windowMin, setWindowMin] = useState<number>(DEFAULT_WINDOW_MIN);
   const [board, setBoard] = useState<Board>("stream");
+  /** The live prediction shown open when several are live (one at a time). */
+  const [openId, setOpenId] = useState<string | null>(null);
   const now = useServerNow(view);
 
   // The saved session for the connected wallet (re-read after signing in or out).
@@ -234,7 +237,9 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   const staff = me?.role ?? null;
   const viewer = Boolean(me) && !staff;
   const live = view.live;
-  const locked = live !== null && now !== null && now >= live.lockAt;
+  const full = live.length >= MAX_LIVE;
+  /** With one live prediction it is open; with several, the one tapped. */
+  const openLive = live.length === 1 ? live[0].id : openId;
   const bet = Number(amount);
   /** A signed-in viewer who doesn't hold the coin: suggest and upvote stay off. */
   const notHolder = viewer && me?.holder === false;
@@ -278,43 +283,32 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
         <p className="mute pm-small num">Watch {me.starterInMinutes} more minutes for {STARTER_POINTS} starter points.</p>
       )}
 
-      {live ? (
-        <div className="pm-live">
-          <div className="pm-livehead">
-            {locked ? <span className="pm-otag pm-oc pm-closedtag">Closed</span> : <span className="pm-livetag">Live</span>}
-            <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
-          </div>
-          <div className="pm-q pm-big">{live.text}</div>
-          <div className="pm-pools">
-            <SidePool side="yes" pools={live} onClick={viewer && !locked ? () => act({ kind: "bet", side: "yes", amount: bet }) : undefined} disabled={busy} />
-            <SidePool side="no" pools={live} onClick={viewer && !locked ? () => act({ kind: "bet", side: "no", amount: bet }) : undefined} disabled={busy} />
-          </div>
-          {staff ? (
-            <ResolveButtons locked={locked} busy={busy} onResolve={(outcome) => act({ kind: "resolve", outcome })} />
-          ) : (
-            <div className="pm-bet num">
-              <input
-                className="slot pm-amt num"
-                inputMode="numeric"
-                aria-label="Points to bet"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, "").slice(0, MAX_BET_DIGITS))}
-                disabled={!viewer || locked}
-              />
-              <span className="mute">{locked ? "Waiting for the result" : viewer ? `Tap Yes or No to bet ${amount || 0}` : "Sign in to bet"}</span>
-              <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${sideLabel(live.myBet.side)}` : ""}</span>
-            </div>
-          )}
-          {staff && !locked && <p className="mute pm-small">Resolve once betting closes.</p>}
-        </div>
-      ) : view.pending ? (
+      {live.map((p) =>
+        p.id === openLive ? (
+          <LiveCard
+            key={p.id}
+            live={p}
+            now={now}
+            viewer={viewer}
+            staff={staff !== null}
+            busy={busy}
+            amount={amount}
+            onAmount={setAmount}
+            onBet={(side) => act({ kind: "bet", id: p.id, side, amount: bet })}
+            onResolve={(outcome) => act({ kind: "resolve", id: p.id, outcome })}
+          />
+        ) : (
+          <LiveRow key={p.id} live={p} now={now} onOpen={() => setOpenId(p.id)} />
+        ),
+      )}
+      {view.pending ? (
         <div className="pm-row">
           <span className="pm-q">{view.pending.text}</span>
           <ReviewTag />
           {view.pending.stuck ? <StuckButtons busy={busy} onAct={(kind) => act({ kind, id: view.pending!.id })} /> : <span />}
         </div>
       ) : (
-        <p className="mute pm-small">Nothing live right now.</p>
+        live.length === 0 && <p className="mute pm-small">Nothing live right now.</p>
       )}
       {me?.notice && <p className="mute pm-small">{me.notice}</p>}
 
@@ -363,7 +357,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
             staff && s.stuck ? <StuckButtons busy={busy} onAct={(kind) => act({ kind, id: s.id })} /> : <span />
           ) : staff ? (
             <div className="pm-qb">
-              <button type="button" className="mbtn buy" disabled={busy || Boolean(live)} onClick={() => act({ kind: "launch", id: s.id, windowMin })}>
+              <button type="button" className="mbtn buy" disabled={busy || full} onClick={() => act({ kind: "launch", id: s.id, windowMin })}>
                 Launch
               </button>
               <button type="button" className="mbtn off" disabled={busy} onClick={() => act({ kind: "remove", id: s.id })}>
@@ -396,7 +390,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           <button
             type="submit"
             className={`mbtn ${!staff && notHolder ? "off" : "buy"}`}
-            disabled={busy || question.trim().length === 0 || (staff !== null && Boolean(live || view.pending)) || (!staff && notHolder)}
+            disabled={busy || question.trim().length === 0 || (staff !== null && (full || view.pending !== null)) || (!staff && notHolder)}
           >
             {staff ? "Launch" : `Suggest, ${SUGGEST_COST} points`}
           </button>
@@ -417,6 +411,86 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
       <p className="pm-free">Free points. No money, no prizes.</p>
       <Leaderboard board={board} top={top} mine={mine} onToggle={() => setBoard(board === "stream" ? "allTime" : "stream")} />
     </section>
+  );
+}
+
+type LiveView = PredictionsView["live"][number];
+
+/** A live prediction, open: countdown, pools (tap a side to bet), and the bet box or, for staff, the resolve buttons. */
+function LiveCard(props: {
+  live: LiveView;
+  now: number | null;
+  viewer: boolean;
+  staff: boolean;
+  busy: boolean;
+  amount: string;
+  onAmount: (amount: string) => void;
+  onBet: (side: Side) => void;
+  onResolve: (outcome: Outcome) => void;
+}) {
+  const { live, now, viewer, staff, busy, amount } = props;
+  const locked = now !== null && now >= live.lockAt;
+  return (
+    <div className="pm-live">
+      <div className="pm-livehead">
+        {locked ? <span className="pm-otag pm-oc pm-closedtag">Closed</span> : <span className="pm-livetag">Live</span>}
+        <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
+      </div>
+      <div className="pm-q pm-big">{live.text}</div>
+      <div className="pm-pools">
+        <SidePool side="yes" pools={live} onClick={viewer && !locked ? () => props.onBet("yes") : undefined} disabled={busy} />
+        <SidePool side="no" pools={live} onClick={viewer && !locked ? () => props.onBet("no") : undefined} disabled={busy} />
+      </div>
+      {staff ? (
+        <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />
+      ) : (
+        <div className="pm-bet num">
+          <input
+            className="slot pm-amt num"
+            inputMode="numeric"
+            aria-label="Points to bet"
+            value={amount}
+            onChange={(e) => props.onAmount(e.target.value.replace(/[^0-9]/g, "").slice(0, MAX_BET_DIGITS))}
+            disabled={!viewer || locked}
+          />
+          <span className="mute">{locked ? "Waiting for the result" : viewer ? `Tap Yes or No to bet ${amount || 0}` : "Sign in to bet"}</span>
+          <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${sideLabel(live.myBet.side)}` : ""}</span>
+        </div>
+      )}
+      {staff && !locked && <p className="mute pm-small">Resolve once betting closes.</p>}
+    </div>
+  );
+}
+
+/** A live prediction, closed to one row (several are live): question, your bet, countdown and the pool split. Tap to open it. */
+function LiveRow({ live, now, onOpen }: { live: LiveView; now: number | null; onOpen: () => void }) {
+  const locked = now !== null && now >= live.lockAt;
+  const total = live.yes + live.no;
+  const yes = total > 0 ? Math.round((live.yes / total) * 100) : 0;
+  return (
+    <div
+      className="pm-row"
+      role="button"
+      tabIndex={0}
+      aria-expanded={false}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        onOpen();
+      }}
+    >
+      <span className="pm-q">
+        {live.text}
+        {live.myBet && <span className="mute pm-by"> Your bet: {fmt(live.myBet.amount)} on {sideLabel(live.myBet.side)}</span>}
+      </span>
+      <span className="mute num">{now === null ? "" : locked ? "Closed" : `${countdown(live.lockAt - now)} left`}</span>
+      <div className="slot pm-pool num">
+        <b className="pm-fy" style={{ width: `${yes}%` }} />
+        <span>Yes {yes}%</span>
+        <span>No {total > 0 ? 100 - yes : 0}%</span>
+      </div>
+    </div>
   );
 }
 

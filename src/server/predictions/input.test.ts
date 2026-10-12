@@ -8,10 +8,11 @@ test("well-formed actions pass through", () => {
   assert.deepEqual(parseAction({ kind: "suggest", text: "Will I eat a banana?" }), { kind: "suggest", text: "Will I eat a banana?" });
   assert.deepEqual(parseAction({ kind: "upvote", id: "12" }), { kind: "upvote", id: "12" });
   assert.deepEqual(parseAction({ kind: "approve", id: "7" }), { kind: "approve", id: "7" });
-  assert.deepEqual(parseAction({ kind: "bet", side: "no", amount: 50 }), { kind: "bet", side: "no", amount: 50 });
+  assert.deepEqual(parseAction({ kind: "bet", id: "4", side: "no", amount: 50 }), { kind: "bet", id: "4", side: "no", amount: 50 });
   assert.deepEqual(parseAction({ kind: "launch", id: "3", windowMin: 5 }), { kind: "launch", id: "3", windowMin: 5 });
   assert.deepEqual(parseAction({ kind: "launch", text: "My own question?" }), { kind: "launch", text: "My own question?", windowMin: undefined });
-  assert.deepEqual(parseAction({ kind: "resolve", outcome: "cancel" }), { kind: "resolve", outcome: "cancel" });
+  assert.deepEqual(parseAction({ kind: "resolve", id: "4", outcome: "cancel" }), { kind: "resolve", id: "4", outcome: "cancel" });
+  assert.deepEqual(parseAction({ kind: "flag", id: "4" }), { kind: "flag", id: "4" });
   assert.deepEqual(parseAction({ kind: "mod", wallet: WALLET, add: true }), { kind: "mod", wallet: WALLET, add: true });
   assert.deepEqual(parseAction({ kind: "crowd", on: false }), { kind: "crowd", on: false });
   assert.equal(parseAction({ kind: "crowd", on: "no" }), null);
@@ -26,9 +27,15 @@ test("malformed actions, and any way to move points between wallets, are refused
     { kind: "approve", id: "x" },
     { kind: "upvote", id: "0" },
     { kind: "upvote", id: "__proto__" },
-    { kind: "bet", side: "maybe", amount: 10 },
-    { kind: "bet", side: "yes", amount: "10" },
-    { kind: "resolve", outcome: "draw" },
+    { kind: "bet", id: "1", side: "maybe", amount: 10 },
+    { kind: "bet", id: "1", side: "yes", amount: "10" },
+    { kind: "bet", side: "yes", amount: 10 },
+    { kind: "bet", id: "0", side: "yes", amount: 10 },
+    { kind: "bet", id: 1, side: "yes", amount: 10 },
+    { kind: "resolve", id: "1", outcome: "draw" },
+    { kind: "resolve", outcome: "yes" },
+    { kind: "resolve", id: "__proto__", outcome: "yes" },
+    { kind: "flag" },
     { kind: "mod", wallet: "not-a-wallet", add: true },
     { kind: "suggest", text: 5 },
   ];

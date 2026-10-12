@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Action, type Actor, apply, applyReview, type Game, GameError, newGame, type Result, STAFF, startReviews } from "./engine";
-import { FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED, NOTICE_MS, REVIEW_MAX_TRIES, REVIEW_RETRY_MS } from "./rules";
+import { FLAG_WINDOW_MS, MAX_BETTORS, MAX_HISTORY, MAX_LIVE, MAX_PREDICTIONS_PER_STREAM, MAX_QUEUE, MAX_UPVOTERS_STORED, NOTICE_MS, payouts, REVIEW_MAX_TRIES, REVIEW_RETRY_MS } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -92,7 +92,7 @@ test("suggest: the queue holds at most MAX_QUEUE; the oldest expire first and fr
 
 test("suggest: the 10 points come back when it goes live; expiry after 20 minutes keeps them", () => {
   const live = withSuggestion(3);
-  assert.equal(live.game.live?.id, "1", "3 upvotes: live at once");
+  assert.equal(live.game.live[0]?.id, "1", "3 upvotes: live at once");
   assert.equal(live.bal.get("asker"), 100);
 
   const expired = withSuggestion(2);
@@ -130,21 +130,38 @@ test("upvote: beyond 200 stored upvoters only a fingerprint and the count are ke
   refused(() => w.run({ kind: "upvote", id: "1" }, voters[0], T0), /already upvoted/);
 });
 
-test("auto-launch: needs 3 upvotes; picks the most upvoted, then the oldest; one live at a time", () => {
+test("auto-launch: needs 3 upvotes; picks the most upvoted, then the oldest; only into a free live slot", () => {
   const voters = ["e1", "e2", "e3", "e4", "e5", "e6", "e7"];
   const w = world({ a: 100, b: 100, c: 100 }, voters);
-  w.run({ kind: "launch", text: "Streamer's warm-up question?" }, STREAMER, T0); // keeps the slot busy
+  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Streamer's warm-up question ${i}?` }, STREAMER, T0); // keeps every slot busy
+  const idOf = (text: string) => w.game.suggestions.find((s) => s.text === text)!.id;
   w.run({ kind: "suggest", text: "Question from A here?" }, "a", T0);
   w.run({ kind: "suggest", text: "Question from B here?" }, "b", T0 + 1);
   w.run({ kind: "suggest", text: "Question from C here?" }, "c", T0 + 2);
-  for (const v of voters.slice(0, 3)) w.run({ kind: "upvote", id: "2" }, v, T0 + 3); // A: 3
-  for (const v of voters.slice(0, 4)) w.run({ kind: "upvote", id: "3" }, v, T0 + 3); // B: 4
-  for (const v of voters.slice(0, 4)) w.run({ kind: "upvote", id: "4" }, v, T0 + 3); // C: 4, but newer
-  assert.equal(w.game.live?.id, "1", "nothing auto-launches while one is live");
-  w.run({ kind: "resolve", outcome: "cancel" }, STREAMER, T0 + 2 * MIN);
-  assert.equal(w.game.live?.text, "Question from B here?", "most upvotes, then oldest");
-  assert.equal(w.game.live?.launchedBy, "crowd");
-  assert.equal(w.game.live!.lockAt - w.game.live!.launchedAt, 2 * MIN, "default 2-minute window");
+  const [a, b, c] = ["Question from A here?", "Question from B here?", "Question from C here?"].map(idOf);
+  for (const v of voters.slice(0, 3)) w.run({ kind: "upvote", id: a }, v, T0 + 3); // A: 3
+  for (const v of voters.slice(0, 4)) w.run({ kind: "upvote", id: b }, v, T0 + 3); // B: 4
+  for (const v of voters.slice(0, 4)) w.run({ kind: "upvote", id: c }, v, T0 + 3); // C: 4, but newer
+  assert.ok(w.game.live.length === MAX_LIVE && w.game.live.every((p) => p.launchedBy === STREAMER), "nothing auto-launches while every slot is live");
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, STREAMER, T0 + 2 * MIN);
+  const crowd = w.game.live.filter((p) => p.launchedBy === "crowd");
+  assert.equal(crowd.length, 1, "one slot freed, one crowd pick");
+  assert.equal(crowd[0].text, "Question from B here?", "most upvotes, then oldest");
+  assert.equal(crowd[0].lockAt - crowd[0].launchedAt, 2 * MIN, "default 2-minute window");
+});
+
+test("auto-launch: the crowd fills every free live slot, up to MAX_LIVE", () => {
+  const askers = Array.from({ length: MAX_LIVE + 1 }, (_, i) => `a${i}`);
+  const voters = ["e1", "e2", "e3"];
+  const w = world(Object.fromEntries(askers.map((a) => [a, 100])), voters);
+  w.away();
+  for (const [i, a] of askers.entries()) w.run({ kind: "suggest", text: `Question number ${i}?` }, a, T0 + i);
+  for (const s of [...w.game.suggestions]) for (const v of voters) w.run({ kind: "upvote", id: s.id }, v, T0 + MIN);
+  assert.deepEqual(w.game.live, [], "streamer away");
+  w.away(false);
+  w.run({ kind: "tick" }, null, T0 + 2 * MIN);
+  assert.equal(w.game.live.length, MAX_LIVE);
+  assert.deepEqual(w.game.suggestions.map((s) => s.text), [`Question number ${MAX_LIVE}?`], "the newest waits for a free slot");
 });
 
 test("auto-launch: only while the streamer is here (heartbeat in the last 5 minutes) and crowd picks are on", () => {
@@ -152,14 +169,14 @@ test("auto-launch: only while the streamer is here (heartbeat in the last 5 minu
   for (const v of ["v0", "v1", "v2"]) w.eligible(v);
   w.away();
   for (const v of ["v0", "v1", "v2"]) w.run({ kind: "upvote", id: "1" }, v, T0 + MIN);
-  assert.equal(w.game.live, null, "streamer away: it waits in the queue");
+  assert.deepEqual(w.game.live, [], "streamer away: it waits in the queue");
   w.run({ kind: "crowd", on: false }, STREAMER, T0 + 2 * MIN);
   w.away(false);
   w.run({ kind: "tick" }, null, T0 + 2 * MIN);
-  assert.equal(w.game.live, null, "streamer back, but crowd picks off");
+  assert.deepEqual(w.game.live, [], "streamer back, but crowd picks off");
   refused(() => w.run({ kind: "crowd", on: true }, "v0", T0 + 2 * MIN), /streamer or a mod/);
   w.run({ kind: "crowd", on: true }, STREAMER, T0 + 3 * MIN);
-  assert.equal((w.game as Game).live?.id, "1", "streamer back, crowd picks on");
+  assert.equal((w.game as Game).live[0]?.id, "1", "streamer back, crowd picks on");
 
   // Exactly 5 minutes since the streamer's last heartbeat counts as away.
   const late = apply(newGame(STREAMER), { kind: "tick" }, null, T0, { streamerSeenAt: T0 - 5 * MIN });
@@ -171,7 +188,7 @@ test("caps: 20 predictions per stream; then no launches and no suggestions", () 
   for (let i = 0; i < 20; i++) {
     const t = T0 + i * 10 * MIN;
     w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
-    w.run({ kind: "resolve", outcome: "cancel" }, STREAMER, t + MIN);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, STREAMER, t + MIN);
   }
   assert.equal(w.game.launched, 20);
   refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0 + 300 * MIN), /20 predictions/);
@@ -185,10 +202,10 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
   let t = T0;
   for (let i = 0; i < MAX_PREDICTIONS_PER_STREAM; i++) {
     w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
-    w.run({ kind: "bet", side: "yes", amount: 10 }, "a", t);
-    w.run({ kind: "bet", side: "no", amount: 10 }, "b", t);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "a", t);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", t);
     t += MIN;
-    w.run({ kind: "resolve", outcome: "yes" }, STREAMER, t);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, t);
   }
   t += FLAG_WINDOW_MS;
   w.run({ kind: "tick" }, null, t);
@@ -209,15 +226,15 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
 test("a wallet with a stake can't resolve it, and can't be made a mod while its bet is live", () => {
   const w = world({ a: 1_000, b: 1_000 });
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-  w.run({ kind: "bet", side: "yes", amount: 100 }, "a", T0);
-  w.run({ kind: "bet", side: "no", amount: 100 }, "b", T0);
-  refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on the live prediction/);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 100 }, "b", T0);
+  refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on a live prediction/);
   // A bettor who became a mod before the bet (staff can't bet, so only through stored state).
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
   const staked = structuredClone(w.game);
-  staked.live!.bets[MOD] = { side: "yes", amount: 100, eligible: false };
-  refused(() => apply(staked, { kind: "resolve", outcome: "yes" }, w.actor(MOD), T0 + MIN), /can't resolve/);
-  w.run({ kind: "resolve", outcome: "yes" }, MOD, T0 + MIN);
+  staked.live[0].bets[MOD] = { side: "yes", amount: 100, eligible: false };
+  refused(() => apply(staked, { kind: "resolve", id: staked.live[0].id, outcome: "yes" }, w.actor(MOD), T0 + MIN), /can't resolve/);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + MIN);
   w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0 + MIN);
   assert.deepEqual(w.game.mods, [MOD, "a"], "once settled, the bettor can be a mod");
 });
@@ -225,44 +242,44 @@ test("a wallet with a stake can't resolve it, and can't be made a mod while its 
 test("bets: 10 to 1,000 points, at most half the balance, add to your side but never switch", () => {
   const w = world({ a: 3_000, b: 50 });
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
-  refused(() => w.run({ kind: "bet", side: "yes", amount: 9 }, "a", T0), /10 to 1000/);
-  refused(() => w.run({ kind: "bet", side: "yes", amount: 1_001 }, "a", T0), /10 to 1000/);
-  refused(() => w.run({ kind: "bet", side: "yes", amount: 10.5 }, "a", T0), /10 to 1000/);
-  refused(() => w.run({ kind: "bet", side: "no", amount: 26 }, "b", T0), /half your points/);
-  w.run({ kind: "bet", side: "no", amount: 25 }, "b", T0);
-  w.run({ kind: "bet", side: "yes", amount: 600 }, "a", T0);
-  refused(() => w.run({ kind: "bet", side: "no", amount: 10 }, "a", T0), /not switch/);
-  refused(() => w.run({ kind: "bet", side: "yes", amount: 401 }, "a", T0), /At most 1000/);
-  w.run({ kind: "bet", side: "yes", amount: 400 }, "a", T0);
-  assert.deepEqual(w.game.live!.bets.a, { side: "yes", amount: 1_000, eligible: false });
-  assert.deepEqual([w.game.live!.yes, w.game.live!.no], [1_000, 25]);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 9 }, "a", T0), /10 to 1000/);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 1_001 }, "a", T0), /10 to 1000/);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10.5 }, "a", T0), /10 to 1000/);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 26 }, "b", T0), /half your points/);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 25 }, "b", T0);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 600 }, "a", T0);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "a", T0), /not switch/);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 401 }, "a", T0), /At most 1000/);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 400 }, "a", T0);
+  assert.deepEqual(w.game.live[0].bets.a, { side: "yes", amount: 1_000, eligible: false });
+  assert.deepEqual([w.game.live[0].yes, w.game.live[0].no], [1_000, 25]);
   assert.equal(w.bal.get("a"), 2_000);
-  refused(() => w.run({ kind: "bet", side: "no", amount: 10 }, "b", T0 + 5 * MIN), /closed/);
+  refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", T0 + 5 * MIN), /closed/);
 });
 
 test("bets: at most MAX_BETTORS bettors per prediction; those in can still add", () => {
   const w = world({ late: 100, first: 100 });
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
-  w.run({ kind: "bet", side: "yes", amount: 10 }, "first", T0);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "first", T0);
   // Fill the rest straight into the state (that many real wallets would only slow the test down).
   const full = structuredClone(w.game);
-  for (let i = 1; i < MAX_BETTORS; i++) full.live!.bets[`w${i}`] = { side: "no", amount: 10, eligible: false };
-  full.live!.bettors = MAX_BETTORS;
+  for (let i = 1; i < MAX_BETTORS; i++) full.live[0].bets[`w${i}`] = { side: "no", amount: 10, eligible: false };
+  full.live[0].bettors = MAX_BETTORS;
   const actor = (wallet: string): Actor => ({ wallet, eligible: false, holder: true, balance: 100 });
-  refused(() => apply(full, { kind: "bet", side: "yes", amount: 10 }, actor("late"), T0), /is full/);
-  assert.equal(apply(full, { kind: "bet", side: "yes", amount: 10 }, actor("first"), T0).game.live!.bets.first.amount, 20);
+  refused(() => apply(full, { kind: "bet", id: full.live[0].id, side: "yes", amount: 10 }, actor("late"), T0), /is full/);
+  assert.equal(apply(full, { kind: "bet", id: full.live[0].id, side: "yes", amount: 10 }, actor("first"), T0).game.live[0].bets.first.amount, 20);
 });
 
 test("resolve: after lock only, by the streamer or a mod; winners split the pool; points conserved", () => {
   const w = world({ a: 1_000, b: 1_000, c: 1_000 });
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-  w.run({ kind: "bet", side: "yes", amount: 100 }, "a", T0);
-  w.run({ kind: "bet", side: "yes", amount: 300 }, "b", T0);
-  w.run({ kind: "bet", side: "no", amount: 400 }, "c", T0);
-  refused(() => w.run({ kind: "resolve", outcome: "yes" }, MOD, T0 + MIN - 1), /still open/);
-  refused(() => w.run({ kind: "resolve", outcome: "yes" }, "a", T0 + MIN), /streamer or a mod/);
-  w.run({ kind: "resolve", outcome: "yes" }, MOD, T0 + MIN);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 300 }, "b", T0);
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 400 }, "c", T0);
+  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + MIN - 1), /still open/);
+  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, "a", T0 + MIN), /streamer or a mod/);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + MIN);
   assert.deepEqual([w.bal.get("a"), w.bal.get("b"), w.bal.get("c")], [1_100, 1_300, 600], "paid at once");
   const total = [...w.bal.values()].reduce((x, y) => x + y, 0);
   assert.equal(total, 3_000, "parimutuel moves points, never makes them");
@@ -272,43 +289,116 @@ test("resolve: after lock only, by the streamer or a mod; winners split the pool
   const after = w.run({ kind: "tick" }, null, T0 + MIN + FLAG_WINDOW_MS);
   assert.deepEqual(w.game.won, { a: 100, b: 300, c: -400 });
   assert.deepEqual(Object.fromEntries(after.won), { a: 100, b: 300, c: -400 }, "all-time winnings move too");
-  refused(() => w.run({ kind: "resolve", outcome: "no" }, MOD, T0 + MIN), /Nothing to resolve/);
+  refused(() => w.run({ kind: "resolve", id: done.id, outcome: "no" }, MOD, T0 + MIN), /Nothing to resolve/);
 });
 
 test("resolve: an empty side or a cancel refunds every bet", () => {
   for (const [bets, outcome] of [[["yes", "yes"], "no"], [["yes", "no"], "cancel"]] as const) {
     const w = world({ a: 1_000, b: 1_000 });
     w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-    w.run({ kind: "bet", side: bets[0], amount: 100 }, "a", T0);
-    w.run({ kind: "bet", side: bets[1], amount: 200 }, "b", T0);
-    w.run({ kind: "resolve", outcome }, STREAMER, T0 + MIN);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: bets[0], amount: 100 }, "a", T0);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: bets[1], amount: 200 }, "b", T0);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, STREAMER, T0 + MIN);
     w.run({ kind: "tick" }, null, T0 + MIN + FLAG_WINDOW_MS);
     assert.deepEqual([w.bal.get("a"), w.bal.get("b")], [1_000, 1_000], `${bets} ${outcome}`);
     assert.deepEqual(w.game.won, {});
   }
 });
 
+test("several live at once: each bet names its prediction; each resolves on its own with exact payouts", () => {
+  const w = world({ a: 2_000, b: 2_000, c: 2_000 });
+  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat win this round?", windowMin: 2 }, STREAMER, T0);
+  const [p1, p2] = w.game.live.map((p) => p.id);
+  refused(() => w.run({ kind: "bet", id: "999", side: "yes", amount: 10 }, "a", T0), /Betting is closed/);
+  const bets1 = [{ wallet: "a", side: "yes", amount: 100 }, { wallet: "b", side: "yes", amount: 300 }, { wallet: "c", side: "no", amount: 401 }] as const;
+  const bets2 = [{ wallet: "a", side: "no", amount: 250 }, { wallet: "c", side: "yes", amount: 50 }] as const;
+  for (const b of bets1) w.run({ kind: "bet", id: p1, side: b.side, amount: b.amount }, b.wallet, T0);
+  for (const b of bets2) w.run({ kind: "bet", id: p2, side: b.side, amount: b.amount }, b.wallet, T0);
+  assert.deepEqual(w.game.live.map((p) => [p.yes, p.no, p.bettors]), [[400, 401, 3], [50, 250, 2]], "separate pools");
+  refused(() => w.run({ kind: "bet", id: p1, side: "yes", amount: 10 }, "b", T0 + MIN), /closed/);
+  w.run({ kind: "bet", id: p2, side: "no", amount: 10 }, "b", T0 + MIN); // p2 still open
+  refused(() => w.run({ kind: "resolve", id: p2, outcome: "yes" }, STREAMER, T0 + MIN), /still open/);
+  refused(() => w.run({ kind: "resolve", id: "999", outcome: "yes" }, STREAMER, T0 + MIN), /Nothing to resolve/);
+
+  const before = new Map(w.bal);
+  w.run({ kind: "resolve", id: p1, outcome: "yes" }, STREAMER, T0 + MIN);
+  const paid1 = payouts([...bets1], "yes");
+  for (const wallet of ["a", "b", "c"]) assert.equal(w.bal.get(wallet)! - before.get(wallet)!, paid1.get(wallet), `${wallet} paid for p1 only`);
+  assert.deepEqual(w.game.live.map((p) => p.id), [p2], "the other stays live");
+  refused(() => w.run({ kind: "resolve", id: p1, outcome: "no" }, STREAMER, T0 + MIN), /Nothing to resolve/);
+
+  const mid = new Map(w.bal);
+  w.run({ kind: "resolve", id: p2, outcome: "cancel" }, STREAMER, T0 + 2 * MIN);
+  assert.deepEqual([w.bal.get("a")! - mid.get("a")!, w.bal.get("b")! - mid.get("b")!, w.bal.get("c")! - mid.get("c")!], [250, 10, 50], "p2 refunds its own stakes");
+  assert.equal([...w.bal.values()].reduce((x, y) => x + y, 0), 6_000, "points conserved");
+  assert.deepEqual(w.game.resolved.map((r) => [r.id, r.outcome, r.yes, r.no]), [[p2, "cancel", 50, 260], [p1, "yes", 400, 401]]);
+  assert.deepEqual(w.game.live, []);
+});
+
+test("launch: at most MAX_LIVE live at once; a slot frees when one resolves", () => {
+  const w = world();
+  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, T0);
+  assert.equal(w.game.live.length, MAX_LIVE);
+  refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0), /already live/);
+  w.run({ kind: "resolve", id: w.game.live[3].id, outcome: "cancel" }, STREAMER, T0 + MIN);
+  w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0 + MIN);
+  assert.equal(w.game.live.length, MAX_LIVE);
+  assert.equal(w.game.live.at(-1)!.text, "One more question?");
+});
+
+test("bets on several live predictions: at most half the balance at bet time, across all of them", () => {
+  const w = world({ a: 400 });
+  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 5 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat win this round?", windowMin: 5 }, STREAMER, T0);
+  const [p1, p2] = w.game.live.map((p) => p.id);
+  w.run({ kind: "bet", id: p1, side: "yes", amount: 200 }, "a", T0);
+  refused(() => w.run({ kind: "bet", id: p2, side: "no", amount: 101 }, "a", T0), /half your points/);
+  w.run({ kind: "bet", id: p2, side: "no", amount: 100 }, "a", T0);
+  refused(() => w.run({ kind: "bet", id: p1, side: "yes", amount: 51 }, "a", T0), /half your points/);
+  w.run({ kind: "bet", id: p1, side: "yes", amount: 50 }, "a", T0);
+  assert.equal(w.bal.get("a"), 50);
+  assert.deepEqual(w.game.live.map((p) => p.bets.a?.amount), [250, 100]);
+});
+
+test("stake checks are per prediction: a bettor-mod can't resolve that one only; a bet on any live one blocks becoming a mod", () => {
+  const w = world({ a: 1_000 });
+  w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will chat win this round?", windowMin: 1 }, STREAMER, T0);
+  const [p1, p2] = w.game.live.map((p) => p.id);
+  w.run({ kind: "bet", id: p2, side: "yes", amount: 100 }, "a", T0);
+  refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on a live prediction/);
+  const staked = structuredClone(w.game);
+  staked.live[1].bets[MOD] = { side: "yes", amount: 100, eligible: false };
+  refused(() => apply(staked, { kind: "resolve", id: p2, outcome: "yes" }, w.actor(MOD), T0 + MIN), /can't resolve/);
+  assert.deepEqual(apply(staked, { kind: "resolve", id: p1, outcome: "yes" }, w.actor(MOD), T0 + MIN).game.live.map((p) => p.id), [p2]);
+});
+
 test("auto-cancel: the streamer's own unresolved 60 minutes after lock; full refunds; then the next one goes live", () => {
   const w = world({ a: 1_000, asker: 100 }, ["v0", "v1", "v2"]);
-  w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-  w.run({ kind: "bet", side: "yes", amount: 100 }, "a", T0);
+  for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Will I eat banana ${i}?`, windowMin: 1 }, STREAMER, T0); // every slot busy
+  const first = w.game.live[0].id;
+  w.run({ kind: "bet", id: first, side: "yes", amount: 100 }, "a", T0);
   w.run({ kind: "suggest", text: "Is the next round a win?" }, "asker", T0 + 50 * MIN);
-  for (const v of ["v0", "v1", "v2"]) w.run({ kind: "upvote", id: "2" }, v, T0 + 50 * MIN);
+  const next = w.game.suggestions[0].id;
+  for (const v of ["v0", "v1", "v2"]) w.run({ kind: "upvote", id: next }, v, T0 + 50 * MIN);
   w.run({ kind: "tick" }, null, T0 + 61 * MIN - 1);
-  assert.equal(w.game.live?.id, "1", "still waiting for the streamer");
+  assert.equal(w.game.live[0]?.id, first, "still waiting for the streamer");
   w.run({ kind: "tick" }, null, T0 + 61 * MIN);
   assert.deepEqual([w.game.resolved[0].outcome, w.game.resolved[0].resolvedBy], ["cancel", "auto"]);
+  assert.ok(w.game.resolved.slice(0, MAX_LIVE).every((r) => r.outcome === "cancel" && r.resolvedBy === "auto"), "each one cancels on its own clock");
   assert.equal(w.bal.get("a"), 1_000);
-  assert.equal(w.game.live?.id, "2", "the crowd's pick goes live next");
+  assert.deepEqual(w.game.live.map((p) => p.id), [next], "the crowd's pick goes live next");
 });
 
 test("auto-cancel: a crowd-launched prediction cancels 15 minutes after lock", () => {
   const w = withSuggestion(3, { a: 1_000 });
-  assert.equal(w.game.live?.launchedBy, "crowd");
-  const lockAt = w.game.live!.lockAt;
-  w.run({ kind: "bet", side: "yes", amount: 100 }, "a", T0 + MIN);
+  assert.equal(w.game.live[0]?.launchedBy, "crowd");
+  const lockAt = w.game.live[0].lockAt;
+  w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0 + MIN);
   w.run({ kind: "tick" }, null, lockAt + 15 * MIN - 1);
-  assert.notEqual(w.game.live, null);
+  assert.equal(w.game.live.length, 1);
   w.run({ kind: "tick" }, null, lockAt + 15 * MIN);
   assert.deepEqual([w.game.resolved[0].outcome, w.game.resolved[0].resolvedBy], ["cancel", "auto"]);
   assert.equal(w.bal.get("a"), 1_000);
@@ -324,11 +414,11 @@ test("streamer and mods can't suggest, upvote or bet on their own coin; only the
     refused(() => w.run({ kind: "upvote", id: "1" }, wallet, T0), /can't upvote/);
   }
   w.run({ kind: "launch", id: "1", windowMin: 10 }, MOD, T0);
-  assert.equal(w.game.live?.launchedBy, MOD);
-  for (const wallet of [STREAMER, MOD]) refused(() => w.run({ kind: "bet", side: "yes", amount: 10 }, wallet, T0), /can't bet/);
+  assert.equal(w.game.live[0]?.launchedBy, MOD);
+  for (const wallet of [STREAMER, MOD]) refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, wallet, T0), /can't bet/);
   refused(() => w.run({ kind: "remove", id: "1" }, "a", T0), /streamer or a mod/);
   w.run({ kind: "mod", wallet: MOD, add: false }, STREAMER, T0);
-  refused(() => w.run({ kind: "resolve", outcome: "yes" }, MOD, T0 + 10 * MIN), /streamer or a mod/);
+  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + 10 * MIN), /streamer or a mod/);
 });
 
 test("remove: the streamer drops a suggestion; its 10 points are spent", () => {
@@ -345,9 +435,9 @@ function askerScenario(eligibleBettors: number, outcome: "yes" | "cancel", flagg
   const w = withSuggestion(3, Object.fromEntries(bettors.map((b) => [b, 1_000])));
   for (const [i, b] of bettors.entries()) {
     if (i < eligibleBettors) w.eligible(b);
-    w.run({ kind: "bet", side: i % 2 ? "yes" : "no", amount: 20 }, b, T0 + MIN);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: i % 2 ? "yes" : "no", amount: 20 }, b, T0 + MIN);
   }
-  w.run({ kind: "resolve", outcome }, STREAMER, T0 + 3 * MIN);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, STREAMER, T0 + 3 * MIN);
   for (const b of bettors.slice(0, flaggers)) w.run({ kind: "flag", id: "1" }, b, T0 + 4 * MIN);
   const before = w.bal.get("asker");
   w.run({ kind: "tick" }, null, T0 + 3 * MIN + FLAG_WINDOW_MS);
@@ -373,8 +463,8 @@ test("flags: bettors only, once each, within the flag window; disputed at 30% of
   const bettors = Array.from({ length: 10 }, (_, i) => `b${i}`);
   const w = world(Object.fromEntries(bettors.map((b) => [b, 1_000])));
   w.run({ kind: "launch", text: "Will I eat a banana?", windowMin: 1 }, STREAMER, T0);
-  for (const [i, b] of bettors.entries()) w.run({ kind: "bet", side: i < 5 ? "yes" : "no", amount: 10 }, b, T0);
-  w.run({ kind: "resolve", outcome: "yes" }, STREAMER, T0 + MIN);
+  for (const [i, b] of bettors.entries()) w.run({ kind: "bet", id: w.game.live[0].id, side: i < 5 ? "yes" : "no", amount: 10 }, b, T0);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, T0 + MIN);
   refused(() => w.run({ kind: "flag", id: "1" }, "outsider", T0 + MIN), /Only its bettors/);
   w.run({ kind: "flag", id: "1" }, "b5", T0 + MIN);
   refused(() => w.run({ kind: "flag", id: "1" }, "b5", T0 + MIN), /already flagged/);
@@ -392,10 +482,10 @@ test("results fold into summaries once their flag window closes; only the last 2
   let t = T0;
   for (let i = 0; i < MAX_PREDICTIONS_PER_STREAM; i++) {
     w.run({ kind: "launch", text: `Question number ${i}?`, windowMin: 1 }, STREAMER, t);
-    w.run({ kind: "bet", side: "yes", amount: 10 }, "a", t);
-    w.run({ kind: "bet", side: "no", amount: 10 }, "b", t);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "a", t);
+    w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", t);
     t += MIN;
-    w.run({ kind: "resolve", outcome: "yes" }, STREAMER, t);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, t);
   }
   const newest = w.game.resolved[0];
   assert.deepEqual(newest.open, { results: { a: [10, 20, 0], b: [10, 0, 0] }, eligible: 0 }, "the flag window needs who bet and what they got");
@@ -447,7 +537,7 @@ test("review: a suggestion under review can't be upvoted, launched or crowd-pick
   w.review("1", { approved: true }, T0 + SEC);
   assert.equal(w.game.suggestions[0].review, undefined);
   for (const v of ["v0", "v1", "v2"]) w.run({ kind: "upvote", id: "1" }, v, T0 + 2 * SEC);
-  assert.equal(w.game.live?.text, "Will I eat a banana?", "approved, upvoted, crowd-launched");
+  assert.equal(w.game.live[0]?.text, "Will I eat a banana?", "approved, upvoted, crowd-launched");
 });
 
 test("review: a rejected suggestion leaves, its 10 points stay spent, and its asker sees why and waits 5 minutes", () => {
@@ -468,16 +558,16 @@ test("review: a rejected suggestion leaves, its 10 points stay spent, and its as
 test("review: a typed staff question goes live only on approval (its window starts then); a rejection uses no launch", () => {
   const w = world({ a: 100 }, [], [], { reviewed: false });
   w.run({ kind: "launch", text: "Will chat hit 100?", windowMin: 2 }, STREAMER, T0);
-  assert.ok(w.game.live === null, "not live yet");
+  assert.deepEqual(w.game.live, [], "not live yet");
   assert.equal(w.game.pending?.text, "Will chat hit 100?");
-  refused(() => w.run({ kind: "bet", side: "yes", amount: 10 }, "a", T0), /Betting is closed/);
+  refused(() => w.run({ kind: "bet", id: w.game.pending!.id, side: "yes", amount: 10 }, "a", T0), /Betting is closed/);
   refused(() => w.run({ kind: "launch", text: "Another one here?" }, STREAMER, T0), /under review/);
   w.review(w.game.pending!.id, { approved: false, text: "Not approved: violent" }, T0 + SEC);
   assert.deepEqual([w.game.pending, w.game.launched, w.game.notices[0].to], [null, 0, STAFF]);
 
   w.run({ kind: "launch", text: "Will chat hit 200?", windowMin: 2 }, STREAMER, T0 + 2 * SEC);
   w.review(w.game.pending!.id, { approved: true }, T0 + 5 * SEC);
-  const live = w.game.live as Game["live"]; // (assert.ok above narrowed it to null)
+  const live = (w.game as Game).live[0]; // (deepEqual above narrowed it to an empty list)
   const launched = w.game.launched;
   assert.deepEqual([live?.text, live?.launchedAt, live?.lockAt, launched], ["Will chat hit 200?", T0 + 5 * SEC, T0 + 5 * SEC + 2 * MIN, 1]);
 });
@@ -517,7 +607,7 @@ test("review: staff remove a stuck question by hand: the asker is refunded and t
   w.run({ kind: "remove", id: "1" }, STREAMER, T0 + SEC);
   assert.deepEqual([w.game.suggestions.length, w.bal.get("asker"), w.game.notices[0].to], [0, 100, "asker"]);
   w.run({ kind: "approve", id: w.game.pending!.id }, STREAMER, T0 + 2 * SEC);
-  assert.equal(w.game.live?.text, "Will chat hit 100?");
+  assert.equal(w.game.live[0]?.text, "Will chat hit 100?");
 });
 
 test("review: a suggestion still under review after 20 minutes expires and its points come back", () => {
