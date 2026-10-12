@@ -64,6 +64,8 @@ export type PredictionsView = {
     market: MarketStepView;
     /** What the market resolves from: the streamer's official link, else null (the stream decides). */
     source: string | null;
+    /** What the streamer or a mod says happened, once betting closed (the admin resolves). */
+    witness: WitnessView;
   }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;
@@ -80,8 +82,9 @@ export type PredictionsView = {
     text: string;
     outcome: Outcome;
     resolvedAt: number;
-    /** `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto"). */
-    resolvedBy: { role: "streamer" | "mod" | "auto"; wallet: string | null };
+    /** "admin": the memestream oracle. `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto"). */
+    resolvedBy: { role: "admin" | "streamer" | "mod" | "auto"; wallet: string | null };
+    witness: WitnessView;
     disputed: boolean;
     /** The AI check's second opinion: "checking" while it runs; null if no check ran. */
     ai: "checking" | "agree" | "disagree" | "unclear" | null;
@@ -99,5 +102,8 @@ export type PredictionsView = {
   mods: string[];
   leaderboard: { stream: LeaderRow[]; allTime: LeaderRow[]; me: { stream: Standing | null; allTime: Standing | null } };
 };
+
+/** The streamer's or a mod's account of what happened; null if none. */
+export type WitnessView = { outcome: Side; note: string | null; role: "streamer" | "mod" } | null;
 
 export type Session = { wallet: string; token: string; expiresAt: number };

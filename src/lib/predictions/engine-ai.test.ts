@@ -8,8 +8,9 @@ const T0 = 1_000_000_000;
 const STREAMER = "Streamer";
 const ASKER = "Asker";
 const BETTORS = ["b1", "b2", "b3", "b4", "b5", "b6"];
-const ON: Env = { streamerSeenAt: null, aiCheck: true };
-const OFF: Env = { streamerSeenAt: null };
+const ORACLE = "Oracle";
+const ON: Env = { streamerSeenAt: null, aiCheck: true, admins: [ORACLE] };
+const OFF: Env = { streamerSeenAt: null, admins: [ORACLE] };
 const actor = (wallet: string): Actor => ({ wallet, eligible: true, holder: true, balance: 1_000_000 });
 
 /** Applies every action, summing each wallet's point movements and the leaderboard changes. */
@@ -34,7 +35,7 @@ function liveGame(env: Env, l = ledger()) {
   return game;
 }
 
-const resolveYesResult = (game: Game, env: Env, now = T0 + MIN) => apply(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, actor(STREAMER), now, env);
+const resolveYesResult = (game: Game, env: Env, now = T0 + MIN) => apply(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, actor(ORACLE), now, env);
 const resolveYes = (game: Game, env: Env, now = T0 + MIN) => resolveYesResult(game, env, now).game;
 
 test("frames: launch is grabbed at once, lock once betting closes, each claimed once; none without the AI check", () => {
@@ -68,9 +69,9 @@ test("frames and checks are per prediction when several are live", () => {
   const lock1 = startAi(game, T0 + MIN, ON);
   assert.deepEqual(lock1.captures.map((c) => [c.id, c.kind]), [[p1, "lock"]], "each locks on its own clock");
   game = lock1.game;
-  game = apply(game, { kind: "resolve", id: p1, outcome: "yes" }, actor(STREAMER), T0 + MIN, ON).game;
+  game = apply(game, { kind: "resolve", id: p1, outcome: "yes" }, actor(ORACLE), T0 + MIN, ON).game;
   assert.deepEqual(startAi(game, T0 + 2 * MIN, ON).captures.map((c) => [c.id, c.kind]), [[p2, "lock"]]);
-  game = apply(game, { kind: "resolve", id: p2, outcome: "no" }, actor(STREAMER), T0 + 2 * MIN, ON).game;
+  game = apply(game, { kind: "resolve", id: p2, outcome: "no" }, actor(ORACLE), T0 + 2 * MIN, ON).game;
   const checks = startAi(game, T0 + 2 * MIN, ON).checks;
   assert.deepEqual(
     checks.map((c) => [c.id, c.outcome, c.frames.map((f) => [f.kind, f.text])]).sort(),
@@ -91,7 +92,7 @@ test("resolve YES/NO starts a check carrying the frames; cancel and coins withou
   assert.equal(aiDue(claim.game, T0 + MIN + 1, ON), false, "a claimed run isn't started twice");
 
   const live = liveGame(ON);
-  const cancelled = apply(live, { kind: "resolve", id: live.live[0].id, outcome: "cancel" }, actor(STREAMER), T0 + MIN, ON).game;
+  const cancelled = apply(live, { kind: "resolve", id: live.live[0].id, outcome: "cancel" }, actor(ORACLE), T0 + MIN, ON).game;
   assert.equal(cancelled.resolved[0].check, undefined);
   assert.equal(resolveYes(liveGame(OFF), OFF).resolved[0].check, undefined);
 });

@@ -6,14 +6,14 @@
  */
 import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
-import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary } from "@/lib/predictions/engine";
+import { type Action, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary, type Witness } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
 import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, type CaptureTarget, type CheckTarget, type FrameNote, startAi } from "@/lib/predictions/engine";
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
-import type { LeaderRow, MarketStepView, PredictionsView, Standing } from "@/lib/predictions/view";
+import type { LeaderRow, MarketStepView, PredictionsView, Standing, WitnessView } from "@/lib/predictions/view";
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
 import { GAME_KEY_COUNT, gameKeys, LIVE_COINS_KEY, liveIndex, liveSlotKeys, loadGame } from "./game-doc";
@@ -192,6 +192,7 @@ function liveView(game: Game, wallet: string | null): PredictionsView["live"] {
       myBet: myBet ? { side: myBet.side, amount: myBet.amount } : null,
       market: marketStepView(live.market),
       source: live.source ?? null,
+      witness: witnessOf(game, live.witness),
     };
   });
 }
@@ -227,8 +228,14 @@ const noticeFor = (game: Game, wallet: string, staff: boolean) =>
 type ResolvedView = PredictionsView["resolved"][number];
 
 /** Who resolved it. Only the streamer and mods see the wallet; everyone else sees the role. */
-const resolverOf = (game: Game, by: string | null, staff: boolean): ResolvedView["resolvedBy"] =>
-  by === AUTO || by === null ? { role: "auto", wallet: null } : { role: by === game.creator ? "streamer" : "mod", wallet: staff ? by : null };
+const resolverOf = (game: Game, by: string | null, staff: boolean): ResolvedView["resolvedBy"] => {
+  if (by === AUTO || by === null) return { role: "auto", wallet: null };
+  // Results from before admins resolved were the streamer's or a mod's.
+  const role = by === game.creator ? "streamer" : game.mods.includes(by) ? "mod" : "admin";
+  return { role, wallet: staff ? by : null };
+};
+
+const witnessOf = (game: Game, w: Witness | undefined): WitnessView => (w ? { outcome: w.outcome, note: w.note ?? null, role: w.by === game.creator ? "streamer" : "mod" } : null);
 
 function myResult(p: Summary, wallet: string | null, now: number): ResolvedView["my"] {
   if (!wallet || !p.open || !Object.hasOwn(p.open.results, wallet)) return null;
@@ -265,6 +272,7 @@ function resolvedView(game: Game, wallet: string | null, staff: boolean, now: nu
     outcome: p.outcome,
     resolvedAt: p.resolvedAt,
     resolvedBy: resolverOf(game, p.resolvedBy, staff),
+    witness: witnessOf(game, p.witness),
     disputed: p.disputed,
     ai: p.check ? "checking" : (p.ai?.verdict ?? null),
     flagUntil: p.open ? p.resolvedAt + FLAG_WINDOW_MS : null,

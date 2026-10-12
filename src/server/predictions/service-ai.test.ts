@@ -13,6 +13,8 @@ const MIN = 60_000;
 const T0 = Date.parse("2026-10-12T12:00:00.000Z");
 const COIN = "coin";
 const STREAMER = "streamer";
+/** The memestream oracle: the admin who resolves. */
+const ORACLE = "oracle";
 const TWITCH = "https://twitch.tv/lofigirl";
 const BETTORS = ["v1", "v2", "v3", "v4", "v5", "v6"];
 
@@ -64,6 +66,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     holds: async () => true,
     review: async () => ({ approved: true, windowMin: 1 }),
     ai: withAi ? ai : null,
+    admins: [ORACLE],
     defer: (task) => void deferred.push(task),
     attempts: 200,
     backoffMs: () => Math.random() * 2,
@@ -92,7 +95,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     await settle(); // the lock frame
   };
   const resolve = async (outcome: "yes" | "no" | "cancel") => {
-    await service.act(COIN, STREAMER, { kind: "resolve", id: liveId, outcome });
+    await service.act(COIN, ORACLE, { kind: "resolve", id: liveId, outcome });
     return (await service.view(COIN, "v1")).resolved[0];
   };
   return { clock, service, models, settle, balance, playToLock, resolve, store };

@@ -4,15 +4,15 @@
  * state and the point movements in one atomic step (and refuses if anything changed meanwhile).
  *
  * Flow: signed-in holders of the coin suggest YES/NO questions (10 points, back when it goes live)
- * and upvote them (free). While the streamer is watching their own coin (heartbeat in the last
- * 5 minutes) and "Crowd picks questions" is on, the top suggestion with 3+ upvotes goes live by
- * itself while a live slot is free; the streamer or a mod can also launch one, or their own question.
- * Up to MAX_LIVE live predictions at a time, 20 per stream. Viewers bet on a side of each until it
- * locks; the streamer or a mod resolves each YES/NO/Cancel; winners split that prediction's losing
- * pool (parimutuel, no house fee).
+ * and upvote them (free); the streamer or a mod launches them, or their own question (crowd picks
+ * are off in the app). Up to MAX_LIVE live predictions at a time, 20 per stream. Viewers bet on a
+ * side of each until it locks. Then the streamer or a mod can say what happened (a witness), and the
+ * memestream oracle, an admin by hand for now, resolves it YES/NO/Cancel; winners split that
+ * prediction's losing pool (parimutuel, no house fee). Markets then go through the challenge window.
  * A result counts for leaderboards and the asker reward only after its flag window, if not disputed.
  */
 import {
+  WITNESS_NOTE_MAX,
   AI_CHECK_MAX_TRIES,
   AI_CHECK_MAX_WAIT_MS,
   AI_CHECK_RETRY_MS,
@@ -109,7 +109,9 @@ export type MarketState = {
   challenge?: Challenge;
   decision?: Decision;
 };
-/** A holder's challenge of the streamer's proposed result, with its points bond. */
+/** The streamer's (or a mod's) account of what happened, for the admin who resolves: a witness, never the decider. */
+export type Witness = { outcome: Side; note?: string; by: string; at: number };
+/** A holder's challenge of the admin's proposed result, with its points bond. */
 export type Challenge = { by: string; at: number; reason: string; link?: string; bond: number };
 /** How a market pays: one side, or "refund" (every token pays half). */
 export type MarketOutcome = Side | "refund";
@@ -132,6 +134,8 @@ export type Prediction = {
   /** Frames grabbed for the AI check (only on a coin whose stream has frames, with the check set up). */
   frames?: FrameNote[];
   market?: MarketState;
+  /** What the streamer or a mod says happened, once betting closed. */
+  witness?: Witness;
   /** The official source the streamer named for a real-world question (an http(s) link); else the stream decides. */
   source?: string;
 };
@@ -148,7 +152,7 @@ export type Summary = {
   no: number;
   bettors: number;
   resolvedAt: number;
-  /** "auto" (nobody resolved in time) or the streamer/mod wallet that resolved it. */
+  /** "auto" (nobody resolved in time) or the admin wallet that resolved it. */
   resolvedBy: string;
   askerReward: number;
   flags: number;
@@ -162,6 +166,8 @@ export type Summary = {
   source?: string;
   /** A market's betting window [launchedAt, lockAt], for "stream window HH:MM–HH:MM". */
   window?: [number, number];
+  /** What the streamer or a mod said happened. */
+  witness?: Witness;
 };
 export type FlagWindow = {
   /** Each bettor's [stake, payout, flagged (1) or not (0)]. */
@@ -200,6 +206,7 @@ export type Action =
   | { kind: "remove"; id: string }
   | { kind: "approve"; id: string }
   | { kind: "resolve"; id: string; outcome: Outcome }
+  | { kind: "witness"; id: string; outcome: Side; note?: string }
   | { kind: "flag"; id: string }
   | { kind: "mod"; wallet: string; add: boolean }
   | { kind: "crowd"; on: boolean }
@@ -738,6 +745,7 @@ function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string) {
   if (outcome !== "cancel" && ctx.env.aiCheck) summary.check = { tries: 0, at: now, frames: p.frames ?? [] };
   if (p.market) Object.assign(summary, { market: p.market, window: [p.launchedAt, p.lockAt] });
   if (p.source) summary.source = p.source;
+  if (p.witness) summary.witness = p.witness;
   game.resolved.unshift(summary);
 }
 
@@ -785,6 +793,8 @@ function act(ctx: Ctx, action: PlayerAction, actor: Actor) {
       return approveByHand(ctx, actor, action.id);
     case "resolve":
       return resolve(ctx, actor, action);
+    case "witness":
+      return witness(ctx, actor, action);
     case "flag":
       return flagResult(ctx, actor, action.id);
     case "mod":
@@ -927,14 +937,36 @@ function approveByHand(ctx: Ctx, actor: Actor, id: string) {
   approveReview(ctx, stuck);
 }
 
+/**
+ * The memestream oracle, by hand for now: only an admin resolves, never the coin's own streamer or
+ * a mod (they can only say what happened, as a witness). Markets then go through the challenge window.
+ */
 function resolve(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"resolve">) {
-  const { game, now } = ctx;
-  requireStaff(game, actor);
+  const { game, now, env } = ctx;
+  if (!env.admins?.includes(actor.wallet)) throw new GameError("Only the memestream oracle (an admin) resolves predictions");
+  if (isStaff(game, actor.wallet)) throw new GameError("Admins can't resolve predictions on a coin they stream or mod");
   const p = findLive(game, id);
   if (!p) throw new GameError("Nothing to resolve");
   if (now < p.lockAt) throw new GameError("Betting is still open");
   if (Object.hasOwn(p.bets, actor.wallet)) throw new GameError("You have a bet on this one, so you can't resolve it");
   settle(ctx, p, outcome, actor.wallet);
+}
+
+/**
+ * The streamer or a mod tells the admin what happened (YES or NO, with an optional note), once
+ * betting closed and until the result is final. It can be changed; it never settles anything itself.
+ */
+function witness(ctx: Ctx, actor: Actor, { id, outcome, note }: ActionOf<"witness">) {
+  const { game, now, env } = ctx;
+  requireStaff(game, actor);
+  const live = findLive(game, id);
+  const done = live ? null : game.resolved.find((x) => x.id === id);
+  const target = live ?? done;
+  if (!target) throw new GameError("Nothing to answer");
+  if (live && now < live.lockAt) throw new GameError("Betting is still open");
+  if (done && (!done.market || done.market.step !== "open" || marketFinal(done, now, env) !== null)) throw new GameError("This result is already final");
+  const cleaned = note?.trim().replace(/\s+/g, " ").slice(0, WITNESS_NOTE_MAX);
+  target.witness = { outcome, by: actor.wallet, at: now, ...(cleaned ? { note: cleaned } : {}) };
 }
 
 function flagResult({ game, now }: Ctx, actor: Actor, id: string) {

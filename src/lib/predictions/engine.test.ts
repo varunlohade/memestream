@@ -7,6 +7,8 @@ const MIN = 60_000;
 const T0 = 1_000_000_000;
 const STREAMER = "Streamer";
 const MOD = "Mod";
+/** The memestream oracle: an admin who resolves (never the coin's streamer or a mod). */
+const ORACLE = "Oracle";
 
 /**
  * A tiny world: one coin's game plus every wallet's balance, so tests can check the point
@@ -19,7 +21,7 @@ function world(balances: Record<string, number> = {}, eligible: string[] = [], n
   const eligibleSet = new Set(eligible);
   let streamerHere = true;
   const actor = (wallet: string): Actor => ({ wallet, eligible: eligibleSet.has(wallet), holder: !nonHolders.includes(wallet), balance: bal.get(wallet) ?? 0 });
-  const env = (now: number) => ({ streamerSeenAt: streamerHere ? now - MIN : null, crowdPicks: true });
+  const env = (now: number) => ({ streamerSeenAt: streamerHere ? now - MIN : null, crowdPicks: true, admins: [ORACLE] });
   const settle = (result: Result) => {
     for (const [w, m] of result.moves) {
       const before = bal.get(w) ?? 0;
@@ -147,7 +149,7 @@ test("auto-launch: needs 3 upvotes; picks the most upvoted, then the oldest; onl
   for (const v of voters.slice(0, 4)) w.run({ kind: "upvote", id: b }, v, T0 + 3); // B: 4
   for (const v of voters.slice(0, 4)) w.run({ kind: "upvote", id: c }, v, T0 + 3); // C: 4, but newer
   assert.ok(w.game.live.length === MAX_LIVE && w.game.live.every((p) => p.launchedBy === STREAMER), "nothing auto-launches while every slot is live");
-  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, STREAMER, T0 + 2 * MIN);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, ORACLE, T0 + 2 * MIN);
   const crowd = w.game.live.filter((p) => p.launchedBy === "crowd");
   assert.equal(crowd.length, 1, "one slot freed, one crowd pick");
   assert.equal(crowd[0].text, "Question from B here?", "most upvotes, then oldest");
@@ -192,7 +194,7 @@ test("caps: 20 predictions per stream; then no launches and no suggestions", () 
   for (let i = 0; i < 20; i++) {
     const t = T0 + i * 10 * MIN;
     w.run({ kind: "launch", text: `Question number ${i}?`, aiWindowMin: 1 }, STREAMER, t);
-    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, STREAMER, t + MIN);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "cancel" }, ORACLE, t + MIN);
   }
   assert.equal(w.game.launched, 20);
   refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0 + 300 * MIN), /20 predictions/);
@@ -208,7 +210,7 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
     w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "a", t);
     w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", t);
     t += MIN;
-    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, t);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, ORACLE, t);
   }
   t += FLAG_WINDOW_MS;
   w.run({ kind: "tick" }, null, t);
@@ -226,18 +228,18 @@ test("a new stream (the streamer back after 2+ hours away) resets the 20 and the
   assert.equal(apply(game, { kind: "tick" }, null, t + 3 * 60 * MIN + 1, stream2).game.launched, 1, "one reset per stream");
 });
 
-test("a wallet with a stake can't resolve it, and can't be made a mod while its bet is live", () => {
+test("an oracle with a stake can't resolve it; a bettor can't be made a mod while its bet is live", () => {
   const w = world({ a: 1_000, b: 1_000 });
   w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 100 }, "b", T0);
   refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on a live prediction/);
-  // A bettor who became a mod before the bet (staff can't bet, so only through stored state).
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
+  // An admin who bet on it can't be its oracle.
   const staked = structuredClone(w.game);
-  staked.live[0].bets[MOD] = { side: "yes", amount: 100, eligible: false };
-  refused(() => apply(staked, { kind: "resolve", id: staked.live[0].id, outcome: "yes" }, w.actor(MOD), T0 + MIN), /can't resolve/);
-  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + MIN);
+  staked.live[0].bets[ORACLE] = { side: "yes", amount: 100, eligible: false };
+  refused(() => apply(staked, { kind: "resolve", id: staked.live[0].id, outcome: "yes" }, w.actor(ORACLE), T0 + MIN, { streamerSeenAt: null, admins: [ORACLE] }), /can't resolve/);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, ORACLE, T0 + MIN);
   w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0 + MIN);
   assert.deepEqual(w.game.mods, [MOD, "a"], "once settled, the bettor can be a mod");
 });
@@ -273,26 +275,28 @@ test("bets: at most MAX_BETTORS bettors per prediction; those in can still add",
   assert.equal(apply(full, { kind: "bet", id: full.live[0].id, side: "yes", amount: 10 }, actor("first"), T0).game.live[0].bets.first.amount, 20);
 });
 
-test("resolve: after lock only, by the streamer or a mod; winners split the pool; points conserved", () => {
+test("resolve: after lock only, by the memestream oracle (an admin), never the streamer or a mod; winners split the pool", () => {
   const w = world({ a: 1_000, b: 1_000, c: 1_000 });
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
   w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 100 }, "a", T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 300 }, "b", T0);
   w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 400 }, "c", T0);
-  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + MIN - 1), /still open/);
-  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, "a", T0 + MIN), /streamer or a mod/);
-  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + MIN);
+  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, ORACLE, T0 + MIN - 1), /still open/);
+  for (const wallet of ["a", STREAMER, MOD]) refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, wallet, T0 + MIN), /memestream oracle/);
+  // Even an admin who streams or mods this coin can't resolve on it.
+  refused(() => apply(w.game, { kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, w.actor(MOD), T0 + MIN, { streamerSeenAt: null, admins: [ORACLE, MOD] }), /stream or mod/);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, ORACLE, T0 + MIN);
   assert.deepEqual([w.bal.get("a"), w.bal.get("b"), w.bal.get("c")], [1_100, 1_300, 600], "paid at once");
   const total = [...w.bal.values()].reduce((x, y) => x + y, 0);
   assert.equal(total, 3_000, "parimutuel moves points, never makes them");
   const done = w.game.resolved[0];
-  assert.deepEqual([done.outcome, done.resolvedBy, done.resolvedAt], ["yes", MOD, T0 + MIN]);
+  assert.deepEqual([done.outcome, done.resolvedBy, done.resolvedAt], ["yes", ORACLE, T0 + MIN]);
   assert.deepEqual(w.game.won, {}, "winnings count only after the flag window");
   const after = w.run({ kind: "tick" }, null, T0 + MIN + FLAG_WINDOW_MS);
   assert.deepEqual(w.game.won, { a: 100, b: 300, c: -400 });
   assert.deepEqual(Object.fromEntries(after.won), { a: 100, b: 300, c: -400 }, "all-time winnings move too");
-  refused(() => w.run({ kind: "resolve", id: done.id, outcome: "no" }, MOD, T0 + MIN), /Nothing to resolve/);
+  refused(() => w.run({ kind: "resolve", id: done.id, outcome: "no" }, ORACLE, T0 + MIN), /Nothing to resolve/);
 });
 
 test("resolve: an empty side or a cancel refunds every bet", () => {
@@ -301,7 +305,7 @@ test("resolve: an empty side or a cancel refunds every bet", () => {
     w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
     w.run({ kind: "bet", id: w.game.live[0].id, side: bets[0], amount: 100 }, "a", T0);
     w.run({ kind: "bet", id: w.game.live[0].id, side: bets[1], amount: 200 }, "b", T0);
-    w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, STREAMER, T0 + MIN);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, ORACLE, T0 + MIN);
     w.run({ kind: "tick" }, null, T0 + MIN + FLAG_WINDOW_MS);
     assert.deepEqual([w.bal.get("a"), w.bal.get("b")], [1_000, 1_000], `${bets} ${outcome}`);
     assert.deepEqual(w.game.won, {});
@@ -321,18 +325,18 @@ test("several live at once: each bet names its prediction; each resolves on its 
   assert.deepEqual(w.game.live.map((p) => [p.yes, p.no, p.bettors]), [[400, 401, 3], [50, 250, 2]], "separate pools");
   refused(() => w.run({ kind: "bet", id: p1, side: "yes", amount: 10 }, "b", T0 + MIN), /closed/);
   w.run({ kind: "bet", id: p2, side: "no", amount: 10 }, "b", T0 + MIN); // p2 still open
-  refused(() => w.run({ kind: "resolve", id: p2, outcome: "yes" }, STREAMER, T0 + MIN), /still open/);
-  refused(() => w.run({ kind: "resolve", id: "999", outcome: "yes" }, STREAMER, T0 + MIN), /Nothing to resolve/);
+  refused(() => w.run({ kind: "resolve", id: p2, outcome: "yes" }, ORACLE, T0 + MIN), /still open/);
+  refused(() => w.run({ kind: "resolve", id: "999", outcome: "yes" }, ORACLE, T0 + MIN), /Nothing to resolve/);
 
   const before = new Map(w.bal);
-  w.run({ kind: "resolve", id: p1, outcome: "yes" }, STREAMER, T0 + MIN);
+  w.run({ kind: "resolve", id: p1, outcome: "yes" }, ORACLE, T0 + MIN);
   const paid1 = payouts([...bets1], "yes");
   for (const wallet of ["a", "b", "c"]) assert.equal(w.bal.get(wallet)! - before.get(wallet)!, paid1.get(wallet), `${wallet} paid for p1 only`);
   assert.deepEqual(w.game.live.map((p) => p.id), [p2], "the other stays live");
-  refused(() => w.run({ kind: "resolve", id: p1, outcome: "no" }, STREAMER, T0 + MIN), /Nothing to resolve/);
+  refused(() => w.run({ kind: "resolve", id: p1, outcome: "no" }, ORACLE, T0 + MIN), /Nothing to resolve/);
 
   const mid = new Map(w.bal);
-  w.run({ kind: "resolve", id: p2, outcome: "cancel" }, STREAMER, T0 + 2 * MIN);
+  w.run({ kind: "resolve", id: p2, outcome: "cancel" }, ORACLE, T0 + 2 * MIN);
   assert.deepEqual([w.bal.get("a")! - mid.get("a")!, w.bal.get("b")! - mid.get("b")!, w.bal.get("c")! - mid.get("c")!], [250, 10, 50], "p2 refunds its own stakes");
   assert.equal([...w.bal.values()].reduce((x, y) => x + y, 0), 6_000, "points conserved");
   assert.deepEqual(w.game.resolved.map((r) => [r.id, r.outcome, r.yes, r.no]), [[p2, "cancel", 50, 260], [p1, "yes", 400, 401]]);
@@ -344,7 +348,7 @@ test("launch: at most MAX_LIVE live at once; a slot frees when one resolves", ()
   for (let i = 0; i < MAX_LIVE; i++) w.run({ kind: "launch", text: `Question number ${i}?`, aiWindowMin: 1 }, STREAMER, T0);
   assert.equal(w.game.live.length, MAX_LIVE);
   refused(() => w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0), /already live/);
-  w.run({ kind: "resolve", id: w.game.live[3].id, outcome: "cancel" }, STREAMER, T0 + MIN);
+  w.run({ kind: "resolve", id: w.game.live[3].id, outcome: "cancel" }, ORACLE, T0 + MIN);
   w.run({ kind: "launch", text: "One more question?" }, STREAMER, T0 + MIN);
   assert.equal(w.game.live.length, MAX_LIVE);
   assert.equal(w.game.live.at(-1)!.text, "One more question?");
@@ -364,7 +368,7 @@ test("bets on several live predictions: at most half the balance at bet time, ac
   assert.deepEqual(w.game.live.map((p) => p.bets.a?.amount), [250, 100]);
 });
 
-test("stake checks are per prediction: a bettor-mod can't resolve that one only; a bet on any live one blocks becoming a mod", () => {
+test("stake checks are per prediction: a bettor-oracle can't resolve that one only; a bet on any live one blocks becoming a mod", () => {
   const w = world({ a: 1_000 });
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
   w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
@@ -373,9 +377,10 @@ test("stake checks are per prediction: a bettor-mod can't resolve that one only;
   w.run({ kind: "bet", id: p2, side: "yes", amount: 100 }, "a", T0);
   refused(() => w.run({ kind: "mod", wallet: "a", add: true }, STREAMER, T0), /has a bet on a live prediction/);
   const staked = structuredClone(w.game);
-  staked.live[1].bets[MOD] = { side: "yes", amount: 100, eligible: false };
-  refused(() => apply(staked, { kind: "resolve", id: p2, outcome: "yes" }, w.actor(MOD), T0 + MIN), /can't resolve/);
-  assert.deepEqual(apply(staked, { kind: "resolve", id: p1, outcome: "yes" }, w.actor(MOD), T0 + MIN).game.live.map((p) => p.id), [p2]);
+  staked.live[1].bets[ORACLE] = { side: "yes", amount: 100, eligible: false };
+  const env = { streamerSeenAt: null, admins: [ORACLE] };
+  refused(() => apply(staked, { kind: "resolve", id: p2, outcome: "yes" }, w.actor(ORACLE), T0 + MIN, env), /can't resolve/);
+  assert.deepEqual(apply(staked, { kind: "resolve", id: p1, outcome: "yes" }, w.actor(ORACLE), T0 + MIN, env).game.live.map((p) => p.id), [p2]);
 });
 
 test("auto-cancel: the streamer's own unresolved 60 minutes after lock; full refunds; then the next one goes live", () => {
@@ -421,7 +426,7 @@ test("streamer and mods can't suggest, upvote or bet on their own coin; only the
   for (const wallet of [STREAMER, MOD]) refused(() => w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, wallet, T0), /can't bet/);
   refused(() => w.run({ kind: "remove", id: "1" }, "a", T0), /streamer or a mod/);
   w.run({ kind: "mod", wallet: MOD, add: false }, STREAMER, T0);
-  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + 10 * MIN), /streamer or a mod/);
+  refused(() => w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, MOD, T0 + 10 * MIN), /memestream oracle/);
 });
 
 test("remove: the streamer drops a suggestion; its 10 points are spent", () => {
@@ -440,7 +445,7 @@ function askerScenario(eligibleBettors: number, outcome: "yes" | "cancel", flagg
     if (i < eligibleBettors) w.eligible(b);
     w.run({ kind: "bet", id: w.game.live[0].id, side: i % 2 ? "yes" : "no", amount: 20 }, b, T0 + MIN);
   }
-  w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, STREAMER, T0 + 3 * MIN);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome }, ORACLE, T0 + 3 * MIN);
   for (const b of bettors.slice(0, flaggers)) w.run({ kind: "flag", id: "1" }, b, T0 + 4 * MIN);
   const before = w.bal.get("asker");
   w.run({ kind: "tick" }, null, T0 + 3 * MIN + FLAG_WINDOW_MS);
@@ -467,7 +472,7 @@ test("flags: bettors only, once each, within the flag window; disputed at 30% of
   const w = world(Object.fromEntries(bettors.map((b) => [b, 1_000])));
   w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
   for (const [i, b] of bettors.entries()) w.run({ kind: "bet", id: w.game.live[0].id, side: i < 5 ? "yes" : "no", amount: 10 }, b, T0);
-  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, T0 + MIN);
+  w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, ORACLE, T0 + MIN);
   refused(() => w.run({ kind: "flag", id: "1" }, "outsider", T0 + MIN), /Only its bettors/);
   w.run({ kind: "flag", id: "1" }, "b5", T0 + MIN);
   refused(() => w.run({ kind: "flag", id: "1" }, "b5", T0 + MIN), /already flagged/);
@@ -488,7 +493,7 @@ test("results fold into summaries once their flag window closes; only the last 2
     w.run({ kind: "bet", id: w.game.live[0].id, side: "yes", amount: 10 }, "a", t);
     w.run({ kind: "bet", id: w.game.live[0].id, side: "no", amount: 10 }, "b", t);
     t += MIN;
-    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, STREAMER, t);
+    w.run({ kind: "resolve", id: w.game.live[0].id, outcome: "yes" }, ORACLE, t);
   }
   const newest = w.game.resolved[0];
   assert.deepEqual(newest.open, { results: { a: [10, 20, 0], b: [10, 0, 0] }, eligible: 0 }, "the flag window needs who bet and what they got");
@@ -498,7 +503,7 @@ test("results fold into summaries once their flag window closes; only the last 2
   assert.ok(w.game.resolved.every((p) => p.open === null));
   assert.deepEqual(
     { ...w.game.resolved[0] },
-    { id: newest.id, text: "Question number 19?", asker: null, outcome: "yes", yes: 10, no: 10, bettors: 2, resolvedAt: t, resolvedBy: STREAMER, askerReward: 0, flags: 1, disputed: true, open: null },
+    { id: newest.id, text: "Question number 19?", asker: null, outcome: "yes", yes: 10, no: 10, bettors: 2, resolvedAt: t, resolvedBy: ORACLE, askerReward: 0, flags: 1, disputed: true, open: null },
   );
 });
 
@@ -641,4 +646,22 @@ test("review: a suggestion still under review after 20 minutes expires and its p
   w.run({ kind: "launch", text: "Will chat hit 100?" }, STREAMER, T0);
   w.run({ kind: "tick" }, null, T0 + 20 * MIN);
   assert.deepEqual([w.game.suggestions.length, w.game.pending, w.bal.get("asker")], [0, null, 100]);
+});
+
+test("witness: once betting closes, the streamer or a mod says what happened; it never settles anything", () => {
+  const w = world({ a: 1_000 });
+  w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
+  w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
+  const id = w.game.live[0].id;
+  w.run({ kind: "bet", id, side: "yes", amount: 100 }, "a", T0);
+  refused(() => w.run({ kind: "witness", id, outcome: "yes" }, STREAMER, T0 + MIN - 1), /still open/);
+  refused(() => w.run({ kind: "witness", id, outcome: "yes" }, "a", T0 + MIN), /streamer or a mod/);
+  w.run({ kind: "witness", id, outcome: "no", note: "  missed   it  " }, MOD, T0 + MIN);
+  w.run({ kind: "witness", id, outcome: "yes", note: "ate it on camera" }, STREAMER, T0 + MIN);
+  assert.equal(w.game.live.length, 1, "still waiting for the oracle");
+  assert.equal(w.bal.get("a"), 900, "no payout from a witness");
+  assert.deepEqual(w.game.live[0].witness, { outcome: "yes", by: STREAMER, at: T0 + MIN, note: "ate it on camera" }, "the latest answer counts");
+  w.run({ kind: "resolve", id, outcome: "yes" }, ORACLE, T0 + 2 * MIN);
+  assert.deepEqual(w.game.resolved[0].witness?.outcome, "yes", "kept on the result for disputes");
+  refused(() => w.run({ kind: "witness", id, outcome: "no" }, STREAMER, T0 + 2 * MIN), /already final|Nothing to answer/);
 });

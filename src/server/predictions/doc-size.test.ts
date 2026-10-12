@@ -29,6 +29,8 @@ const T0 = 1_000_000_000;
 /** Real wallet addresses are up to 44 characters. */
 const wallet = (tag: string, i: number) => `${tag}${i}`.padEnd(44, "W");
 const STREAMER = wallet("streamer", 0);
+/** The memestream oracle: the admin who resolves. */
+const ORACLE = wallet("oracle", 0);
 const actor = (w: string): Actor => ({ wallet: w, eligible: true, holder: true, balance: 1_000_000 });
 const question = (i: number) => `Q${i} `.padEnd(QUESTION_MAX - 1, "x") + "?";
 
@@ -36,7 +38,7 @@ const question = (i: number) => `Q${i} `.padEnd(QUESTION_MAX - 1, "x") + "?";
 const DOC_CAP = 262_144;
 
 test("a coin's game at full caps, MAX_LIVE live: the coin document and every other document stay under 256 KB", () => {
-  const step = (game: Game, action: Parameters<typeof apply>[1], who: string | null, now: number) => apply(game, action, who ? actor(who) : null, now).game;
+  const step = (game: Game, action: Parameters<typeof apply>[1], who: string | null, now: number) => apply(game, action, who ? actor(who) : null, now, { streamerSeenAt: null, admins: [ORACLE] }).game;
   const bettors = Array.from({ length: MAX_BETTORS }, (_, i) => wallet("bettor", i));
 
   let game = newGame(STREAMER);
@@ -46,7 +48,7 @@ test("a coin's game at full caps, MAX_LIVE live: the coin document and every oth
   game = step(game, { kind: "launch", text: question(0) }, STREAMER, T0);
   game = applyReview(game, game.pending!, { approved: true, windowMin: BET_WINDOWS_MIN[0] }, T0).game;
   for (const [i, b] of bettors.entries()) game = step(game, { kind: "bet", id: game.live[0].id, side: i % 2 ? "yes" : "no", amount: MAX_BET }, b, T0);
-  game = step(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, STREAMER, T0 + MIN);
+  game = step(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, ORACLE, T0 + MIN);
   for (const b of bettors) game = step(game, { kind: "flag", id: game.resolved[0].id }, b, T0 + MIN);
   const open = game.resolved[0];
 

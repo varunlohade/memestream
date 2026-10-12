@@ -27,6 +27,10 @@ export function parseAction(body: Record<string, unknown>): Action | null {
     }
     case "resolve":
       return isId(body.id) && isOutcome(body.outcome) ? { kind: "resolve", id: body.id, outcome: body.outcome } : null;
+    case "witness": {
+      const note = optionalText(body.note);
+      return isId(body.id) && isSide(body.outcome) ? { kind: "witness", id: body.id, outcome: body.outcome, ...(note ? { note } : {}) } : null;
+    }
     case "mod":
       return typeof body.wallet === "string" && isBase58Of(body.wallet, 32) && typeof body.add === "boolean"
         ? { kind: "mod", wallet: body.wallet, add: body.add }

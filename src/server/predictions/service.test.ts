@@ -19,6 +19,8 @@ const SECRET = "test-secret-test-secret-test-secret";
 const DOMAIN = "memestream.lol";
 const COIN = "coin";
 const STREAMER = "streamer";
+/** The memestream oracle: the admin who resolves. */
+const ORACLE = "oracle";
 
 const fengari = loadFengari();
 type Clock = { t: number };
@@ -69,6 +71,7 @@ function setup(make: (clock: Clock) => PredictionStore, { autoReview = true } = 
     coin: async (mint) => coins.get(mint) ?? null,
     holds: async (_mint, wallet) => !nonHolders.has(wallet),
     review,
+    admins: [ORACLE],
     defer: (task) => void deferred.push(task),
     attempts: 200,
     backoffMs: () => Math.random() * 2,
@@ -217,13 +220,13 @@ for (const [name, make] of STORES) {
     assert.equal(await balance("asker"), 100, "suggestion cost refunded on going live");
 
     await Promise.all(viewers.map((v, i) => service.act(COIN, v, { kind: "bet", id, side: i < 2 ? "yes" : "no", amount: 100 })));
-    await assert.rejects(service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" }), /still open/);
+    await assert.rejects(service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" }), /still open/);
     clock.t += 2 * MIN;
-    const done = (await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" }))!;
+    const done = (await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" }))!;
     const after = (await Promise.all(viewers.map(balance))).reduce((a, b) => a + b, 0);
     assert.equal(after, 6 * 1_000, "the pool goes back out in full");
     assert.deepEqual([await balance("v1"), await balance("v3")], [1_000 + 200, 1_000 - 100]);
-    assert.deepEqual(done.resolved[0].resolvedBy, { role: "streamer", wallet: STREAMER }, "staff see the wallet");
+    assert.deepEqual(done.resolved[0].resolvedBy, { role: "admin", wallet: null }, "the oracle isn't staff on this coin: role only");
     assert.deepEqual([done.leaderboard.stream, await balance("asker")], [[], 100], "nothing counts during the flag window");
 
     clock.t += FLAG_WINDOW_MS;
@@ -344,7 +347,7 @@ for (const [name, make] of STORES) {
 
     clock.t += MIN;
     const before = await Promise.all(["a", "b"].map(balance));
-    for (const [i, id] of ids.entries()) await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: i % 2 ? "cancel" : "yes" });
+    for (const [i, id] of ids.entries()) await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: i % 2 ? "cancel" : "yes" });
     // YES: a wins b's 20 on top of their own stake; cancel: both refunded.
     const want = ids.map((_, i) => (i % 2 ? [10 + i, 20] : [10 + i + 20, 0]));
     const after = await Promise.all(["a", "b"].map(balance));
@@ -376,7 +379,7 @@ for (const [name, make] of STORES) {
     assert.deepEqual((await service.liveAcross((mint) => mint !== "other", 10)).map((l) => l.mint), ["coin"], "a coin the filter rejects is never read");
     clock.t += 0.75 * MIN;
     assert.deepEqual((await service.liveAcross(() => true, 10)).map((l) => l.mint), ["other"], "betting closed: not shown");
-    await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+    await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
     assert.deepEqual(await store.members("predictions:live"), ["other"], "the resolve commit took the coin off the index");
   });
 
@@ -405,7 +408,7 @@ for (const [name, make] of STORES) {
     await service.act(COIN, "drive-by", { kind: "bet", id, side: "yes", amount: 200 });
     await service.act(COIN, "loser", { kind: "bet", id, side: "no", amount: 150 });
     clock.t += MIN;
-    await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+    await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
     clock.t += FLAG_WINDOW_MS;
     const view = await service.view(COIN, "loser");
     assert.deepEqual(view.leaderboard.stream, [{ wallet: "watcher", points: 50 }], "drive-by won more but never got the grant (over its IP's cap); losers aren't on the top line");
@@ -433,7 +436,7 @@ for (const [name, make] of STORES) {
     for (let i = 0; i < 20; i++) {
       await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?` });
       clock.t += MIN;
-      await service.act(COIN, STREAMER, { kind: "resolve", id: await liveId(), outcome: "cancel" });
+      await service.act(COIN, ORACLE, { kind: "resolve", id: await liveId(), outcome: "cancel" });
       await streamerHere();
     }
     await assert.rejects(service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }), /20 predictions/);
@@ -446,17 +449,17 @@ for (const [name, make] of STORES) {
     assert.deepEqual([fresh.launched, fresh.resolved.length], [1, 5]);
   });
 
-  test(`${name}: viewers see who resolved a prediction by role only; staff see the wallet`, async () => {
+  test(`${name}: viewers see that the oracle (an admin) resolved it, by role only; staff see the wallet`, async () => {
     const { service, clock, liveId } = setup(make);
     await service.act(COIN, STREAMER, { kind: "mod", wallet: "modwallet", add: true });
     await service.act(COIN, "modwallet", { kind: "launch", text: "Will chat win this round?" });
     clock.t += MIN;
-    await service.act(COIN, "modwallet", { kind: "resolve", id: await liveId(), outcome: "cancel" });
+    await service.act(COIN, ORACLE, { kind: "resolve", id: await liveId(), outcome: "cancel" });
     for (const who of [null, "viewer"]) {
-      assert.deepEqual((await service.view(COIN, who)).resolved[0].resolvedBy, { role: "mod", wallet: null }, String(who));
+      assert.deepEqual((await service.view(COIN, who)).resolved[0].resolvedBy, { role: "admin", wallet: null }, String(who));
     }
     for (const who of [STREAMER, "modwallet"]) {
-      assert.deepEqual((await service.view(COIN, who)).resolved[0].resolvedBy, { role: "mod", wallet: "modwallet" }, who);
+      assert.deepEqual((await service.view(COIN, who)).resolved[0].resolvedBy, { role: "admin", wallet: ORACLE }, who);
     }
   });
 
@@ -468,7 +471,7 @@ for (const [name, make] of STORES) {
     for (let i = 0; i < 6; i++) {
       await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?` });
       clock.t += MIN;
-      await service.act(COIN, STREAMER, { kind: "resolve", id: await liveId(), outcome: "cancel" });
+      await service.act(COIN, ORACLE, { kind: "resolve", id: await liveId(), outcome: "cancel" });
     }
     await service.act(COIN, STREAMER, { kind: "mod", wallet: "modwallet", add: true });
     const viewer = await service.view(COIN, "a00");

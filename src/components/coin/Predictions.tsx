@@ -16,6 +16,7 @@ import { shortAddress } from "@/lib/format";
 import { fetchJson, postJson } from "@/lib/http";
 import { newNonce, MESSAGE_TTL_MS, sessionMessage, signInInput } from "@/lib/predictions/message";
 import {
+  WITNESS_NOTE_MAX,
   HEARTBEAT_MS,
   MAX_LIVE,
   MIN_HOLDING_COINS,
@@ -323,11 +324,13 @@ export function Predictions({
             initialSide={openSide}
             viewer={viewer}
             staff={staff !== null}
+            admin={me?.admin ?? false}
             busy={busy}
             amount={amount}
             onAmount={setAmount}
             onBet={(side) => act({ kind: "bet", id: p.id, side, amount: bet })}
             onResolve={(outcome) => act({ kind: "resolve", id: p.id, outcome })}
+            onWitness={(outcome, note) => act({ kind: "witness", id: p.id, outcome, ...(note ? { note } : {}) })}
           />
         ) : (
           <LiveRow
@@ -462,7 +465,10 @@ export function Predictions({
 
 type LiveView = PredictionsView["live"][number];
 
-/** A live prediction, open: countdown, pools (tap a side to bet), and the bet box or, for staff, the resolve buttons. */
+/**
+ * A live prediction, open: countdown, pools (tap a side to bet), and the bet box. Once betting
+ * closes, staff say what happened (a witness) and an admin, the memestream oracle, resolves.
+ */
 function LiveCard(props: {
   mint: string;
   source: string | null;
@@ -472,15 +478,24 @@ function LiveCard(props: {
   initialSide?: "yes" | "no" | null;
   viewer: boolean;
   staff: boolean;
+  admin: boolean;
   busy: boolean;
   amount: string;
   onAmount: (amount: string) => void;
   onBet: (side: Side) => void;
   onResolve: (outcome: Outcome) => void;
+  onWitness: (outcome: Side, note: string) => void;
 }) {
-  const { live, now, viewer, staff, busy, amount } = props;
+  const { live, now, viewer, staff, admin, busy, amount } = props;
   const locked = now !== null && now >= live.lockAt;
-  const resolve = staff ? <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} /> : null;
+  const resolve = (
+    <>
+      {locked && <WitnessLine witness={live.witness} />}
+      {staff && <WitnessButtons locked={locked} busy={busy} witness={live.witness} onWitness={props.onWitness} />}
+      {admin && !staff && locked && <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />}
+      {!admin && !staff && locked && <p className="mute pm-small">The memestream oracle resolves this.</p>}
+    </>
+  );
   if (marketUp(live.market)) {
     return (
       <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll source={props.source} betWindow={[live.launchedAt, live.lockAt]} initialTicket={props.initialSide}>
@@ -513,7 +528,7 @@ function LiveCard(props: {
         <SidePool side="yes" pools={live} onClick={viewer && !locked ? () => props.onBet("yes") : undefined} disabled={busy} />
         <SidePool side="no" pools={live} onClick={viewer && !locked ? () => props.onBet("no") : undefined} disabled={busy} />
       </div>
-      {staff ? (
+      {staff || (admin && locked) ? (
         resolve
       ) : (
         <div className="pm-bet num">
@@ -624,6 +639,36 @@ const RESOLVE_LABELS: Record<Outcome, string> = { yes: "Resolve Yes", no: "Resol
 /** After betting closes: Yes green, No red, Cancel off. */
 const RESOLVE_CLASSES: Record<Outcome, string> = { yes: "buy", no: "pm-no", cancel: "off" };
 
+/** What the streamer or a mod said happened, shown under a closed prediction. */
+function WitnessLine({ witness }: { witness: LiveView["witness"] }) {
+  if (!witness) return null;
+  return (
+    <p className="mute pm-small">
+      The {witness.role} says: <strong>{witness.outcome === "yes" ? "Yes" : "No"}</strong>
+      {witness.note ? ` · "${witness.note}"` : ""}
+    </p>
+  );
+}
+
+/** Staff can't resolve: once betting closes they tell the oracle what happened, with an optional note. */
+function WitnessButtons({ locked, busy, witness, onWitness }: { locked: boolean; busy: boolean; witness: LiveView["witness"]; onWitness: (outcome: Side, note: string) => void }) {
+  const [note, setNote] = useState("");
+  if (!locked) return <p className="mute pm-small">When betting closes, tell memestream what happened. The memestream oracle resolves it.</p>;
+  return (
+    <div>
+      <p className="mute pm-small">What happened? The memestream oracle resolves it; your answer helps if there&apos;s a dispute.</p>
+      <input className="slot pm-amt" style={{ width: "100%", marginBottom: 8 }} placeholder="Optional note (what the stream showed)" maxLength={WITNESS_NOTE_MAX} value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
+      <div className="pm-res3">
+        {(["yes", "no"] as const).map((side) => (
+          <button key={side} type="button" className={`mbtn ${witness?.outcome === side ? RESOLVE_CLASSES[side] : "off"}`} disabled={busy} onClick={() => onWitness(side, note.trim())}>
+            {side === "yes" ? "It happened" : "It didn't"}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ResolveButtons({ locked, busy, onResolve }: { locked: boolean; busy: boolean; onResolve: (outcome: Outcome) => void }) {
   return (
     <div className="pm-res3">
@@ -657,7 +702,7 @@ function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
 function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void; bare?: boolean }) {
   const result = betOutcome(r.my, r.outcome);
   const { role, wallet } = r.resolvedBy;
-  const by = role === "auto" ? "auto-cancelled" : wallet ? `${role} ${shortAddress(wallet)}` : role;
+  const by = role === "auto" ? "auto-cancelled" : role === "admin" ? "memestream oracle" : wallet ? `${role} ${shortAddress(wallet)}` : role;
   const at = new Date(r.resolvedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
     <div className="pm-rr num">
@@ -677,6 +722,12 @@ function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result:
         </button>
       ) : (
         <span className="pm-flag mute">{r.my?.flagged ? "Flagged" : ""}</span>
+      )}
+      {r.witness && r.verdict && r.verdict.status !== "final" && (
+        <span className="mute pm-small" style={{ gridColumn: "1 / -1" }}>
+          The {r.witness.role} says: {r.witness.outcome === "yes" ? "Yes" : "No"}
+          {r.witness.note ? ` · "${r.witness.note}"` : ""}
+        </span>
       )}
     </div>
   );

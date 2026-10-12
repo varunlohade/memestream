@@ -61,6 +61,8 @@ export const MARKET_DECISION_MS = 24 * 60 * MINUTE_MS;
 export const CHALLENGE_BOND = 100;
 export const OVERTURN_REWARD = 50;
 export const CHALLENGE_REASON_MAX = 200;
+/** A streamer's or mod's witness note (what the stream showed) is cut to this many characters. */
+export const WITNESS_NOTE_MAX = 200;
 export const CHALLENGE_REASON_MIN = 5;
 /** Links (a market's official source, a challenge's evidence) are kept this short. */
 export const LINK_MAX = 200;

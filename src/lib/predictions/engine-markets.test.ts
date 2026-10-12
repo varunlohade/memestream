@@ -7,14 +7,17 @@ const MIN = 60_000;
 const T0 = 1_000_000_000;
 const STREAMER = "Streamer";
 const ADMIN = "Admin";
+/** The memestream oracle: the admin who resolves. */
+const ORACLE = "Oracle";
 const HOLDER = "Holder";
 const QUESTION = "Q".repeat(44);
 const viewer = (wallet: string): Actor => ({ wallet, eligible: true, holder: true, balance: 1_000 });
 const streamer: Actor = { wallet: STREAMER, eligible: true, holder: false, balance: 0 };
 const admin: Actor = { wallet: ADMIN, eligible: true, holder: false, balance: 0 };
+const oracle: Actor = { wallet: ORACLE, eligible: true, holder: false, balance: 0 };
 const holder = (balance = 500, shares = true): Actor => ({ wallet: HOLDER, eligible: true, holder: true, balance, shares });
-const on = (now: number, extra: Partial<Env> = {}): Env => ({ streamerSeenAt: now - MIN, markets: true, admins: [ADMIN], ...extra });
-const off = (now: number): Env => ({ streamerSeenAt: now - MIN });
+const on = (now: number, extra: Partial<Env> = {}): Env => ({ streamerSeenAt: now - MIN, markets: true, admins: [ADMIN, ORACLE], ...extra });
+const off = (now: number): Env => ({ streamerSeenAt: now - MIN, admins: [ORACLE] });
 /** The net points change for `wallet` in a result. */
 const delta = (r: Result, wallet: string) => r.moves.get(wallet)?.delta ?? 0;
 
@@ -36,7 +39,7 @@ function resolvedWith(outcome: "yes" | "no" | "cancel", { close = true, env = on
   game = applyMarketDone(game, { id, kind: "create" }, QUESTION, T0, env(T0)).game;
   game = apply(game, { kind: "bet", id, side: "no", amount: 10 }, viewer("v1"), T0 + 1_000, env(T0)).game;
   if (close) game = applyMarketDone(game, { id, kind: "close" }, null, LOCK, env(LOCK)).game;
-  game = apply(game, { kind: "resolve", id, outcome }, streamer, RESOLVED_AT, env(RESOLVED_AT)).game;
+  game = apply(game, { kind: "resolve", id, outcome }, oracle, RESOLVED_AT, env(RESOLVED_AT)).game;
   return { game, id };
 }
 const resolveJob = (game: Game, now: number, env = on(now)) => claim(game, now, env).jobs.find((j) => j.kind === "resolve");
@@ -45,7 +48,7 @@ test("markets off: a prediction goes live with no market, and no market step is 
   const game = launched(off);
   assert.equal(game.live[0].market, undefined);
   assert.equal(marketsDue(game, T0, off(T0)), false);
-  const resolved = apply(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, streamer, LOCK, off(LOCK)).game;
+  const resolved = apply(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, oracle, LOCK, off(LOCK)).game;
   assert.equal(resolved.resolved[0].market, undefined);
   assert.equal(marketsDue(resolved, WINDOW_END, off(T0)), false);
   assert.deepEqual(claim(resolved, WINDOW_END, off(T0)).jobs, []);
@@ -71,7 +74,7 @@ test("full life: create, close at lock, resolve YES only after the challenge win
   assert.deepEqual(close.jobs, [{ id, kind: "close" }]);
   game = applyMarketDone(close.game, { id, kind: "close" }, null, LOCK + 1_000, on(LOCK)).game;
   assert.equal(game.live[0].market?.closed, true);
-  game = apply(game, { kind: "resolve", id, outcome: "yes" }, streamer, LOCK + 2_000, on(LOCK)).game;
+  game = apply(game, { kind: "resolve", id, outcome: "yes" }, oracle, LOCK + 2_000, on(LOCK)).game;
   assert.equal(game.resolved[0].market?.closed, true, "the market moves with the result");
   assert.deepEqual(claim(game, LOCK + 2_000 + FLAG_WINDOW_MS).jobs, [], "the points flag window doesn't matter");
   const end = LOCK + 2_000 + MARKET_CHALLENGE_MS;
@@ -246,7 +249,7 @@ test("admins decide the outcome; the bond follows: upheld (lost), refund (back),
 
 test("audit L4: only admins decide, never the coin's streamer even if listed, and only markets that wait for one", () => {
   const { r, id } = challenged();
-  const streamerListed = (now: number) => on(now, { admins: [ADMIN, STREAMER] });
+  const streamerListed = (now: number) => on(now, { admins: [ADMIN, ORACLE, STREAMER] });
   assert.throws(() => apply(r.game, { kind: "decide", id, outcome: "yes" }, streamer, RESOLVED_AT + MIN, streamerListed(RESOLVED_AT)), /a coin they stream or mod/);
   assert.throws(() => apply(r.game, { kind: "decide", id, outcome: "yes" }, viewer("v1"), RESOLVED_AT + MIN, on(RESOLVED_AT)), /Only a memestream admin/);
   const { game, id: plain } = resolvedWith("yes");

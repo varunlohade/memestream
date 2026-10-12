@@ -50,6 +50,8 @@ function fakeMarkets() {
 }
 
 const ADMIN = "admin1";
+/** The memestream oracle: the admin who resolves. */
+const ORACLE = "oracle";
 
 function setup(markets: MarketDeps | null, closeWaitMs = 0) {
   const clock = { t: T0 };
@@ -68,7 +70,7 @@ function setup(markets: MarketDeps | null, closeWaitMs = 0) {
     defer: (task) => void deferred.push(task),
     markets,
     closeWaitMs,
-    admins: [ADMIN],
+    admins: [ADMIN, ORACLE],
   });
   const settle = async () => {
     while (deferred.length) await Promise.all(deferred.splice(0).map((task) => task()));
@@ -100,7 +102,7 @@ test("markets off: no market, no oracle calls, no registry; the view shows marke
   const id = await launch();
   assert.equal((await look()).live[0].market, null);
   clock.t += MIN;
-  await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
   clock.t += FLAG_WINDOW_MS;
   const view = await look();
   assert.equal(view.resolved[0].market, null);
@@ -126,7 +128,7 @@ test("markets on: create once after review, registered with its lockAt; close at
   assert.equal((await look()).live[0].market, "closed");
   assert.deepEqual(calls.slice(1), [`close ${id}`]);
 
-  await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
   clock.t += FLAG_WINDOW_MS;
   await look();
   assert.equal(calls.length, 2, "no resolve during the challenge window");
@@ -146,7 +148,7 @@ test("a cancel proposes a refund: on chain after the challenge window; then the 
   await look();
   clock.t += MIN;
   await look();
-  await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "cancel" });
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "cancel" });
   clock.t += FLAG_WINDOW_MS;
   await look();
   assert.ok(!calls.some((c) => c.startsWith("resolve")), "a cancel waits out the window like YES or NO");
@@ -237,7 +239,7 @@ async function proposed() {
   await env.look();
   env.clock.t += MIN;
   await env.look();
-  await env.service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+  await env.service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
   return { ...env, calls, holders, id };
 }
 
@@ -284,7 +286,7 @@ test("the close-due sweep closes trading at lockAt with nobody watching, and dro
   clock.t = lockAt;
   assert.deepEqual(await service.sweepMarkets(10), { swept: 1, listed: 1 });
   assert.equal(calls.at(-1), `close ${id}`, "closed by the sweep, no view needed");
-  await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: "yes" });
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
   clock.t += MARKET_CHALLENGE_MS;
   await service.sweepMarkets(10);
   assert.deepEqual(calls.slice(-2), [`resolve ${id} yes`, `redeem ${id}`]);

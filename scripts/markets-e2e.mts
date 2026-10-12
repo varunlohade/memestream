@@ -214,7 +214,9 @@ async function run() {
   check("lock: the server closed trading", true, "market closed");
   shot("closed", mint, viewer.publicKey.toBase58(), viewerSession);
 
-  await ok("POST", coinPath, { token: session.token, body: { kind: "resolve", id, outcome: "yes" } });
+  // The memestream oracle (an admin) resolves; the streamer can only say what happened.
+  await ok("POST", coinPath, { token: session.token, body: { kind: "witness", id, outcome: "yes", note: "gg typed in chat" } });
+  await ok("POST", coinPath, { token: adminSession.token, body: { kind: "resolve", id, outcome: "yes" } });
   log("resolve: the streamer proposed YES; the challenge window runs");
   const proposed = await waitFor("the proposal", (v) => v.resolved.find((x) => x.id === id && x.verdict?.status === "proposed"), 60_000);
   check("challenge window: the result is proposed, final at the window's end", proposed.verdict?.finalAt !== null, `final at ${new Date(proposed.verdict!.finalAt!).toISOString()}`);
