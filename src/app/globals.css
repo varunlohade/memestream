@@ -342,6 +342,8 @@ span.pm-flag { text-decoration: none; }
 .mk-admin a { color: var(--fg); }
 .mk .pm-rr { border-top: 4px solid rgba(255,255,255,.07); margin-top: 8px; padding-top: 8px; }
 @media (max-width: 640px) {
+  .mk-kv { font-size: 20px; flex-wrap: nowrap; }
+  .mk-big .mbtn { font-size: 17px; height: 76px; }
   .pm-row { grid-template-columns: 1fr auto; }
   .pm-row > :last-child { grid-column: 1 / -1; }
   .pm-rr { grid-template-columns: 1fr auto; }

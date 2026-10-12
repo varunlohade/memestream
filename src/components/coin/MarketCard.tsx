@@ -32,6 +32,9 @@ const cents = (probability: number) => `${Math.round(probability * 100)}¢`;
 const percent = (probability: number) => `${Math.round(probability * 100)}%`;
 const shares = (amount: string) => compact(Number(amount));
 const held = (amount: string | undefined) => Number(amount ?? 0) > 0;
+/** Leftovers a sell can leave (a few millionths of a share): not shown as a position. */
+const DUST_SHARES = 0.001;
+const shown = (amount: string | undefined) => Number(amount ?? 0) >= DUST_SHARES;
 
 function countdown(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
@@ -75,7 +78,7 @@ function positionLine(market: MarketView): string | null {
   const p = market.position;
   if (!p) return null;
   const parts = (["yes", "no"] as const)
-    .filter((side) => held(p[side]))
+    .filter((side) => shown(p[side]))
     .map((side) => `${shares(p[side])} ${side.toUpperCase()} shares · pays ${shares(p[side])} SOL if ${LABEL[side]}`);
   return parts.length ? `Your position: ${parts.join(" and ")}` : null;
 }
