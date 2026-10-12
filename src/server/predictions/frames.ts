@@ -1,0 +1,69 @@
+/**
+ * Still frames of a coin's stream for the AI check: the platform's public preview picture.
+ * Only Twitch and YouTube have one; URLs are built from a validated login or video id on two
+ * fixed hosts, never from a URL the user typed, and each fetch is time- and size-capped.
+ */
+import "server-only";
+import { parseStreamLink } from "@/lib/stream-link";
+
+const TWITCH_LOGIN = /^[a-z0-9_]{3,25}$/;
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+const FRAME_HOSTS = new Set(["static-cdn.jtvnw.net", "i.ytimg.com"]);
+const FETCH_TIMEOUT_MS = 5_000;
+export const MAX_FRAME_BYTES = 2 * 1024 * 1024;
+
+/** The preview URLs to try, best first; none for Kick, other hosts or a bad link. */
+export function frameUrls(streamUrl: string | null | undefined): string[] {
+  const link = parseStreamLink(streamUrl ?? "");
+  if (!link) return [];
+  const url = new URL(link.url);
+  if (link.platform === "twitch") {
+    const login = url.pathname.slice(1).toLowerCase();
+    return TWITCH_LOGIN.test(login) ? [`https://static-cdn.jtvnw.net/previews-ttv/live_user_${login}-1280x720.jpg`] : [];
+  }
+  if (link.platform === "youtube") {
+    const id = url.searchParams.get("v") ?? "";
+    return YOUTUBE_ID.test(id) ? ["maxresdefault_live", "hqdefault_live"].map((name) => `https://i.ytimg.com/vi/${id}/${name}.jpg`) : [];
+  }
+  return [];
+}
+
+export type Frame = { url: string; mime: string; base64: string };
+export type FrameDeps = { fetch?: typeof fetch; timeoutMs?: number };
+
+/** The first preview that loads as an image (no redirects: an offline Twitch channel redirects to a placeholder), or null. */
+export async function fetchFrame(urls: string[], deps: FrameDeps = {}): Promise<Frame | null> {
+  for (const url of urls) {
+    if (!FRAME_HOSTS.has(new URL(url).hostname) || !url.startsWith("https://")) continue;
+    const frame = await fetchOne(url, deps).catch(() => null);
+    if (frame) return frame;
+  }
+  return null;
+}
+
+async function fetchOne(url: string, deps: FrameDeps): Promise<Frame | null> {
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), deps.timeoutMs ?? FETCH_TIMEOUT_MS);
+  try {
+    const response = await (deps.fetch ?? fetch)(url, { redirect: "error", signal: abort.signal });
+    const mime = response.headers.get("content-type")?.split(";")[0].trim() ?? "";
+    if (!response.ok || !/^image\/(jpeg|png|webp)$/.test(mime) || !response.body) return null;
+    if (Number(response.headers.get("content-length") ?? 0) > MAX_FRAME_BYTES) return null;
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    const reader = response.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > MAX_FRAME_BYTES) {
+        await reader.cancel();
+        return null;
+      }
+      chunks.push(value);
+    }
+    return size > 0 ? { url, mime, base64: Buffer.concat(chunks).toString("base64") } : null;
+  } finally {
+    clearTimeout(timer);
+  }
+}

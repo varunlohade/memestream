@@ -12,6 +12,8 @@
  * A result counts for leaderboards and the asker reward only after its flag window, if not disputed.
  */
 import {
+  AI_CHECK_MAX_TRIES,
+  AI_CHECK_RETRY_MS,
   ASKER_REWARD,
   ASKER_REWARD_MIN_BETTORS,
   AUTO_CANCEL_CROWD_MS,
@@ -23,6 +25,7 @@ import {
   DEFAULT_WINDOW_MIN,
   DISPUTE_PERCENT,
   FLAG_WINDOW_MS,
+  FRAME_NOTE_MAX,
   MAX_BET,
   MAX_BETTORS,
   MAX_HISTORY,
@@ -67,6 +70,14 @@ export type PendingLaunch = { id: string; text: string; by: string; windowMin: n
 /** A short note for one wallet (or every staff wallet, `to: STAFF`) until `until`. */
 export type Notice = { to: string; text: string; until: number };
 export type BetRecord = { side: Side; amount: number; eligible: boolean };
+/** When a stream frame is grabbed for the AI check. */
+export type FrameKind = "launch" | "lock" | "resolve";
+/** A frame grabbed at `at`, as a short description (null: not described yet, or no frame). Never the image. */
+export type FrameNote = { kind: FrameKind; at: number; text: string | null };
+/** The AI check's second opinion on the streamer's result. */
+export type AiVerdict = "agree" | "disagree" | "unclear";
+/** An AI check waiting for its verdict: runs started so far, when the last one started, the frames grabbed earlier. */
+export type AiCheck = { tries: number; at: number; frames: FrameNote[] };
 /** The prediction that is live now: open for bets until `lockAt`, then waiting for a result. */
 export type Prediction = {
   id: string;
@@ -81,6 +92,8 @@ export type Prediction = {
   yes: number;
   no: number;
   bettors: number;
+  /** Frames grabbed for the AI check (only on a coin whose stream has frames, with the check set up). */
+  frames?: FrameNote[];
 };
 /**
  * A result, kept short: no per-wallet lists. Only while its flag window is open does it keep
@@ -101,6 +114,10 @@ export type Summary = {
   flags: number;
   disputed: boolean;
   open: FlagWindow | null;
+  /** The AI check's verdict; absent if no check ran. */
+  ai?: { verdict: AiVerdict; at: number };
+  /** Present while the AI check runs; the result counts only after it ends. */
+  check?: AiCheck;
 };
 export type FlagWindow = {
   /** Each bettor's [stake, payout, flagged (1) or not (0)]. */
@@ -151,7 +168,12 @@ export type Actor = { wallet: string; eligible: boolean; holder: boolean; balanc
  * Facts from outside the coin's document: when the streamer's own heartbeat last came in, and
  * when their current stream started (their first heartbeat after 2+ hours away).
  */
-export type Env = { streamerSeenAt: number | null; streamStartedAt?: number | null };
+export type Env = {
+  streamerSeenAt: number | null;
+  streamStartedAt?: number | null;
+  /** The coin's stream has frames and the AI check is set up (keys present). */
+  aiCheck?: boolean;
+};
 
 /** A balance change: `delta` points, allowed only if the balance is at least `floor` before it. */
 export type Movement = { delta: number; floor: number };
@@ -249,6 +271,67 @@ export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVe
   });
 }
 
+/** A frame to grab and describe for the live prediction. */
+export type CaptureTarget = { id: string; text: string; kind: FrameKind };
+/** A result to check: its question, the streamer's outcome, the frames grabbed before, and which run this is. */
+export type CheckTarget = { id: string; text: string; outcome: Side; frames: FrameNote[]; tries: number };
+
+const checkDue = (check: AiCheck, now: number) => check.tries < AI_CHECK_MAX_TRIES && (check.tries === 0 || now >= check.at + AI_CHECK_RETRY_MS);
+const capturesFor = (live: Prediction, now: number): FrameKind[] =>
+  (["launch", "lock"] as const).filter((kind) => (kind === "launch" || now >= live.lockAt) && !live.frames?.some((f) => f.kind === kind));
+/** Whether a frame grab or an AI check is due now. */
+export const aiDue = (game: Game, now: number, env: Env) =>
+  (Boolean(env.aiCheck) && game.live !== null && capturesFor(game.live, now).length > 0) || game.resolved.some((p) => p.check && checkDue(p.check, now));
+
+/**
+ * Claims every due frame grab (launch; lock once betting closes) and AI check run, like
+ * startReviews: committing this first means no other server starts the same one.
+ */
+export function startAi(state: Game, now: number, env: Env): Result & { captures: CaptureTarget[]; checks: CheckTarget[] } {
+  const captures: CaptureTarget[] = [];
+  const checks: CheckTarget[] = [];
+  const result = run(state, now, env, ({ game }) => {
+    const live = game.live;
+    if (env.aiCheck && live) {
+      for (const kind of capturesFor(live, now)) {
+        live.frames = [...(live.frames ?? []), { kind, at: now, text: null }];
+        captures.push({ id: live.id, text: live.text, kind });
+      }
+    }
+    for (const p of game.resolved) {
+      if (!p.check || !checkDue(p.check, now) || p.outcome === "cancel") continue;
+      p.check = { ...p.check, tries: p.check.tries + 1, at: now };
+      checks.push({ id: p.id, text: p.text, outcome: p.outcome, frames: p.check.frames, tries: p.check.tries });
+    }
+  });
+  return { ...result, captures, checks };
+}
+
+/** A grabbed frame's description (null: no frame). Only fills a claimed, empty note; anything else is left alone. */
+export function applyFrame(state: Game, target: CaptureTarget, text: string | null, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, ({ game }) => {
+    const notes = game.live?.id === target.id ? game.live.frames : game.resolved.find((p) => p.id === target.id)?.check?.frames;
+    const note = notes?.find((f) => f.kind === target.kind && f.text === null);
+    if (note && text) note.text = text.slice(0, FRAME_NOTE_MAX);
+  });
+}
+
+/**
+ * The AI check's verdict on a result (null: no evidence, so no check). A disagree marks it
+ * disputed, as bettors' flags do; since the result counts only after its check ends, a late
+ * verdict still keeps it off the leaderboards and the asker reward. A result already checked is left alone.
+ */
+export function applyAiVerdict(state: Game, id: string, verdict: AiVerdict | null, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, ({ game }) => {
+    const p = game.resolved.find((x) => x.id === id && x.check);
+    if (!p) return;
+    delete p.check;
+    if (!verdict) return;
+    p.ai = { verdict, at: now };
+    if (verdict === "disagree") p.disputed = true;
+  });
+}
+
 /** Runs the clock, then `step`, then the clock again (a step may free the slot for the next suggestion). */
 function run(state: Game, now: number, env: Env, step: (ctx: Ctx) => void): Result {
   const game: Game = structuredClone(state);
@@ -285,6 +368,7 @@ function tick(ctx: Ctx) {
   expireSuggestions(ctx);
   expireNotices(ctx);
   autoCancelUnresolved(ctx);
+  endStaleChecks(ctx);
   closeFlagWindows(ctx);
   launchCrowdPick(ctx);
 }
@@ -348,10 +432,19 @@ function autoCancelUnresolved(ctx: Ctx) {
   if (ctx.game.live && ctx.now >= autoCancelAt(ctx.game.live)) settle(ctx, "cancel", AUTO);
 }
 
-/** Results past their flag window count now (unless disputed); then only the last MAX_HISTORY stay. */
+/** An AI check whose every run failed (or never reported back) ends as "couldn't tell". */
+function endStaleChecks({ game, now }: Ctx) {
+  for (const p of game.resolved) {
+    if (!p.check || p.check.tries < AI_CHECK_MAX_TRIES || now < p.check.at + AI_CHECK_RETRY_MS) continue;
+    delete p.check;
+    p.ai = { verdict: "unclear", at: now };
+  }
+}
+
+/** Results past their flag window, with no AI check still running, count now (unless disputed); then only the last MAX_HISTORY stay. */
 function closeFlagWindows(ctx: Ctx) {
   const { game, now } = ctx;
-  for (const p of game.resolved) if (p.open && now >= p.resolvedAt + FLAG_WINDOW_MS) finalize(ctx, p);
+  for (const p of game.resolved) if (p.open && !p.check && now >= p.resolvedAt + FLAG_WINDOW_MS) finalize(ctx, p);
   game.resolved = game.resolved.filter((p, i) => p.open || i < MAX_HISTORY);
 }
 
@@ -407,7 +500,10 @@ function settle(ctx: Ctx, outcome: Outcome, by: string) {
   const eligible = Object.values(p.bets).filter((b) => b.eligible).length;
   const { id, text, asker, yes, no, bettors } = p;
   game.live = null;
-  game.resolved.unshift({ id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } });
+  const summary: Summary = { id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } };
+  // A YES/NO result gets an AI check when the coin's stream has frames; a cancel needs none.
+  if (outcome !== "cancel" && ctx.env.aiCheck) summary.check = { tries: 0, at: now, frames: p.frames ?? [] };
+  game.resolved.unshift(summary);
 }
 
 /** The flag window is over: the winnings count (unless disputed), the asker reward is settled, the lists go. */
@@ -581,9 +677,10 @@ function resolve(ctx: Ctx, actor: Actor, outcome: Outcome) {
   settle(ctx, outcome, actor.wallet);
 }
 
-function flagResult({ game }: Ctx, actor: Actor, id: string) {
+function flagResult({ game, now }: Ctx, actor: Actor, id: string) {
   const p = game.resolved.find((x) => x.id === id);
-  if (!p || !p.open) throw new GameError("Too late to flag");
+  // A result held open for its AI check takes no flags past its window.
+  if (!p || !p.open || now >= p.resolvedAt + FLAG_WINDOW_MS) throw new GameError("Too late to flag");
   if (!Object.hasOwn(p.open.results, actor.wallet)) throw new GameError("Only its bettors can flag a result");
   const mine = p.open.results[actor.wallet];
   if (mine[2]) throw new GameError("You already flagged this");

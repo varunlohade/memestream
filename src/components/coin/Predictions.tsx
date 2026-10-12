@@ -92,6 +92,20 @@ function ReviewTag() {
   return <span className="pm-otag pm-oc pm-closedtag">Under review</span>;
 }
 
+const AI_TAGS = {
+  checking: ["AI checking…", "pm-oc"],
+  agree: ["AI check: agrees", "pm-aiok"],
+  disagree: ["AI check: disagrees", "pm-ono"],
+  unclear: ["AI check: couldn't tell", "pm-oc"],
+} as const;
+
+/** The AI check's second opinion on a result; nothing if no check ran. */
+function AiTag({ ai }: { ai: PredictionsView["resolved"][number]["ai"] }) {
+  if (!ai) return null;
+  const [text, cls] = AI_TAGS[ai];
+  return <span className={`pm-otag pm-ai ${cls}`}>{text}</span>;
+}
+
 function OutcomeTag({ outcome }: { outcome: Outcome }) {
   if (outcome === "yes") return <span className="pm-otag pm-oy">Yes</span>;
   if (outcome === "no") return <span className="pm-otag pm-ono">No</span>;
@@ -478,6 +492,7 @@ function ResolvedRow({ result: r, staff, busy, onFlag }: { result: ResolvedResul
           {" "}
           {at}, {by}
         </span>
+        <AiTag ai={r.ai} />
       </span>
       <OutcomeTag outcome={r.outcome} />
       {r.disputed ? <span className="pm-otag pm-oc pm-dsp">Disputed</span> : <span />}

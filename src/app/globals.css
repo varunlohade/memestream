@@ -307,6 +307,8 @@ button.pm-pool:disabled { cursor: wait; }
 .pm-oc { background: #3E3E44; color: #D8D8DC; }
 .pm-dsp { font-size: 18px; color: #FF5A4E; }
 .pm-closedtag { font-size: 16px; padding: 4px 8px; }
+.pm-ai { display: table; margin-top: 4px; font-size: 15px; padding: 2px 6px; border-width: 2px; }
+.pm-aiok { background: #2F4A26; color: #B8E89A; }
 .pm-flag { font-size: 20px; color: var(--mute); text-decoration: underline; text-align: right; background: none; border: 0; padding: 0; }
 span.pm-flag { text-decoration: none; }
 .pm-free { font-size: 22px; color: var(--mute); text-align: center; margin-top: 14px; }
