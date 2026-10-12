@@ -21,3 +21,10 @@ test("without the test settings, the defaults stay", () => {
   assert.equal(DEFAULT_PREFIX, "memestream:pm:");
   assert.deepEqual(REAL_WAITS, { starterAfterMs: 10 * 60_000, eligibleAfterMs: 15 * 60_000 });
 });
+
+test("MEMESTREAM_PREDICTIONS_STARTER_MIN shortens only the starter wait, in production too, within 1-10 minutes", () => {
+  const prod = (v: string) => testSettings({ VERCEL_ENV: "production", MEMESTREAM_PREDICTIONS_STARTER_MIN: v }).waits;
+  assert.deepEqual(prod("2"), { ...REAL_WAITS, starterAfterMs: 2 * 60_000 });
+  for (const bad of ["0", "11", "1.5", "abc", ""]) assert.deepEqual(prod(bad), REAL_WAITS, bad);
+  assert.equal(testSettings({ VERCEL_ENV: "production", MEMESTREAM_PREDICTIONS_STARTER_MIN: "2", MEMESTREAM_PREDICTIONS_PREFIX: "x:" }).prefix, "memestream:pm:");
+});

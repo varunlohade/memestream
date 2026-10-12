@@ -14,10 +14,21 @@ const FAST_ELIGIBLE_AFTER_MS = 2 * MINUTE_MS;
 export type Waits = { starterAfterMs: number; eligibleAfterMs: number };
 export const REAL_WAITS: Waits = { starterAfterMs: STARTER_AFTER_MS, eligibleAfterMs: ELIGIBLE_AFTER_MS };
 
+/**
+ * MEMESTREAM_PREDICTIONS_STARTER_MIN (1-10, production too): minutes watched before the starter
+ * points, so Boss man can test rounds back to back. Unset or invalid: the real 10 minutes.
+ */
+function starterOverride(env: Record<string, string | undefined>): number | null {
+  const minutes = Number(env.MEMESTREAM_PREDICTIONS_STARTER_MIN);
+  return Number.isInteger(minutes) && minutes >= 1 && minutes * MINUTE_MS <= STARTER_AFTER_MS ? minutes * MINUTE_MS : null;
+}
+
 export function testSettings(env: Record<string, string | undefined> = process.env): { prefix: string; waits: Waits } {
-  if (env.VERCEL_ENV === "production") return { prefix: DEFAULT_PREFIX, waits: REAL_WAITS };
+  const starter = starterOverride(env);
+  const real = starter === null ? REAL_WAITS : { ...REAL_WAITS, starterAfterMs: starter };
+  if (env.VERCEL_ENV === "production") return { prefix: DEFAULT_PREFIX, waits: real };
   return {
     prefix: env.MEMESTREAM_PREDICTIONS_PREFIX || DEFAULT_PREFIX,
-    waits: env.MEMESTREAM_PREDICTIONS_FAST === "1" ? { starterAfterMs: FAST_STARTER_AFTER_MS, eligibleAfterMs: FAST_ELIGIBLE_AFTER_MS } : REAL_WAITS,
+    waits: env.MEMESTREAM_PREDICTIONS_FAST === "1" ? { starterAfterMs: FAST_STARTER_AFTER_MS, eligibleAfterMs: FAST_ELIGIBLE_AFTER_MS } : real,
   };
 }
