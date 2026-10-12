@@ -11,6 +11,9 @@ export const TAPE_MIN_RECENT = 5;
 export const TAPE_RECENT_SECONDS = 30 * 60;
 const TAPE_MAX_RACE = 8;
 
+/** Below this many items the tape also shows the graduation race. */
+const TAPE_MIN_ITEMS = 4;
+
 export function buildTape(coins: CoinView[], tradesByMint: Map<string, TradeView[]>, nowSeconds: number): TapeItem[] {
   if (coins.length === 0) return [];
   const symbolOf = new Map(coins.map((c) => [c.mint, c.symbol]));
@@ -42,9 +45,11 @@ export function buildTape(coins: CoinView[], tradesByMint: Map<string, TradeView
   );
 
   const recent = trades.filter(({ t }) => t.time !== null && nowSeconds - t.time <= TAPE_RECENT_SECONDS).length;
-  if (recent < TAPE_MIN_RECENT) {
+  // Quiet tape (few recent trades, or few items at all): add the coins racing to graduate, so it never
+  // loops one line. A full curve waiting to graduate counts too.
+  if (recent < TAPE_MIN_RECENT || items.length < TAPE_MIN_ITEMS) {
     const race = coins
-      .filter((c) => c.status === "trading")
+      .filter((c) => c.status !== "graduated")
       .sort((a, b) => b.progress - a.progress)
       .slice(0, TAPE_MAX_RACE)
       .map((c): TapeItem => ({ kind: "race", mint: c.mint, symbol: c.symbol, progress: c.progress }));
