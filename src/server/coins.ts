@@ -12,6 +12,7 @@ import { lpPositionsOf, unclaimedPoolFees } from "@/lib/damm/positions";
 import { baseUnitsToCoins, lamportsToSol } from "@/lib/dbc/units";
 import { shareInFlight } from "@/lib/in-flight";
 import { isCanonicalTicker } from "@/lib/short-link";
+import { hiddenCreators, withoutHiddenCreators } from "@/lib/hidden-coins";
 import { buildTape } from "@/lib/tape";
 import { streamLinkFromUri } from "@/lib/stream-link";
 import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
@@ -105,6 +106,14 @@ async function refreshList(allowScan: () => Promise<boolean>): Promise<CoinView[
     }
     throw error;
   }
+}
+
+/**
+ * The coins the public lists show (home, tape, /api/coins): listCoins minus our own test coins,
+ * whose creators are in MEMESTREAM_HIDDEN_CREATORS. Same cache and budget; direct links still use listCoins.
+ */
+export async function listPublicCoins(): Promise<CoinView[]> {
+  return withoutHiddenCreators(await listCoins(), hiddenCreators(process.env.MEMESTREAM_HIDDEN_CREATORS));
 }
 
 /** A coin's view plus the vault addresses its trade history needs. */
@@ -322,7 +331,7 @@ export async function getLaunchFeeSol(): Promise<string | null> {
  * trades coin pages have read. No extra RPC calls.
  */
 export async function getTape(): Promise<TapeItem[]> {
-  const coins = await listCoins();
+  const coins = await listPublicCoins();
   const tradesByMint = new Map<string, TradeView[]>();
   for (const [mint, entry] of coinCache) if (entry.value) tradesByMint.set(mint, entry.value.trades);
   return buildTape(coins, tradesByMint, Math.floor(Date.now() / 1000));
