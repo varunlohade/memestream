@@ -1,0 +1,97 @@
+/**
+ * Each market trades in two Meteora DAMM v2 pools: YES/wSOL and NO/wSOL (outcome = token A,
+ * wSOL = token B, both 9 decimals). A pool's price is SOL per outcome token, which is the
+ * market's probability for that side.
+ *
+ * The pools are concentrated on prices 0.001–1 SOL: no one pays more than a token can ever redeem
+ * for, and the seed liquidity goes further than over the full price range.
+ */
+import {
+  ActivationType,
+  BaseFeeMode,
+  CollectFeeMode,
+  deriveCustomizablePoolAddress,
+  getAmountAFromLiquidityDelta,
+  getBaseFeeParams,
+  getLiquidityDeltaFromAmountB,
+  getSqrtPriceFromPrice,
+  type PoolFeesParams,
+  Rounding,
+} from "@meteora-ag/cp-amm-sdk";
+import { NATIVE_MINT } from "@solana/spl-token";
+import type { Connection, PublicKey } from "@solana/web3.js";
+import type BN from "bn.js";
+import { type DammSnapshot, loadDammSnapshot } from "../damm/pool";
+import { questionIdFor, type MarketOdds, oddsFromPrices, priceFromSqrtPrice, type Side } from "./math";
+import { vaultKeys, type VaultKeys } from "./vault";
+
+export const OUTCOME_DECIMALS = 9;
+
+/** 1% swap fee, flat (no fee scheduler, no dynamic fee), paid in SOL to the market's LP (the server). */
+export const MARKET_FEE_BPS = 100;
+const sqrtPrice = (price: string) => getSqrtPriceFromPrice(price, OUTCOME_DECIMALS, OUTCOME_DECIMALS);
+export const PRICE_RANGE = { min: sqrtPrice("0.001"), max: sqrtPrice("1"), start: sqrtPrice("0.5") };
+/** Fees in SOL only, on a fixed price range (concentrated liquidity). */
+export const COLLECT_FEE_MODE = CollectFeeMode.OnlyB;
+export const ACTIVATION_TYPE = ActivationType.Timestamp;
+
+export function marketPoolFees(): PoolFeesParams {
+  const baseFee = getBaseFeeParams(
+    {
+      baseFeeMode: BaseFeeMode.FeeTimeSchedulerLinear,
+      feeTimeSchedulerParam: { startingFeeBps: MARKET_FEE_BPS, endingFeeBps: MARKET_FEE_BPS, numberOfPeriod: 0, totalDuration: 0 },
+    },
+    OUTCOME_DECIMALS,
+    ACTIVATION_TYPE,
+  );
+  return { baseFee, compoundingFeeBps: 0, padding: 0, dynamicFee: null };
+}
+
+export type SeedPlan = {
+  /** Liquidity each pool starts with. */
+  liquidity: BN;
+  /** Outcome tokens each pool takes at 0.5: also the SOL to split into YES + NO. */
+  outcomeTokens: BN;
+  /** SOL each pool takes as its wSOL side. */
+  lamportsPerPool: BN;
+};
+
+/**
+ * Seeding with `lamportsPerPool` SOL on each pool's wSOL side at a 0.5 start price. On the 0.001–1
+ * range that needs ~0.61 outcome tokens per SOL, so the whole seed costs ~2.61× `lamportsPerPool`.
+ */
+export function seedPlan(lamportsPerPool: BN): SeedPlan {
+  const liquidity = getLiquidityDeltaFromAmountB(lamportsPerPool, PRICE_RANGE.min, PRICE_RANGE.start, COLLECT_FEE_MODE);
+  const outcomeTokens = getAmountAFromLiquidityDelta(PRICE_RANGE.start, PRICE_RANGE.max, liquidity, Rounding.Up, COLLECT_FEE_MODE);
+  return { liquidity, outcomeTokens, lamportsPerPool };
+}
+
+export type MarketKeys = VaultKeys & {
+  coinMint: PublicKey;
+  predictionId: string;
+  oracle: PublicKey;
+  questionId: Uint8Array;
+  pools: Record<Side, PublicKey>;
+};
+
+/** Every address of a market, from its coin, prediction and oracle: no lookups. */
+export function marketKeys(connection: Connection, coinMint: PublicKey, predictionId: string, oracle: PublicKey): MarketKeys {
+  const questionId = questionIdFor(coinMint, predictionId);
+  const vault = vaultKeys(connection, questionId, oracle);
+  const pool = (side: Side) => deriveCustomizablePoolAddress(vault.mints[side], NATIVE_MINT);
+  return { ...vault, coinMint, predictionId, oracle, questionId, pools: { yes: pool("yes"), no: pool("no") } };
+}
+
+export type MarketPools = Record<Side, DammSnapshot>;
+
+/** Both pools, or null if the market has no pools (not created, or a pool is missing). */
+export async function loadMarketPools(connection: Connection, keys: MarketKeys): Promise<MarketPools | null> {
+  const [yes, no] = await Promise.all([loadDammSnapshot(connection, keys.pools.yes), loadDammSnapshot(connection, keys.pools.no)]);
+  return yes && no ? { yes, no } : null;
+}
+
+/** Price and probability per side, from the pools' current prices. */
+export function marketOdds(pools: MarketPools): MarketOdds {
+  const price = (side: Side) => priceFromSqrtPrice(BigInt(pools[side].state.sqrtPrice.toString()));
+  return oddsFromPrices(price("yes"), price("no"));
+}
