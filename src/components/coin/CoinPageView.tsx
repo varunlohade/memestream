@@ -1,18 +1,20 @@
 "use client";
-import { useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { type CoinDetail, type CoinView, type HolderView, type Holdings, type TradeView, useCoin, useHolders, usePriceTrend } from "@/components/hooks";
 import { useTx } from "@/components/tx";
 import { noSubscription } from "@/components/no-subscription";
 import { useHostname } from "@/components/use-hostname";
-import { Scene, StepChart, useTexture, XpBar } from "@/components/pixel/Pixel";
+import { Scene, useTexture, XpBar } from "@/components/pixel/Pixel";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
 import { LiveBadge } from "@/components/ui/LiveBadge";
 import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, formatSol, shortAddress, SIDE_LABEL, signedPercent } from "@/lib/format";
 import { solscanAccount, solscanTx } from "@/lib/explorer";
+import { priceSeries } from "@/lib/price-series";
 import { parseStreamLink } from "@/lib/stream-link";
 import { Predictions } from "./Predictions";
+import { PriceChart } from "./PriceChart";
 import { TradeBox } from "./TradeBox";
 
 function StreamEmbed({ coin }: { coin: CoinView }) {
@@ -233,7 +235,8 @@ export function CoinPageView({
   const { address } = useWallet();
   const { data, refresh } = useCoin(mint, address, initial);
   const detail = data ?? initial;
-  const { prices, change } = usePriceTrend(detail);
+  const { change } = usePriceTrend(detail);
+  const points = useMemo(() => priceSeries(detail.trades), [detail.trades]);
   const { data: holderData } = useHolders(mint);
   const holders = holderData?.holders ?? null;
   const [tab, setTab] = useState<CoinTab>("trades");
@@ -267,7 +270,7 @@ export function CoinPageView({
           <StreamEmbed coin={coin} />
         </div>
         <section className="p cp-chart" aria-label="Price chart">
-          {prices.length >= 2 ? <StepChart values={prices} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
+          {points.length > 0 ? <PriceChart points={points} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
         </section>
         <div className="cp-tabs">
           <div className="sort" role="group" aria-label="Trades, predictions and holders">
