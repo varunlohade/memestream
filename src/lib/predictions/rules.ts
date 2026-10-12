@@ -77,8 +77,8 @@ export const STREAM_GAP_MS = 120 * MINUTE_MS;
 /** After a result, bettors can flag it for this long; then it counts (leaderboard, asker reward) unless disputed. */
 export const FLAG_WINDOW_MS = 10 * MINUTE_MS;
 /**
- * Caps that keep a coin's whole game document under about 256 KB, since every action and GET
- * reads it and every action rewrites it (doc-size.test.ts builds one at full caps).
+ * Caps that keep each of a coin's game documents under about 256 KB, since every action and GET
+ * reads them and every action rewrites them (doc-size.test.ts builds a game at full caps).
  * Waiting suggestions per coin.
  */
 export const MAX_QUEUE = 25;

@@ -3,9 +3,10 @@ import { createHmac, generateKeyPairSync, sign } from "node:crypto";
 import { test } from "node:test";
 import bs58 from "bs58";
 import { MESSAGE_TTL_MS, sessionMessage } from "@/lib/predictions/message";
-import { FLAG_WINDOW_MS } from "@/lib/predictions/rules";
+import { FLAG_WINDOW_MS, MAX_LIVE } from "@/lib/predictions/rules";
 import { newProfile, utcDay } from "@/lib/predictions/watch";
 import { walletFromToken } from "./identity";
+import { gameKeys } from "./game-doc";
 import { jevAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { type CoinFacts, ContentionError, ipBucket, predictionsService } from "./service";
@@ -319,6 +320,38 @@ for (const [name, make] of STORES) {
     assert.equal(await balance("w"), 10);
     const mine = (await service.view(COIN, "w")).live.map((p) => p.myBet?.amount ?? 0);
     assert.equal(mine[0] + mine[1], 90, "every accepted bet counted once, on its own prediction");
+  });
+
+  test(`${name}: MAX_LIVE live at once, each in its own document: bets, results and payouts stay per prediction`, async () => {
+    const { service, clock, fund, balance, store } = setup(make);
+    await fund("a", 10_000);
+    await fund("b", 10_000);
+    for (let i = 0; i < MAX_LIVE; i++) await service.act(COIN, STREAMER, { kind: "launch", text: `Streamer question ${i}?`, windowMin: 1 });
+    await assert.rejects(service.act(COIN, STREAMER, { kind: "launch", text: "One more question?" }), /already live/);
+    const ids = (await service.view(COIN, STREAMER)).live.map((p) => p.id);
+    assert.equal(ids.length, MAX_LIVE);
+    for (const [i, id] of ids.entries()) {
+      await service.act(COIN, "a", { kind: "bet", id, side: "yes", amount: 10 + i });
+      await service.act(COIN, "b", { kind: "bet", id, side: "no", amount: 20 });
+    }
+    const slots = (await store.read(gameKeys(COIN))).slice(1, 1 + MAX_LIVE);
+    assert.ok(slots.every((d) => d.json !== null), "every live prediction has its own document");
+    const coinDoc = (await store.read([`coin:${COIN}`]))[0].json!;
+    assert.ok(!coinDoc.includes('"bets"'), "the coin document holds no bets");
+
+    clock.t += MIN;
+    const before = await Promise.all(["a", "b"].map(balance));
+    for (const [i, id] of ids.entries()) await service.act(COIN, STREAMER, { kind: "resolve", id, outcome: i % 2 ? "cancel" : "yes" });
+    // YES: a wins b's 20 on top of their own stake; cancel: both refunded.
+    const want = ids.map((_, i) => (i % 2 ? [10 + i, 20] : [10 + i + 20, 0]));
+    const after = await Promise.all(["a", "b"].map(balance));
+    assert.deepEqual(after.map((x, w) => x - before[w]), [0, 1].map((w) => want.reduce((t, pair) => t + pair[w], 0)));
+    const view = await service.view(COIN, "a");
+    assert.deepEqual(view.live, []);
+    const expected = ids.map((id, i) => [id, i % 2 ? "cancel" : "yes", 10 + i, want[i][0]]).reverse();
+    assert.deepEqual(view.resolved.map((r) => [r.id, r.outcome, r.my?.bet, r.my?.payout]), expected.slice(0, view.resolved.length), "newest first, each with its own stake and payout");
+    const left = (await store.read(gameKeys(COIN))).slice(1, 1 + MAX_LIVE);
+    assert.ok(left.every((d) => d.json === null), "resolved predictions' documents are deleted");
   });
 
   test(`${name}: auto-cancel refunds everyone after 60 minutes unresolved`, async () => {

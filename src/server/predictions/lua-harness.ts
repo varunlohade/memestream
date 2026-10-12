@@ -47,6 +47,13 @@ function fakeDb(now: () => number) {
         strings.set(a[0], { value: a[1], until: now() + Number(a[3]) });
         return { ok: "OK" };
       }
+      case "DEL": {
+        const existed = live(a[0]) || alive(a[0]) ? 1 : 0;
+        strings.delete(a[0]);
+        hashes.delete(a[0]);
+        expires.delete(a[0]);
+        return existed;
+      }
       case "EXISTS":
         return live(a[0]) || alive(a[0]) ? 1 : 0;
       case "HGET":

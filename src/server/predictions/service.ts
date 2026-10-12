@@ -14,7 +14,7 @@ import { AI_CHECK_MAX_TRIES, FLAG_WINDOW_MS, MAX_EARNING_WALLETS_PER_IP, MAX_PRE
 import type { LeaderRow, PredictionsView, Standing } from "@/lib/predictions/view";
 import { heartbeat, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
-import { parseGame } from "./game-doc";
+import { GAME_KEY_COUNT, gameKeys, loadGame } from "./game-doc";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
 import { REAL_WAITS, type Waits } from "./test-settings";
@@ -57,7 +57,6 @@ export class ContentionError extends Error {}
 /** Not a memestream coin. */
 export class UnknownCoinError extends Error {}
 
-const coinKey = (mint: string) => `coin:${mint}`;
 const watchKey = (wallet: string) => `watch:${wallet}`;
 const presenceKey = (mint: string) => `presence:${mint}`;
 /** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
@@ -230,6 +229,12 @@ export function predictionsService(deps: ServiceDeps) {
     throw new ContentionError("Busy, try again");
   }
 
+  /** The coin's game (its document and every live slot) and the `extra` documents, in one read. */
+  async function readGame(mint: string, creator: string, extra: string[]) {
+    const docs = await store.read([...gameKeys(mint), ...extra]);
+    return { ...loadGame(mint, docs.slice(0, GAME_KEY_COUNT), creator), extra: docs.slice(GAME_KEY_COUNT) };
+  }
+
   async function facts(mint: string) {
     const coin = await deps.coin(mint);
     if (!coin) throw new UnknownCoinError("Coin not found");
@@ -290,12 +295,11 @@ export function predictionsService(deps: ServiceDeps) {
     // the re-send answers "replay" and the action counts once.
     const once = { key: `act:${randomUUID()}`, ttlMs: ACT_ONCE_TTL_MS };
     await retryOnConflict(async () => {
-      const [coinDoc, watchDoc, presenceDoc] = await store.read([coinKey(mint), watchKey(wallet), presenceKey(mint)]);
+      const { game, save, extra: [watchDoc, presenceDoc] } = await readGame(mint, creator, [watchKey(wallet), presenceKey(mint)]);
       const [balance] = await store.balances([wallet]);
-      const game = parseGame(coinDoc.json, creator);
       const eligible = isEligible(parseProfile(watchDoc.json), waits.eligibleAfterMs);
       const result = apply(game, action, { wallet, eligible, holder, balance }, now(), { ...parseEnv(presenceDoc.json), aiCheck });
-      const status = await store.commit({ docs: [{ key: coinKey(mint), v: coinDoc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result), nonce: once });
+      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
       return RETRY;
@@ -310,19 +314,18 @@ export function predictionsService(deps: ServiceDeps) {
   async function ticked(mint: string, coin: CoinFacts): Promise<{ game: Game; env: Env }> {
     const { creator } = coin;
     for (let i = 0; i < TICK_COMMIT_ATTEMPTS; i++) {
-      const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
+      const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
       const env = { ...parseEnv(presenceDoc.json), aiCheck: aiOn(coin) };
-      const game = parseGame(doc.json, creator);
       const result = apply(game, { kind: "tick" }, null, now(), env);
       if (reviewsDue(result.game, now())) startReviewing(mint, creator);
       if (aiDue(result.game, now(), env)) startAiRun(mint, coin);
       if (!result.changed) return { game, env };
-      const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
+      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       if (status === "ok") return { game: result.game, env };
     }
     // Others are saving the same tick; show what's stored.
-    const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
-    return { game: parseGame(doc.json, creator), env: parseEnv(presenceDoc.json) };
+    const { game, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
+    return { game, env: parseEnv(presenceDoc.json) };
   }
 
   /** Coins with a review run in flight in this process (another process is held off by the claim). */
@@ -345,10 +348,10 @@ export function predictionsService(deps: ServiceDeps) {
    * next try; it is never approved by default.
    */
   async function reviewDue(mint: string, creator: string) {
-    const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
-    const claim = startReviews(parseGame(doc.json, creator), now(), parseEnv(presenceDoc.json));
+    const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
+    const claim = startReviews(game, now(), parseEnv(presenceDoc.json));
     if (claim.due.length === 0) return;
-    const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(claim.game) }], ...ledgerChanges(claim) });
+    const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     await Promise.all(claim.due.map((target) => reviewOne(mint, creator, target)));
   }
@@ -362,10 +365,10 @@ export function predictionsService(deps: ServiceDeps) {
       return;
     }
     await retryOnConflict(async () => {
-      const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
-      const result = applyReview(parseGame(doc.json, creator), target, verdict, now(), parseEnv(presenceDoc.json));
+      const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
+      const result = applyReview(game, target, verdict, now(), parseEnv(presenceDoc.json));
       if (!result.changed) return true;
-      const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
+      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
   }
@@ -389,10 +392,10 @@ export function predictionsService(deps: ServiceDeps) {
   /** Commits `step`'s result to the coin's game, re-reading on a conflict; nothing to save is fine. */
   const commitGame = (mint: string, creator: string, step: (game: Game, env: Env) => ReturnType<typeof apply>) =>
     retryOnConflict(async () => {
-      const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
-      const result = step(parseGame(doc.json, creator), parseEnv(presenceDoc.json));
+      const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
+      const result = step(game, parseEnv(presenceDoc.json));
       if (!result.changed) return true;
-      const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(result.game) }], ...ledgerChanges(result) });
+      const status = await store.commit({ docs: save(result.game), ...ledgerChanges(result) });
       return status === "ok" ? true : RETRY;
     });
 
@@ -401,10 +404,10 @@ export function predictionsService(deps: ServiceDeps) {
     const ai = deps.ai;
     const streamUrl = coin.streamUrl;
     if (!ai || !streamUrl || !aiOn(coin)) return;
-    const [doc, presenceDoc] = await store.read([coinKey(mint), presenceKey(mint)]);
-    const claim = startAi(parseGame(doc.json, coin.creator), now(), { ...parseEnv(presenceDoc.json), aiCheck: true });
+    const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
+    const claim = startAi(game, now(), { ...parseEnv(presenceDoc.json), aiCheck: true });
     if (claim.captures.length === 0 && claim.checks.length === 0) return;
-    const status = await store.commit({ docs: [{ key: coinKey(mint), v: doc.v, json: JSON.stringify(claim.game) }], ...ledgerChanges(claim) });
+    const status = await store.commit({ docs: save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     await Promise.all([
       ...claim.captures.map((target) => captureOne(ai, mint, coin.creator, streamUrl, target)),
