@@ -7,12 +7,13 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint src scripts test",
-    "test": "tsx --test 'src/**/*.test.ts'",
+    "test": "tsx --conditions=react-server --test 'src/**/*.test.ts'",
     "test:surfpool": "tsx --conditions=react-server --test --test-timeout=180000 'test/integration/*.surfpool.ts'",
     "dev:chain": "tsx scripts/dev-chain.ts",
     "test:clock": "tsx --test 'test/integration/*.slow.ts'",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run lint && npm test && npm run test:surfpool && NEXT_DIST_DIR=.next-check npm run build"
+    "check:bundle": "test -d .next-check/static && ! grep -rliE typesafe .next-check/static",
+    "check": "npm run typecheck && npm run lint && npm test && npm run test:surfpool && NEXT_DIST_DIR=.next-check npm run build && npm run check:bundle"
   },
   "dependencies": {
     "@meteora-ag/cp-amm-sdk": "^1.4.5",

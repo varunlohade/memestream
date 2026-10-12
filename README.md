@@ -50,6 +50,11 @@ the streamer) is proven on Meteora's real programs in `test/integration/mainnet-
 - **Can't pay twice:** reloads, second tabs and fast double clicks still make exactly one trade.
 - **Never fills worse than the price you saw:** a moved price makes the trade fail, not fill worse.
 - **Live ticker tape** of trades and graduations.
+- **Predictions (free points, no money)**, behind `MEMESTREAM_PREDICTIONS=1`: viewers suggest yes/no
+  questions and bet watch points. Every typed question shows "Under review" to its asker until jev
+  (TypeSafe's choice model, called from the server only) approves it; a failed check retries, then the
+  streamer or a mod approves or removes it by hand. Env: `TYPESAFE_API_KEY` (server only; without it
+  questions wait for staff) and `TYPESAFE_MODEL` (default `jev-latest`).
 
 ## Proof it works
 

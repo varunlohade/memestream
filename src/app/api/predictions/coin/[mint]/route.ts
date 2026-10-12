@@ -28,7 +28,7 @@ export const GET = withRpcGuard({ name: "predictions-coin", burst: 30, perSecond
 /**
  * POST /api/predictions/coin/<mint> { kind, ... } (session token) -> the updated view, or
  * { saved: true } if the action was saved but the view could not be read just then.
- * kind: suggest | upvote | bet | launch | remove | resolve | flag | mod | crowd. Free points only; there
+ * kind: suggest | upvote | bet | launch | remove | approve | resolve | flag | mod | crowd. Free points only; there
  * is no action that buys, sells or sends points.
  */
 export const POST = withRpcGuard({ name: "predictions-act", burst: 20, perSecond: 2 }, async (request: Request, { params }: RouteContext<"/api/predictions/coin/[mint]">) => {

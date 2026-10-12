@@ -28,6 +28,14 @@ export const SUGGEST_COST = 10;
 export const SUGGEST_TTL_MS = 20 * MINUTE_MS;
 export const QUESTION_MIN = 5;
 export const QUESTION_MAX = 80;
+/**
+ * AI review: every typed question waits "under review" until jev approves it. A failed check is
+ * tried again at most this often, this many times; then the streamer or a mod decides by hand.
+ */
+export const REVIEW_RETRY_MS = 15_000;
+export const REVIEW_MAX_TRIES = 5;
+/** A "Not approved" note shows to its asker for this long. */
+export const NOTICE_MS = 5 * MINUTE_MS;
 /** A suggestion goes live by itself with this many eligible upvotes, when nothing is live. */
 export const AUTO_LAUNCH_UPVOTES = 3;
 
@@ -62,6 +70,8 @@ export const FLAG_WINDOW_MS = 10 * MINUTE_MS;
  * Waiting suggestions per coin.
  */
 export const MAX_QUEUE = 25;
+/** "Not approved" notes kept per coin (the oldest goes first). */
+export const MAX_NOTICES = 30;
 /** Bettors per prediction. */
 export const MAX_BETTORS = 200;
 /** Upvoters kept in full per suggestion; beyond that, short fingerprints (for dedupe) up to MAX_UPVOTES. */

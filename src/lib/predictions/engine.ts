@@ -27,6 +27,7 @@ import {
   MAX_BETTORS,
   MAX_HISTORY,
   MAX_MODS,
+  MAX_NOTICES,
   MAX_PREDICTIONS_PER_STREAM,
   MAX_QUEUE,
   MAX_UPVOTERS_STORED,
@@ -35,8 +36,11 @@ import {
   MIN_BET,
   MIN_HOLDING_COINS,
   MINUTE_MS,
+  NOTICE_MS,
   type Outcome,
   payouts,
+  REVIEW_MAX_TRIES,
+  REVIEW_RETRY_MS,
   type Side,
   STREAMER_PRESENT_MS,
   SUGGEST_COST,
@@ -53,7 +57,15 @@ export type Suggestion = {
   /** Later upvoters, as short fingerprints (enough to refuse a second upvote). */
   extra: string[];
   upvotes: number;
+  /** Present while the AI review hasn't approved it: only its asker sees it (staff too, once stuck). */
+  review?: Review;
 };
+/** An AI review in progress: checks started so far, and when the last one started. */
+export type Review = { tries: number; at: number };
+/** A question the streamer or a mod typed, waiting for its review before it goes live. */
+export type PendingLaunch = { id: string; text: string; by: string; windowMin: number; at: number; review: Review };
+/** A short note for one wallet (or every staff wallet, `to: STAFF`) until `until`. */
+export type Notice = { to: string; text: string; until: number };
 export type BetRecord = { side: Side; amount: number; eligible: boolean };
 /** The prediction that is live now: open for bets until `lockAt`, then waiting for a result. */
 export type Prediction = {
@@ -111,6 +123,10 @@ export type Game = {
   resolved: Summary[];
   /** Net points won from bets on this stream, per wallet (top 100 only). */
   won: Record<string, number>;
+  /** A staff question under review (at most one; nothing else launches meanwhile). */
+  pending: PendingLaunch | null;
+  /** "Not approved" notes, newest last. */
+  notices: Notice[];
 };
 
 export type Action =
@@ -120,6 +136,7 @@ export type Action =
   | { kind: "bet"; side: Side; amount: number }
   | { kind: "launch"; id?: string; text?: string; windowMin?: number }
   | { kind: "remove"; id: string }
+  | { kind: "approve"; id: string }
   | { kind: "resolve"; outcome: Outcome }
   | { kind: "flag"; id: string }
   | { kind: "mod"; wallet: string; add: boolean }
@@ -151,6 +168,8 @@ const BALANCE_PER_BET_POINT = 2;
 export const CROWD = "crowd";
 /** `resolvedBy` for a prediction nobody resolved in time. */
 export const AUTO = "auto";
+/** `Notice.to` for a note every staff wallet sees. */
+export const STAFF = "staff";
 
 export const newGame = (creator: string): Game => ({
   creator,
@@ -163,12 +182,24 @@ export const newGame = (creator: string): Game => ({
   live: null,
   resolved: [],
   won: {},
+  pending: null,
+  notices: [],
 });
 
 export const isStaff = (game: Game, wallet: string) => wallet === game.creator || game.mods.includes(wallet);
 export const streamerPresent = (env: Env, now: number) => env.streamerSeenAt !== null && now - env.streamerSeenAt < STREAMER_PRESENT_MS;
 /** When a locked prediction nobody resolves cancels by itself (crowd picks sooner). */
 export const autoCancelAt = (live: Prediction) => live.lockAt + (live.launchedBy === CROWD ? AUTO_CANCEL_CROWD_MS : AUTO_CANCEL_MS);
+/** Every check failed: the streamer or a mod approves or removes it by hand. */
+export const reviewStuck = (review: Review) => review.tries >= REVIEW_MAX_TRIES;
+const reviewDue = (review: Review, now: number) => !reviewStuck(review) && (review.tries === 0 || now >= review.at + REVIEW_RETRY_MS);
+/** Whether any question is due a review check now. */
+export const reviewsDue = (game: Game, now: number) =>
+  [...game.suggestions, ...(game.pending ? [game.pending] : [])].some((item) => item.review && reviewDue(item.review, now));
+/** The question a verdict is about: a suggestion or the staff launch, by id. */
+export type ReviewTarget = { id: string; text: string };
+export type ReviewVerdict = { approved: true } | { approved: false; text: string };
+
 export const hasUpvoted = (suggestion: Suggestion, wallet: string) =>
   suggestion.upvoters.includes(wallet) || suggestion.extra.includes(upvoteFingerprint(wallet));
 /** Per-stream winnings as leaderboard rows, best first. */
@@ -180,6 +211,46 @@ const upvoteFingerprint = (wallet: string) => wallet.slice(0, FINGERPRINT_CHARS)
 
 /** Applies `action` by `actor` at `now`. Every action first runs the clock (expiry, auto-cancel, auto-launch). */
 export function apply(state: Game, action: Action, actor: Actor | null, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, (ctx) => {
+    if (action.kind === "tick") return;
+    if (!actor) throw new GameError("Sign in to play");
+    act(ctx, action, actor);
+  });
+}
+
+/**
+ * Starts a review of every question that is due one (never checked, or its last check started
+ * 15+ s ago and tries are left): counts the try and returns what to check. Committing this first
+ * claims the check, so two servers never check the same question at the same moment.
+ */
+export function startReviews(state: Game, now: number, env: Env = { streamerSeenAt: null }): Result & { due: ReviewTarget[] } {
+  const due: ReviewTarget[] = [];
+  const result = run(state, now, env, ({ game }) => {
+    const items = [...game.suggestions, ...(game.pending ? [game.pending] : [])];
+    for (const item of items) {
+      if (!item.review || !reviewDue(item.review, now)) continue;
+      item.review = { tries: item.review.tries + 1, at: now };
+      due.push({ id: item.id, text: item.text });
+    }
+  });
+  return { ...result, due };
+}
+
+/**
+ * A review's verdict. Approved: a suggestion joins the queue, a staff question goes live (its bet
+ * window starts now). Not approved: a suggestion leaves and its asker gets the 10 points back, a
+ * staff question is dropped (no launch used); either way the asker sees the note. A question no
+ * longer under review (decided by hand, expired, changed) is left alone.
+ */
+export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVerdict, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, (ctx) => {
+    if (verdict.approved) approveReview(ctx, target);
+    else rejectReview(ctx, target, verdict.text);
+  });
+}
+
+/** Runs the clock, then `step`, then the clock again (a step may free the slot for the next suggestion). */
+function run(state: Game, now: number, env: Env, step: (ctx: Ctx) => void): Result {
   const game: Game = structuredClone(state);
   const moves = new Map<string, Movement>();
   const won = new Map<string, number>();
@@ -195,11 +266,8 @@ export function apply(state: Game, action: Action, actor: Actor | null, now: num
   const ctx: Ctx = { game, credit, debit, won, now, env };
 
   tick(ctx);
-  if (action.kind !== "tick") {
-    if (!actor) throw new GameError("Sign in to play");
-    act(ctx, action, actor);
-    tick(ctx); // a resolve or launch may free the slot for the next suggestion
-  }
+  step(ctx);
+  tick(ctx);
   return { game, moves, won, changed: JSON.stringify(game) !== JSON.stringify(state) };
 }
 
@@ -215,6 +283,7 @@ type Ctx = {
 function tick(ctx: Ctx) {
   startNewStream(ctx);
   expireSuggestions(ctx);
+  expireNotices(ctx);
   autoCancelUnresolved(ctx);
   closeFlagWindows(ctx);
   launchCrowdPick(ctx);
@@ -226,9 +295,51 @@ function startNewStream({ game, env }: Ctx) {
   if (started !== null && started !== game.stream) Object.assign(game, { stream: started, launched: 0, won: {} });
 }
 
-/** Suggestions that didn't go live in 20 minutes expire; their 10 points are spent. */
-function expireSuggestions({ game, now }: Ctx) {
+/**
+ * Suggestions that didn't go live in 20 minutes expire; their 10 points are spent, unless the
+ * review never finished (then they come back). A staff question still under review goes too.
+ */
+function expireSuggestions({ game, now, credit }: Ctx) {
+  for (const s of game.suggestions) if (s.review && now >= s.at + SUGGEST_TTL_MS) credit(s.asker, SUGGEST_COST);
   game.suggestions = game.suggestions.filter((s) => now < s.at + SUGGEST_TTL_MS);
+  if (game.pending && now >= game.pending.at + SUGGEST_TTL_MS) game.pending = null;
+}
+
+function expireNotices({ game, now }: Ctx) {
+  game.notices = game.notices.filter((n) => now < n.until);
+}
+
+/** One note per wallet: a new one replaces the old; past MAX_NOTICES the oldest goes. */
+function notify({ game, now }: Ctx, to: string, text: string) {
+  game.notices = [...game.notices.filter((n) => n.to !== to), { to, text, until: now + NOTICE_MS }].slice(-MAX_NOTICES);
+}
+
+function approveReview(ctx: Ctx, target: ReviewTarget) {
+  const { game } = ctx;
+  const s = game.suggestions.find((x) => x.id === target.id && x.text === target.text && x.review);
+  if (s) {
+    delete s.review;
+    return;
+  }
+  const p = game.pending;
+  if (!p || p.id !== target.id || p.text !== target.text) return;
+  game.pending = null;
+  if (game.live || game.launched >= MAX_PREDICTIONS_PER_STREAM) return notify(ctx, STAFF, "Not launched: no slot was free");
+  launch(ctx, { id: p.id, text: p.text }, p.by, p.windowMin);
+}
+
+function rejectReview(ctx: Ctx, target: ReviewTarget, text: string) {
+  const { game } = ctx;
+  const s = game.suggestions.find((x) => x.id === target.id && x.text === target.text && x.review);
+  if (s) {
+    game.suggestions = game.suggestions.filter((x) => x !== s);
+    ctx.credit(s.asker, SUGGEST_COST);
+    return notify(ctx, s.asker, text);
+  }
+  const p = game.pending;
+  if (!p || p.id !== target.id || p.text !== target.text) return;
+  game.pending = null;
+  notify(ctx, STAFF, text);
 }
 
 /** A locked prediction nobody resolved cancels by itself: full refunds. */
@@ -246,14 +357,14 @@ function closeFlagWindows(ctx: Ctx) {
 /** The crowd picks: only while the streamer is here and has crowd picks on. */
 function launchCrowdPick(ctx: Ctx) {
   const { game, now } = ctx;
-  if (game.live || !game.crowdPicks || !streamerPresent(ctx.env, now) || game.launched >= MAX_PREDICTIONS_PER_STREAM) return;
+  if (game.live || game.pending || !game.crowdPicks || !streamerPresent(ctx.env, now) || game.launched >= MAX_PREDICTIONS_PER_STREAM) return;
   const top = [...game.suggestions]
-    .filter((s) => s.upvotes >= AUTO_LAUNCH_UPVOTES)
+    .filter((s) => !s.review && s.upvotes >= AUTO_LAUNCH_UPVOTES)
     .sort((a, b) => b.upvotes - a.upvotes || a.at - b.at || Number(a.id) - Number(b.id))[0];
   if (top) launch(ctx, top, CROWD, DEFAULT_WINDOW_MIN);
 }
 
-function launch(ctx: Ctx, from: Suggestion | { text: string }, by: string, windowMin: number) {
+function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string }, by: string, windowMin: number) {
   const { game, now } = ctx;
   let id: string;
   let asker: string | null = null;
@@ -263,7 +374,7 @@ function launch(ctx: Ctx, from: Suggestion | { text: string }, by: string, windo
     id = from.id;
     asker = from.asker;
   } else {
-    id = String(game.nextId++);
+    id = from.id ?? String(game.nextId++);
   }
   game.launched += 1;
   game.live = {
@@ -338,6 +449,8 @@ function act(ctx: Ctx, action: PlayerAction, actor: Actor) {
       return launchByStaff(ctx, actor, action);
     case "remove":
       return removeSuggestion(ctx, actor, action.id);
+    case "approve":
+      return approveByHand(ctx, actor, action.id);
     case "resolve":
       return resolve(ctx, actor, action.outcome);
     case "flag":
@@ -363,8 +476,9 @@ function requireLaunchesLeft(game: Game) {
   if (game.launched >= MAX_PREDICTIONS_PER_STREAM) throw new GameError(`This stream has had its ${MAX_PREDICTIONS_PER_STREAM} predictions`);
 }
 
+/** A suggestion in the queue (one still under review is hidden from everyone but its asker). */
 function findSuggestion(game: Game, id: string) {
-  const s = game.suggestions.find((x) => x.id === id);
+  const s = game.suggestions.find((x) => x.id === id && !x.review);
   if (!s) throw new GameError("That suggestion is gone");
   return s;
 }
@@ -385,7 +499,7 @@ function suggest(ctx: Ctx, actor: Actor, text: string) {
   const question = cleanedOrThrow(text);
   if (actor.balance < SUGGEST_COST) throw new GameError(`Suggesting costs ${SUGGEST_COST} points`);
   ctx.debit(actor.wallet, SUGGEST_COST, SUGGEST_COST);
-  game.suggestions.push({ id: String(game.nextId++), text: question, asker: actor.wallet, at: now, upvoters: [], extra: [], upvotes: 0 });
+  game.suggestions.push({ id: String(game.nextId++), text: question, asker: actor.wallet, at: now, upvoters: [], extra: [], upvotes: 0, review: { tries: 0, at: now } });
 }
 
 function upvote({ game }: Ctx, actor: Actor, id: string) {
@@ -423,17 +537,36 @@ function launchByStaff(ctx: Ctx, actor: Actor, action: ActionOf<"launch">) {
   const { game } = ctx;
   requireStaff(game, actor);
   if (game.live) throw new GameError("A prediction is already live");
+  if (game.pending) throw new GameError("A question is under review");
   requireLaunchesLeft(game);
   const windowMin = action.windowMin ?? DEFAULT_WINDOW_MIN;
   if (!(BET_WINDOWS_MIN as readonly number[]).includes(windowMin)) throw new GameError("Pick 1, 2, 5 or 10 minutes");
   if (action.id !== undefined) return launch(ctx, findSuggestion(game, action.id), actor.wallet, windowMin);
-  return launch(ctx, { text: cleanedOrThrow(action.text) }, actor.wallet, windowMin);
+  // A typed question goes live only once its review approves it.
+  game.pending = { id: String(game.nextId++), text: cleanedOrThrow(action.text), by: actor.wallet, windowMin, at: ctx.now, review: { tries: 0, at: ctx.now } };
 }
 
-function removeSuggestion({ game }: Ctx, actor: Actor, id: string) {
+/** A question staff may decide by hand: one whose every review check failed. */
+function stuckItem(game: Game, id: string): ReviewTarget | null {
+  const s = game.suggestions.find((x) => x.id === id && x.review && reviewStuck(x.review));
+  if (s) return s;
+  return game.pending?.id === id && reviewStuck(game.pending.review) ? game.pending : null;
+}
+
+function removeSuggestion(ctx: Ctx, actor: Actor, id: string) {
+  const { game } = ctx;
   requireStaff(game, actor);
+  const stuck = stuckItem(game, id);
+  if (stuck) return rejectReview(ctx, stuck, "Not approved by the streamer");
   const s = findSuggestion(game, id);
   game.suggestions = game.suggestions.filter((x) => x !== s); // its 10 points are spent, as on expiry
+}
+
+function approveByHand(ctx: Ctx, actor: Actor, id: string) {
+  requireStaff(ctx.game, actor);
+  const stuck = stuckItem(ctx.game, id);
+  if (!stuck) throw new GameError("That question is still being checked");
+  approveReview(ctx, stuck);
 }
 
 function resolve(ctx: Ctx, actor: Actor, outcome: Outcome) {
