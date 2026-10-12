@@ -13,6 +13,8 @@ import { DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
 import { compact, fractionOf, minusReserve } from "@/lib/format";
 import { postJson } from "@/lib/http";
 import type { MarketPreview, MarketView } from "@/lib/markets/record";
+import { CHALLENGE_BOND, CHALLENGE_REASON_MAX, LINK_MAX } from "@/lib/predictions/rules";
+import type { MarketVerdictView } from "@/lib/predictions/view";
 
 type Side = "yes" | "no";
 type Action = "buy" | "sell";
@@ -33,8 +35,13 @@ const held = (amount: string | undefined) => Number(amount ?? 0) > 0;
 
 function countdown(ms: number) {
   const s = Math.max(0, Math.ceil(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  const [h, m, sec] = [Math.floor(s / 3600), Math.floor((s % 3600) / 60), s % 60];
+  const mm = h > 0 ? String(m).padStart(2, "0") : String(m);
+  return `${h > 0 ? `${h}:` : ""}${mm}:${String(sec).padStart(2, "0")}`;
 }
+
+const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const OUTCOME_TEXT = { yes: "YES", no: "NO", refund: "refund (every share pays half)" } as const;
 
 /** The market's odds and the wallet's position, polled while `pollMs` is set. */
 function useMarket(mint: string, predictionId: string, wallet: string | null, pollMs: number | null) {
@@ -103,9 +110,21 @@ type CardProps = {
   poll: boolean;
   /** Shown under the card (the streamer's resolve buttons, or the result's flag row). */
   children?: ReactNode;
+  /** What it resolves from (the streamer's official link, or the stream), and when betting was open. */
+  source?: string | null;
+  betWindow?: [number, number] | null;
+  /** After the streamer's result: the proposal, its challenge window, and the final outcome. */
+  verdict?: MarketVerdictView;
+  proposed?: "yes" | "no" | "cancel";
+  /** Signed in to predictions (a challenge needs the session); an admin settles challenges. */
+  signedIn?: boolean;
+  admin?: boolean;
+  onChallenge?: (reason: string, link: string) => Promise<boolean>;
+  onDecide?: (decision: "uphold" | "overturn" | "void") => void;
 };
 
-export function MarketCard({ mint, predictionId, text, now, canBet, poll, children }: CardProps) {
+export function MarketCard(props: CardProps) {
+  const { mint, predictionId, text, now, canBet, poll, children, source, betWindow, verdict } = props;
   const { address, chain } = useWallet();
   const { run, locked } = useTx();
   const { market, error, refresh } = useMarket(mint, predictionId, address, poll ? ODDS_POLL_MS : null);
@@ -153,6 +172,15 @@ export function MarketCard({ mint, predictionId, text, now, canBet, poll, childr
         </span>
       </div>
       <div className="pm-q pm-big">{text}</div>
+      {source && (
+        <p className="mute pm-small mk-src">
+          Resolves from:{" "}
+          <a href={source} target="_blank" rel="noopener noreferrer">
+            {source}
+          </a>
+          {betWindow ? ` (stream window ${clock(betWindow[0])}–${clock(betWindow[1])})` : ""}
+        </p>
+      )}
       <div className="mk-bar" aria-hidden>
         <b className="mk-y" style={{ width: `${yes * 100}%` }} />
         <b className="mk-n" style={{ width: `${no * 100}%` }} />
@@ -194,9 +222,13 @@ export function MarketCard({ mint, predictionId, text, now, canBet, poll, childr
           }}
         />
       )}
+      {verdict && !market.resolved && <VerdictLine {...props} verdict={verdict} market={market} />}
       {result && (
         <div className="mk-result">
-          <span className="pm-small">{result.text}</span>
+          <span className="pm-small">
+            {verdict?.final ? `Final: ${OUTCOME_TEXT[verdict.final]}. ` : ""}
+            {result.text}
+          </span>
           {result.redeem && (
             <button type="button" className="mbtn buy" disabled={busy || locked} onClick={redeem}>
               {busy ? (status ?? "Preparing") : "Redeem"}
@@ -330,6 +362,93 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
       <button type="button" className={`mbtn ${side === "yes" ? "buy" : "mk-no"} mk-confirm`} disabled={!preview || locked || stage !== null} onClick={confirm}>
         {stage ?? (locked ? "Paused: checking your last trade" : "Confirm")}
       </button>
+    </div>
+  );
+}
+
+/**
+ * The challenge window on a resolved market: "Proposed: YES · final in 1:52:10" with Challenge for
+ * holders, "Disputed: under review" (admins see the reason and decide), or "Final: YES" until it's
+ * on chain. Final on chain shows in the result line with Redeem instead.
+ */
+function VerdictLine(props: CardProps & { verdict: NonNullable<MarketVerdictView>; market: MarketView }) {
+  const { verdict, market, now, proposed, signedIn, admin, onChallenge, onDecide } = props;
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const holds = held(market.position?.yes) || held(market.position?.no);
+  const side = proposed === "yes" || proposed === "no" ? proposed.toUpperCase() : null;
+
+  if (verdict.status === "final") {
+    return <p className="pm-small mk-verdict">Final: {verdict.final ? OUTCOME_TEXT[verdict.final] : ""}. Paying out shortly.</p>;
+  }
+  if (verdict.status === "disputed") {
+    const c = verdict.challenge;
+    return (
+      <div className="mk-verdict">
+        <p className="pm-small">
+          <span className="pm-otag pm-oc">Disputed</span> under review
+        </p>
+        {admin && c && (
+          <div className="mk-admin">
+            <p className="pm-small">
+              Proposed {side}. Challenge: “{c.reason}”
+              {c.link && (
+                <>
+                  {" "}
+                  <a href={c.link} target="_blank" rel="noopener noreferrer nofollow">
+                    evidence
+                  </a>
+                </>
+              )}
+            </p>
+            <div className="pm-res3">
+              {(["uphold", "overturn", "void"] as const).map((d) => (
+                <button key={d} type="button" className={`mbtn ${d === "uphold" ? "buy" : d === "overturn" ? "pm-no" : "off"}`} onClick={() => onDecide?.(d)}>
+                  {d === "uphold" ? `Uphold ${side}` : d === "overturn" ? "Overturn" : "Void"}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+  const left = verdict.finalAt !== null && now !== null ? verdict.finalAt - now : null;
+  const submit = async () => {
+    setBusy(true);
+    if (await onChallenge?.(reason, link)) setOpen(false);
+    setBusy(false);
+  };
+  return (
+    <div className="mk-verdict">
+      <div className="mk-result">
+        <span className="pm-small num">
+          Proposed: {side}
+          {left !== null ? ` · final in ${countdown(left)}` : ""}
+        </span>
+        {holds && !open && (
+          <button type="button" className="mbtn off" onClick={() => setOpen(true)} disabled={!signedIn} title={signedIn ? undefined : "Sign in to challenge"}>
+            Challenge
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mk-box">
+          <input className="slot pm-in" placeholder="Why is the result wrong?" maxLength={CHALLENGE_REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />
+          <input className="slot pm-in" placeholder="Link to proof (optional)" maxLength={LINK_MAX} value={link} onChange={(e) => setLink(e.target.value)} aria-label="Link to proof" />
+          <p className="mute pm-small">The bond is {CHALLENGE_BOND} points. You get it back if the result is overturned or voided.</p>
+          <div className="pm-qb">
+            <button type="button" className="mbtn buy" disabled={busy || reason.trim().length === 0} onClick={submit}>
+              Challenge, {CHALLENGE_BOND} points
+            </button>
+            <button type="button" className="mbtn off" onClick={() => setOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

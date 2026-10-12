@@ -190,7 +190,7 @@ export function CoinPageView({ mint, initial, predictions = false }: { mint: str
             <TradeList trades={trades} symbol={coin.symbol} />
           </div>
         </div>
-        {predictions && <Predictions mint={coin.mint} symbol={coin.symbol} />}
+        {predictions && <Predictions mint={coin.mint} symbol={coin.symbol} streamUrl={coin.streamUrl} />}
       </div>
       <div className="side">
         <section className="p" aria-label="Price and graduation">

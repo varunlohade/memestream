@@ -23,6 +23,7 @@ import {
   MIN_HOLDING_COINS,
   multiplier,
   type Outcome,
+  LINK_MAX,
   QUESTION_MAX,
   type Side,
   STARTER_POINTS,
@@ -138,13 +139,15 @@ function SidePool({ side, pools, onClick, disabled }: { side: Side; pools: { yes
   );
 }
 
-export function Predictions({ mint, symbol }: { mint: string; symbol: string }) {
+export function Predictions({ mint, symbol, streamUrl = null }: { mint: string; symbol: string; streamUrl?: string | null }) {
   const { address, signIn: walletSignIn } = useWallet();
   const [view, setView] = useState<PredictionsView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [amount, setAmount] = useState("50");
   const [question, setQuestion] = useState("");
+  /** The streamer's optional official source for a real-world question (markets resolve from it). */
+  const [sourceLink, setSourceLink] = useState("");
   const [windowMin, setWindowMin] = useState<number>(DEFAULT_WINDOW_MIN);
   const [board, setBoard] = useState<Board>("stream");
   /** The live prediction shown open when several are live (one at a time). */
@@ -257,7 +260,10 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
   };
   const launchOwn = async (e: FormEvent) => {
     e.preventDefault();
-    if (await act({ kind: "launch", text: question, windowMin })) setQuestion("");
+    if (await act({ kind: "launch", text: question, windowMin, ...(sourceLink.trim() ? { source: sourceLink.trim() } : {}) })) {
+      setQuestion("");
+      setSourceLink("");
+    }
   };
 
   const standings = view.leaderboard;
@@ -293,6 +299,7 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           <LiveCard
             key={p.id}
             mint={mint}
+            source={p.source ?? streamUrl}
             live={p}
             now={now}
             canBet={Boolean(address) && staff === null}
@@ -403,13 +410,39 @@ export function Predictions({ mint, symbol }: { mint: string; symbol: string }) 
           </button>
         </form>
       )}
+      {staff && (
+        <input
+          className="slot pm-in pm-source"
+          placeholder="Official source link for a real-world question (optional)"
+          maxLength={LINK_MAX}
+          value={sourceLink}
+          onChange={(e) => setSourceLink(e.target.value)}
+          aria-label="Official source link"
+        />
+      )}
       {viewer && notHolder && <p className="mute pm-small">Hold at least {MIN_HOLDING_COINS} ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
       {view.resolved.slice(0, RESOLVED_SHOWN).map((r) =>
         marketUp(r.market) ? (
           // Remounted when the market's step changes, so it reads the result once it's resolved.
-          <MarketCard key={`${r.id}:${r.market}`} mint={mint} predictionId={r.id} text={r.text} now={now} canBet={false} poll={false}>
+          <MarketCard
+            key={`${r.id}:${r.market}:${r.verdict?.status}`}
+            mint={mint}
+            predictionId={r.id}
+            text={r.text}
+            now={now}
+            canBet={false}
+            poll={false}
+            source={r.source ?? streamUrl}
+            betWindow={r.launchedAt !== null && r.lockAt !== null ? [r.launchedAt, r.lockAt] : null}
+            verdict={r.verdict}
+            proposed={r.outcome}
+            signedIn={Boolean(me)}
+            admin={me?.admin ?? false}
+            onChallenge={(reason, link) => act({ kind: "challenge", id: r.id, reason, ...(link.trim() ? { link: link.trim() } : {}) })}
+            onDecide={(decision) => void act({ kind: "decide", id: r.id, decision })}
+          >
             <ResolvedRow result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} bare />
           </MarketCard>
         ) : (
@@ -435,6 +468,7 @@ type LiveView = PredictionsView["live"][number];
 /** A live prediction, open: countdown, pools (tap a side to bet), and the bet box or, for staff, the resolve buttons. */
 function LiveCard(props: {
   mint: string;
+  source: string | null;
   live: LiveView;
   now: number | null;
   canBet: boolean;
@@ -451,7 +485,7 @@ function LiveCard(props: {
   const resolve = staff ? <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} /> : null;
   if (marketUp(live.market)) {
     return (
-      <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll>
+      <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll source={props.source} betWindow={[live.launchedAt, live.lockAt]}>
         {resolve}
       </MarketCard>
     );
