@@ -2,6 +2,25 @@
 
 Read this first in a new session. Everything below is current as of commit `acf473f` on `origin/main`.
 
+## NEXT TASK (Varun, 2026-10-14): the AI resolves first, the streamer is the fallback
+
+Varun's words: "let the ai check first if the said thing is true or not, if the ai doesnt say or
+response to it, let the streamer decide the prediction market results".
+
+Today the streamer resolves and the AI check is only a second opinion (a disagree goes to the admin). Change it to:
+1. **AI first:** when betting closes, the server runs the AI check: stream frames → vision description → jev,
+   asking whether it happened, YES or NO, at confidence ≥ 0.7 (the existing ai-check.ts pipeline). If the AI
+   answers YES or NO, that is the PROPOSED result. It goes through the existing 2 h challenge window, and
+   holders can still challenge. The card says "Proposed by AI: YES".
+2. **Streamer fallback:** if the AI says UNCLEAR, fails, times out or has no frames (YouTube often has none),
+   the streamer's Resolve Yes / No / Cancel buttons switch on, as today. The card says "AI couldn't tell, the
+   streamer decides".
+3. **Points-only predictions** follow the same rule.
+4. **Keep:** the challenge window, the admin decision on disputes, the 24 h auto-void, and no early resolve.
+5. **This is a money-path change** (it decides real-SOL market payouts). It needs tests, a fresh security
+   audit (prompt-injection via stream content can now steer the result directly, so the challenge window and
+   admin are the backstop), and UI previews (A/B/C) of the new card states before building the UI.
+
 ## Where things live
 
 | What | Where |
