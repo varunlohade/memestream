@@ -29,7 +29,7 @@ import {
 } from "@/lib/predictions/rules";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
-import { MarketCard, useMarket } from "./MarketCard";
+import { AI_WHY, MarketCard, useMarket } from "./MarketCard";
 
 const POLL_MS = 5_000;
 /** Faster while the viewer waits on a question under review, so its approval shows within seconds. */
@@ -492,7 +492,7 @@ function LiveCard(props: {
   const locked = now !== null && now >= live.lockAt;
   const resolve = (
     <>
-      {locked && <RefereeLine ai={live.ai} />}
+      {locked && <RefereeLine ai={live.ai} why={live.aiWhy} />}
       {locked && <WitnessLine witness={live.witness} />}
       {staff && <WitnessButtons locked={locked} decide={live.ai === "unclear"} busy={busy} onWitness={props.onWitness} />}
       {admin && !staff && locked && <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />}
@@ -501,6 +501,7 @@ function LiveCard(props: {
   if (marketUp(live.market)) {
     return (
       <MarketCard mint={props.mint} predictionId={live.id} text={live.text} now={now} canBet={props.canBet} poll source={props.source} betWindow={[live.launchedAt, live.lockAt]} initialTicket={props.initialSide}>
+        <RuleLine rule={live.rule} />
         {resolve}
       </MarketCard>
     );
@@ -513,6 +514,7 @@ function LiveCard(props: {
           <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
         </div>
         <div className="pm-q pm-big">{live.text}</div>
+        <RuleLine rule={live.rule} />
         <p className="mute pm-small">Opening market…</p>
         {resolve}
       </div>
@@ -525,6 +527,7 @@ function LiveCard(props: {
         <span className="num pm-clock">{now === null ? "" : locked ? "Betting closed" : `${countdown(live.lockAt - now)} left`}</span>
       </div>
       <div className="pm-q pm-big">{live.text}</div>
+      <RuleLine rule={live.rule} />
       {live.market === "failed" && <p className="mute pm-small">Market unavailable. Bet points instead.</p>}
       <div className="pm-pools">
         <SidePool side="yes" pools={live} onClick={viewer && !locked ? () => props.onBet("yes") : undefined} disabled={busy} />
@@ -546,7 +549,7 @@ function LiveCard(props: {
           <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${sideLabel(live.myBet.side)}` : ""}</span>
         </div>
       )}
-      {!staff && !admin && locked && <RefereeLine ai={live.ai} />}
+      {!staff && !admin && locked && <RefereeLine ai={live.ai} why={live.aiWhy} />}
     </div>
   );
 }
@@ -653,10 +656,15 @@ function WitnessLine({ witness }: { witness: LiveView["witness"] }) {
 }
 
 /** Where the result stands once betting closed: the AI referee checking, or the streamer deciding. */
-function RefereeLine({ ai }: { ai: LiveView["ai"] }) {
+function RefereeLine({ ai, why }: { ai: LiveView["ai"]; why: LiveView["aiWhy"] }) {
   if (ai === "checking") return <p className="mute pm-small">AI is checking the stream…</p>;
-  if (ai === "unclear") return <p className="mute pm-small">AI couldn&apos;t tell. The streamer decides.</p>;
+  if (ai === "unclear") return <p className="mute pm-small">AI couldn&apos;t tell{why ? ` (${AI_WHY[why]})` : ""}. The streamer decides.</p>;
   return null;
+}
+
+/** What the AI checks to decide the question (a hint it wrote once the question went live). */
+function RuleLine({ rule }: { rule: LiveView["rule"] }) {
+  return rule ? <p className="mute pm-small">AI checks: {rule}</p> : null;
 }
 
 /** Staff decide only when the AI referee couldn't tell (`decide`): YES or NO, with an optional note. */

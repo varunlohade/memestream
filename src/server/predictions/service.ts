@@ -8,11 +8,12 @@ import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, AI, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary, type Witness } from "@/lib/predictions/engine";
 import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
-import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, applyReferee, type CaptureTarget, type CheckTarget, type FrameNote, type RefereeAnswer, refereeState, type RefereeTarget, startAi } from "@/lib/predictions/engine";
+import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, applyReferee, applyRule, type CaptureTarget, type CheckTarget, type FrameNote, freshNotes } from "@/lib/predictions/engine";
+import { type RefereeAnswer, refereeState, type RefereeTarget, refereeWhy, type RuleTarget, startAi } from "@/lib/predictions/engine";
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
 import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
-import { AI_CHECK_MAX_TRIES, CHECK_RULE_MAX, DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
+import { AI_CHECK_MAX_TRIES, DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, MIN_MARKET_PICTURES, type Side, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, MarketStepView, PredictionsView, Standing, WitnessView } from "@/lib/predictions/view";
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { frameUrls } from "./frames";
@@ -42,6 +43,9 @@ export type MarketDeps = {
   redeemOracle: (record: MarketRecord) => Promise<unknown>;
 };
 
+/** One piece of evidence: what it shows (text only), a hash of the media, and when it was taken, if known. */
+export type Evidence = { hash: string; text: string; shot?: number };
+
 /**
  * Where the AI referee's evidence comes from, and how it decides: the seam a source plugs into
  * (today the platforms' preview pictures, see ai-check.ts; a video clip source can replace it). The
@@ -50,10 +54,11 @@ export type MarketDeps = {
  */
 export type EvidenceSource = {
   /**
-   * Evidence on the stream now, as a short description with a hash of what it saw; null if the stream
-   * has none now, or it is the same as one in `seen` (then no model is asked).
+   * Evidence on the stream now; null if the stream has none now, it is the same as one in `seen`
+   * (then no model is asked), or `spend` says the daily AI budget is used up. `spend` is called once
+   * right before each model call.
    */
-  capture: (streamUrl: string, question: string, rule: string | null, seen: string[]) => Promise<{ hash: string; text: string } | null>;
+  capture: (streamUrl: string, question: string, rule: string | null, seen: string[], spend: () => Promise<boolean>) => Promise<Evidence | null>;
   /** What happened, from the question, its rule and the notes only (never anyone's outcome); `lockAt`: when betting closed. */
   decide: (question: string, notes: FrameNote[], rule: string | null, lockAt: number | null) => Promise<{ happened: "yes" | "no" | "unclear"; confidence: number; model: string }>;
   /** The check rule for an approved question: what on stream decides YES or NO. */
@@ -81,6 +86,8 @@ export type ServiceDeps = {
   admins?: string[];
   /** The market challenge window (shorter only in test runs). */
   challengeMs?: number;
+  /** Model calls a day (UTC), across all coins and per coin; defaults AI_DAILY_CALLS and AI_DAILY_CALLS_PER_COIN. */
+  aiBudget?: { daily: number; perCoin: number };
   /** Runs a task after the response is sent (Next's `after`). */
   defer: (task: () => Promise<void>) => void;
   /** Commit attempts before answering "busy", and the pause between them. */
@@ -127,6 +134,9 @@ const QUEUE_SHOWN = 20;
 const RESOLVED_SHOWN = 5;
 const LEADERS_SHOWN = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
+/** The daily AI budget's defaults (MEMESTREAM_AI_DAILY_CALLS, MEMESTREAM_AI_DAILY_CALLS_PER_COIN). */
+export const AI_DAILY_CALLS = 5_000;
+export const AI_DAILY_CALLS_PER_COIN = 500;
 /** Characters of the keyed IP hash kept in its key (132 bits). */
 const IP_HASH_CHARS = 22;
 const IPV6_GROUPS = 8;
@@ -188,7 +198,7 @@ const standing = (board: LeaderRow[], wallet: string, fallback: number | undefin
 /** The top line shows winners only; a wallet's own standing can be below zero. */
 const topWinners = (board: LeaderRow[]) => board.filter((l) => l.points > 0).slice(0, LEADERS_SHOWN);
 
-function liveView(game: Game, wallet: string | null, now: number, env: Env): PredictionsView["live"] {
+function liveView(game: Game, wallet: string | null, now: number, env: Env, admin: boolean): PredictionsView["live"] {
   return game.live.map((live) => {
     const myBet = wallet ? live.bets[wallet] : undefined;
     return {
@@ -205,6 +215,8 @@ function liveView(game: Game, wallet: string | null, now: number, env: Env): Pre
       source: live.source ?? null,
       witness: witnessOf(game, live.witness),
       ai: refereeState(live, now, env),
+      aiWhy: admin && refereeState(live, now, env) === "unclear" ? refereeWhy(live, env) : null,
+      rule: live.rule ?? null,
     };
   });
 }
@@ -271,6 +283,7 @@ function verdictView(p: Summary, now: number, env: Env, admin: boolean): Predict
     finalAt: disputed || final ? null : challengeEndsAt(p, env),
     final,
     why: admin && disputed ? (c ? "challenge" : (waits?.why ?? null)) : null,
+    aiWhy: admin ? (p.fallback ?? null) : null,
     challenge: admin && c ? { by: c.by, at: c.at, reason: c.reason, link: c.link ?? null, bond: c.bond } : null,
   };
 }
@@ -305,6 +318,7 @@ const RETRY = Symbol("retry");
 export function predictionsService(deps: ServiceDeps) {
   const { store, now } = deps;
   const attempts = deps.attempts ?? DEFAULT_COMMIT_ATTEMPTS;
+  const aiBudget = deps.aiBudget ?? { daily: AI_DAILY_CALLS, perCoin: AI_DAILY_CALLS_PER_COIN };
   /** The coin's environment for the engine; markets follow the server flag. */
   const envOf = (presenceJson: string | null, extra: Partial<Env> = {}): Env => ({
     ...parseEnv(presenceJson),
@@ -399,9 +413,10 @@ export function predictionsService(deps: ServiceDeps) {
     const aiCheck = aiOn(coin);
     // Holding the coin is checked only where it matters (one cached read), not on every bet.
     const holder = action.kind === "suggest" || action.kind === "upvote" ? await deps.holds(mint, wallet) : false;
-    // A challenge needs shares of that market: one read of the wallet's YES/NO, only for challenges.
+    // A challenge needs shares of that market, and a streamer's decision must not come from a holder:
+    // one read of the wallet's YES/NO, only for those two actions.
     let shares = false;
-    if (action.kind === "challenge" && deps.markets) {
+    if ((action.kind === "challenge" || action.kind === "witness") && deps.markets) {
       const record = await market(mint, action.id);
       shares = record ? await deps.markets.holdsShares(record, wallet) : false;
     }
@@ -473,7 +488,6 @@ export function predictionsService(deps: ServiceDeps) {
     await Promise.all(claim.due.map((target) => reviewOne(mint, coin, target)));
   }
 
-  /** One review; an approved question on a coin with frames also gets the referee's check rule (none if writing it fails: the question alone is used). */
   async function reviewOne(mint: string, coin: CoinFacts, target: ReviewTarget) {
     const { creator } = coin;
     let verdict: ReviewVerdict;
@@ -482,13 +496,6 @@ export function predictionsService(deps: ServiceDeps) {
     } catch (error) {
       console.warn(`predictions: review check failed (${error instanceof Error ? error.message : "unknown error"}); it stays under review`);
       return;
-    }
-    if (verdict.approved && deps.ai && aiOn(coin)) {
-      const rule = await deps.ai.rule(target.text).catch((error: Error) => {
-        console.warn(`predictions: writing the check rule failed (${error.message}); the referee uses the question alone`);
-        return null;
-      });
-      verdict = { ...verdict, rule: rule?.slice(0, CHECK_RULE_MAX) ?? null };
     }
     await retryOnConflict(async () => {
       const { game, save, extra: [presenceDoc] } = await readGame(mint, creator, [presenceKey(mint)]);
@@ -533,34 +540,64 @@ export function predictionsService(deps: ServiceDeps) {
       return status === "ok" ? true : RETRY;
     });
 
-  /** Claims every due frame grab, referee run and check run (so no other server starts them), then runs them. */
+  /**
+   * Takes one model call from the daily AI budget (UTC day): the global count and the coin's, in one
+   * atomic commit. False once either is spent: the step is skipped (a referee then couldn't tell).
+   */
+  async function spendAi(mint: string): Promise<boolean> {
+    const day = utcDay(now());
+    const keys = [`ai-calls:${day}`, `ai-calls:${day}:${mint}`];
+    const limits = [aiBudget.daily, aiBudget.perCoin];
+    return retryOnConflict(async () => {
+      const docs = await store.read(keys);
+      const counts = docs.map((d) => (d.json ? Number(JSON.parse(d.json)) : 0));
+      if (counts.some((c, i) => c >= limits[i])) return false;
+      const status = await store.commit({ docs: keys.map((key, i) => ({ key, v: docs[i].v, json: JSON.stringify(counts[i] + 1), ttlMs: 2 * DAY_MS })), moves: [], won: [] });
+      return status === "ok" ? true : RETRY;
+    });
+  }
+
+  /** Claims every due rule, frame grab, referee run and check run (so no other server starts them), then runs them. */
   async function aiRun(mint: string, coin: CoinFacts) {
     const ai = deps.ai;
     const streamUrl = coin.streamUrl;
     if (!ai || !streamUrl || !aiOn(coin)) return;
     const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
     const claim = startAi(game, now(), envOf(presenceDoc.json, { aiCheck: true }));
-    if (claim.captures.length === 0 && claim.referees.length === 0 && claim.checks.length === 0) return;
+    if (claim.rules.length + claim.captures.length + claim.referees.length + claim.checks.length === 0) return;
     const status = await store.commit({ ...save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
+    const spend = () => spendAi(mint);
     await Promise.all([
-      ...claim.captures.map((target) => captureOne(ai, mint, coin.creator, streamUrl, target)),
-      ...claim.referees.map((target) => refereeOne(ai, mint, coin.creator, target)),
-      ...claim.checks.map((target) => checkOne(ai, mint, coin.creator, streamUrl, target)),
+      ...claim.rules.map((target) => ruleOne(ai, mint, coin.creator, target, spend)),
+      ...claim.captures.map((target) => captureOne(ai, mint, coin.creator, streamUrl, target, spend)),
+      ...claim.referees.map((target) => refereeOne(ai, mint, coin.creator, target, spend)),
+      ...claim.checks.map((target) => checkOne(ai, mint, coin.creator, streamUrl, target, spend)),
     ]);
   }
 
   /** The env for saving an AI step's result: the coin has the AI (its settle may need it). */
   const aiEnv = (env: Env): Env => ({ ...env, aiCheck: true });
 
+  /** The check rule for a prediction that just went live (a hint for the referee, shown on the card); a failure leaves none. */
+  async function ruleOne(ai: AiCheckDeps, mint: string, creator: string, target: RuleTarget, spend: () => Promise<boolean>) {
+    let rule: string | null = null;
+    try {
+      if (await spend()) rule = await ai.rule(target.text);
+    } catch (error) {
+      console.warn(`predictions: writing the check rule failed (${error instanceof Error ? error.message : "unknown error"}); the referee uses the question alone`);
+    }
+    if (rule) await commitGame(mint, creator, (game, env) => applyRule(game, target.id, rule, now(), aiEnv(env)));
+  }
+
   /**
    * A capture: evidence not seen before is described and saved; the same evidence again (same hash)
    * costs no model call. A failed capture saves nothing.
    */
-  async function captureOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CaptureTarget) {
-    let saved: { hash: string; text: string } | null;
+  async function captureOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CaptureTarget, spend: () => Promise<boolean>) {
+    let saved: Evidence | null;
     try {
-      saved = await ai.capture(streamUrl, target.text, target.rule, target.hashes);
+      saved = await ai.capture(streamUrl, target.text, target.rule, target.hashes, spend);
       if (!saved) return;
     } catch (error) {
       console.warn(`predictions: frame description failed (${error instanceof Error ? error.message : "unknown error"})`);
@@ -570,42 +607,61 @@ export function predictionsService(deps: ServiceDeps) {
     await commitGame(mint, creator, (game, env) => applyFrame(game, target, note, now(), aiEnv(env)));
   }
 
+  /** jev's side for `notes`, or why not (unsure, or the budget is spent). */
+  async function decideOn(ai: AiCheckDeps, target: RefereeTarget, notes: FrameNote[], spend: () => Promise<boolean>) {
+    if (!(await spend())) return { unclear: "budget" as const };
+    const decision = await ai.decide(target.text, notes, target.rule, target.lockAt);
+    return decision.happened === "unclear" ? { unclear: "unclear" as const } : decision;
+  }
+
   /**
-   * One referee run on a locked prediction: jev reads the question, its rule and the frame notes. A
-   * sure YES or NO resolves it; unsure, or no new picture since betting closed (the preview never
-   * refreshed, or no frames at all), means the streamer decides. A failed run is tried again later;
-   * the last failed run also hands it to the streamer. A failure is never a side.
+   * One referee run on a locked prediction. It needs pictures taken after the lock (a preview seen
+   * before the lock proves nothing). Points: jev decides from every note. A market: the two newest
+   * fresh pictures are judged apart (each with the earlier notes) and must give the same side. A sure
+   * side resolves it; anything else hands it to the streamer (a market's call then waits for an
+   * admin). A failed run is tried again later; the last failed run also hands it over. A failure is
+   * never a side.
    */
-  async function refereeOne(ai: AiCheckDeps, mint: string, creator: string, target: RefereeTarget) {
+  async function refereeOne(ai: AiCheckDeps, mint: string, creator: string, target: RefereeTarget, spend: () => Promise<boolean>) {
     const notes = target.frames.filter((f) => f.text);
-    let answer: RefereeAnswer = "unclear";
+    const fresh = freshNotes(target);
+    let answer: RefereeAnswer;
     try {
-      // A note from after the lock is always a new picture: one seen before is never added again.
-      if (notes.some((f) => f.at >= target.lockAt)) {
-        const { happened, confidence, model } = await ai.decide(target.text, notes, target.rule, target.lockAt);
-        // What it saw: the newest frame from after betting closed, else the newest one.
-        const seen = [...notes].reverse().find((f) => f.at >= target.lockAt) ?? notes[notes.length - 1];
-        if (happened !== "unclear") answer = { outcome: happened, model, confidence, reason: seen.text ?? "", frames: notes.map((f) => f.at) };
+      if (fresh.length === 0) answer = { unclear: "no-picture" };
+      else if (target.market && fresh.length < MIN_MARKET_PICTURES) answer = { unclear: "one-picture" };
+      else {
+        const views = target.market ? fresh.slice(-MIN_MARKET_PICTURES).map((pick) => notes.filter((f) => !fresh.includes(f) || f === pick)) : [notes];
+        const decisions = await Promise.all(views.map((view) => decideOn(ai, target, view, spend)));
+        const sides = decisions.flatMap((d) => ("happened" in d ? [d] : []));
+        const gaveUp = decisions.find((d) => "unclear" in d);
+        if (gaveUp && "unclear" in gaveUp) answer = { unclear: gaveUp.unclear };
+        else if (new Set(sides.map((d) => d.happened)).size > 1) answer = { unclear: "disagree" };
+        else {
+          const { happened, model } = sides[0];
+          const confidence = Math.min(...sides.map((d) => d.confidence));
+          answer = { outcome: happened as Side, model, confidence, reason: fresh[fresh.length - 1].text ?? "", frames: notes.map((f) => f.at) };
+        }
       }
     } catch (error) {
       console.warn(`predictions: the AI referee failed (${error instanceof Error ? error.message : "unknown error"})`);
       if (target.tries < AI_CHECK_MAX_TRIES) return;
+      answer = { unclear: "error" };
     }
-    await commitGame(mint, creator, (game, env) => applyReferee(game, target.id, answer, now(), aiEnv(env)));
+    await commitGame(mint, creator, (game, env) => applyReferee(game, target.id, target.tries, answer, now(), aiEnv(env)));
   }
 
   /**
-   * One check run on a result someone else gave: a frame at resolve (if the picture is new), then
-   * jev's unbiased answer, compared with that outcome. No frame at all: no check. A failed run is tried
-   * again later; the last failed run ends as "couldn't tell". A failure is never a disagree.
+   * One check run on a result someone else gave: new evidence at resolve (if any), then jev's
+   * unbiased answer, compared with that outcome. No evidence at all, or no budget: no check. A failed
+   * run is tried again later; the last failed run ends as "couldn't tell". A failure is never a disagree.
    */
-  async function checkOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CheckTarget) {
+  async function checkOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CheckTarget, spend: () => Promise<boolean>) {
     let verdict: AiVerdict | null;
     try {
       const notes = target.frames.filter((f) => f.text);
-      const atResolve = await ai.capture(streamUrl, target.text, target.rule, notes.flatMap((f) => (f.hash ? [f.hash] : [])));
+      const atResolve = await ai.capture(streamUrl, target.text, target.rule, notes.flatMap((f) => (f.hash ? [f.hash] : [])), spend);
       if (atResolve) notes.push({ kind: "resolve", at: now(), ...atResolve });
-      if (notes.length === 0) verdict = null;
+      if (notes.length === 0 || !(await spend())) verdict = null;
       else {
         const { happened } = await ai.decide(target.text, notes, target.rule, null);
         verdict = happened === "unclear" ? "unclear" : happened === target.outcome ? "agree" : "disagree";
@@ -615,7 +671,7 @@ export function predictionsService(deps: ServiceDeps) {
       if (target.tries < AI_CHECK_MAX_TRIES) return;
       verdict = "unclear";
     }
-    await commitGame(mint, creator, (game, env) => applyAiVerdict(game, target.id, verdict, now(), env));
+    await commitGame(mint, creator, (game, env) => applyAiVerdict(game, target.id, verdict, now(), env, target.tries));
   }
 
   /** Coins with a market run in flight in this process (another process is held off by the claim). */
@@ -881,7 +937,7 @@ export function predictionsService(deps: ServiceDeps) {
       crowdPicks: game.crowdPicks,
       streamerHere: streamerPresent(env, t),
       me,
-      live: liveView(game, wallet, t, env),
+      live: liveView(game, wallet, t, env, me?.admin ?? false),
       pending: staff ? pendingView(game) : null,
       queueSize: visibleSuggestions(game, wallet, staff).length,
       queue: queueView(game, wallet, staff),

@@ -1,4 +1,5 @@
 /** What the predictions API returns for a coin (shared by the server and the browser; types only). */
+import type { RefereeWhy } from "./engine";
 import type { Outcome, Side } from "./rules";
 
 /**
@@ -18,8 +19,10 @@ export type MarketVerdictView = {
   proposed: Side | "refund";
   finalAt: number | null;
   final: Side | "refund" | null;
-  /** Why it waits for an admin, for admins only. */
-  why: "challenge" | "unresolved" | "ai" | null;
+  /** Why it waits for an admin, for admins only ("fallback": the streamer decided because the AI couldn't tell). */
+  why: "challenge" | "unresolved" | "fallback" | "ai" | null;
+  /** Why the AI couldn't tell, when the streamer decided; for admins only. */
+  aiWhy: RefereeWhy | null;
   /** The challenge, for admins only (null for everyone else). */
   challenge: { by: string; at: number; reason: string; link: string | null; bond: number } | null;
 } | null;
@@ -71,6 +74,10 @@ export type PredictionsView = {
      * (or the coin has no AI): then the streamer or a mod decides. null while betting is open.
      */
     ai: "checking" | "unclear" | null;
+    /** Why the AI couldn't tell, for admins only (null for everyone else, and while it checks). */
+    aiWhy: RefereeWhy | null;
+    /** What on stream decides YES or NO, as the AI wrote it once the question went live (a hint); null until then. */
+    rule: string | null;
   }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;

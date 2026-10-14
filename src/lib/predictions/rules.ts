@@ -31,9 +31,11 @@ export const REVIEW_MAX_TRIES = 5;
  * AI check of a YES/NO result (the referee's runs use the same pause and limit): a vision model
  * describes stream frames, jev decides what happened. A check of a result someone else resolved never
  * changes payouts. A run that fails is tried again after this pause, at most this many runs in all
- * (the first plus two retries); then it "couldn't tell".
+ * (the first plus two retries); then it "couldn't tell". The pause is longer than a normal run (a
+ * frame, a description and jev, each with its own timeout), and an answer from an older run never
+ * counts, so a slow run can't land on top of a newer one.
  */
-export const AI_CHECK_RETRY_MS = 20_000;
+export const AI_CHECK_RETRY_MS = 45_000;
 export const AI_CHECK_MAX_TRIES = 3;
 /** Hard deadline: past this long after the result's flag window, an unfinished AI check ends as "couldn't tell", whatever the server's keys. */
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
@@ -47,9 +49,15 @@ export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
 export const FRAME_GAP_MS = 50_000;
 export const FRAMES_AFTER_LOCK_MS = 6 * MINUTE_MS;
 export const MAX_FRAME_NOTES = 12;
-/** With no YES or NO from the referee this long after betting closed, it "couldn't tell": the streamer decides. */
-export const REFEREE_DEADLINE_MS = 10 * MINUTE_MS;
-/** The referee's check rule (what on stream decides YES or NO), written when the question is approved. */
+/**
+ * A market (real SOL) needs MIN_MARKET_PICTURES distinct pictures taken after the lock that agree
+ * before an AI result counts, so grabbing goes on longer: two preview refreshes.
+ */
+export const MARKET_FRAMES_AFTER_LOCK_MS = 11 * MINUTE_MS;
+export const MIN_MARKET_PICTURES = 2;
+/** With no YES or NO from the referee this long after its frame window, it "couldn't tell": the streamer decides. */
+export const REFEREE_GRACE_MS = 4 * MINUTE_MS;
+/** The referee's check rule (what on stream decides YES or NO, only a hint), written once the question goes live. */
 export const CHECK_RULE_MAX = 200;
 /** The referee's short reason (what it saw), shown under its result. */
 export const REFEREE_REASON_MAX = 160;

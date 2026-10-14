@@ -3,10 +3,10 @@ import { test } from "node:test";
 import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAMES_AFTER_LOCK_MS } from "@/lib/predictions/rules";
 import { newProfile } from "@/lib/predictions/watch";
 import { aiCheck, OPENROUTER_URL } from "./ai-check";
-import { happenedAnswer, visionAnswer } from "./jev-fake";
+import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { TYPESAFE_URL } from "./review";
-import { type CoinFacts, predictionsService } from "./service";
+import { type CoinFacts, predictionsService, type ServiceDeps } from "./service";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
@@ -40,6 +40,8 @@ function fakeModels() {
     ruleFails: false,
     frame: true,
     picture: 1,
+    /** The CDN's Last-Modified for the picture (ms), if it sends one. */
+    shot: undefined as number | undefined,
     calls: { frame: 0, rule: 0, vision: 0, jev: 0 },
     jevBodies: [] as string[],
   };
@@ -47,7 +49,8 @@ function fakeModels() {
     const u = String(url);
     if (u.startsWith("https://static-cdn.jtvnw.net/")) {
       models.calls.frame++;
-      return models.frame ? new Response(new Uint8Array([models.picture, 2, 3]), { headers: { "content-type": "image/jpeg" } }) : Promise.reject(new TypeError("redirect"));
+      const headers = { "content-type": "image/jpeg", ...(models.shot !== undefined ? { "last-modified": new Date(models.shot).toUTCString() } : {}) };
+      return models.frame ? new Response(new Uint8Array([models.picture, 2, 3]), { headers }) : Promise.reject(new TypeError("redirect"));
     }
     if (u === OPENROUTER_URL) {
       if (String(init!.body).includes("You write the check rule")) {
@@ -55,7 +58,7 @@ function fakeModels() {
         return models.ruleFails ? json({}, 500) : json(visionAnswer(RULE));
       }
       models.calls.vision++;
-      return models.fail ? json({}, 500) : json(visionAnswer(`A girl with headphones writes at a desk (picture ${models.picture}).`));
+      return models.fail ? json({}, 500) : json(factsAnswer([`A girl with headphones writes at a desk (picture ${models.picture})`, "camera"]));
     }
     assert.equal(u, TYPESAFE_URL);
     models.calls.jev++;
@@ -66,7 +69,7 @@ function fakeModels() {
   return { models, ai };
 }
 
-function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null = TWITCH, withAi = true) {
+function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null = TWITCH, withAi = true, aiBudget?: ServiceDeps["aiBudget"]) {
   const clock = { t: T0 };
   const store = make(clock);
   const { models, ai } = fakeModels();
@@ -82,6 +85,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     review: async () => ({ approved: true, windowMin: 1 }),
     ai: withAi ? ai : null,
     admins: [ORACLE],
+    ...(aiBudget ? { aiBudget } : {}),
     defer: (task) => void deferred.push(task),
     attempts: 200,
     backoffMs: () => Math.random() * 2,
@@ -135,7 +139,8 @@ for (const [name, make] of STORES) {
     assert.deepEqual([r.outcome, r.resolvedBy.role, r.ai], ["yes", "ai", null]);
     assert.match(r.aiReason ?? "", /picture 2/);
     const sent = JSON.parse(models.jevBodies[0]);
-    assert.equal(sent.state.check_rule, RULE);
+    assert.equal(sent.state.check_rule_hint, RULE);
+    assert.equal(locked.live[0].rule, RULE, "bettors see the rule under the question");
     assert.deepEqual(sent.state.frames.map((f: { grabbed: string }) => f.grabbed), ["launch", "after"]);
     assert.doesNotMatch(models.jevBodies[0], /outcome/);
     const after = await Promise.all(BETTORS.map(balance));
@@ -151,8 +156,10 @@ for (const [name, make] of STORES) {
       const id = await playToLive();
       models.picture = 2;
       await viewAt(LOCK);
-      const view = await viewAt(LOCK + 1_000);
+      assert.equal((await viewAt(LOCK + 1_000)).live[0].ai, "checking", "unsure early: one more run at the window's end");
+      const view = await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1_000);
       assert.equal(view.live[0].ai, "unclear");
+      assert.deepEqual([models.calls.jev, view.live[0].aiWhy, (await service.view(COIN, ORACLE)).live[0].aiWhy], [2, null, "unclear"], "only admins see why");
       await assert.rejects(service.act(COIN, "v1", { kind: "witness", id, outcome: "yes" }), /streamer or a mod/);
       models.happened = happenedAnswer("NO", 0.9);
       await service.act(COIN, STREAMER, { kind: "witness", id, outcome: "yes" });
@@ -222,6 +229,33 @@ for (const [name, make] of STORES) {
     assert.deepEqual([view.live.length, view.live[0].ai, models.calls.jev, models.calls.vision], [1, "unclear", 0, 1]);
   });
 
+  test(`${name}: audit F2: a picture the CDN made before the lock is not evidence; admins see "no picture after lock"`, async () => {
+    const { models, viewAt, playToLive, service } = setup(make);
+    await playToLive();
+    models.picture = 2;
+    models.shot = LOCK - 2 * MIN; // new to us, but made before betting closed
+    await viewAt(LOCK + 30_000);
+    assert.equal(models.calls.vision, 2, "described, but not fresh");
+    assert.equal((await viewAt(LOCK + MIN)).live[0].ai, "checking");
+    await viewAt(LOCK + FRAMES_AFTER_LOCK_MS);
+    const view = await service.view(COIN, ORACLE);
+    assert.deepEqual([view.live[0].ai, view.live[0].aiWhy, models.calls.jev], ["unclear", "no-picture", 0]);
+  });
+
+  test(`${name}: audit F5: the daily AI budget stops model calls (here: the rule takes the only one)`, async () => {
+    const { models, viewAt, playToLive, store } = setup(make, TWITCH, true, { daily: 100, perCoin: 1 });
+    await playToLive();
+    models.picture = 2;
+    await viewAt(LOCK);
+    await viewAt(LOCK + FRAMES_AFTER_LOCK_MS);
+    const view = await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1);
+    assert.deepEqual([models.calls.rule, models.calls.vision, models.calls.jev], [1, 0, 0]);
+    assert.equal(view.live[0].ai, "unclear");
+    const day = new Date(T0).toISOString().slice(0, 10);
+    const [global, coin] = await store.read([`ai-calls:${day}`, `ai-calls:${day}:${COIN}`]);
+    assert.deepEqual([global.json, coin.json], ["1", "1"]);
+  });
+
   test(`${name}: a failed rule leaves the question without one; the referee still works from the question`, async () => {
     const { models, viewAt, playToLive } = setup(make);
     models.ruleFails = true;
@@ -229,7 +263,7 @@ for (const [name, make] of STORES) {
     models.picture = 2;
     await viewAt(LOCK);
     await viewAt(LOCK + 1_000);
-    assert.equal(JSON.parse(models.jevBodies[0]).state.check_rule, undefined);
+    assert.equal(JSON.parse(models.jevBodies[0]).state.check_rule_hint, undefined);
   });
 
   test(`${name}: a referee run is claimed once: parallel runs ask jev once and resolve once`, async () => {

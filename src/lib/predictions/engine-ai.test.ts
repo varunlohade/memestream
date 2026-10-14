@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
+import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, applyRule, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
 import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAME_NOTE_MAX, FRAMES_AFTER_LOCK_MS, MAX_FRAME_NOTES } from "./rules";
 
 const MIN = 60_000;
@@ -29,8 +29,9 @@ function ledger() {
 function liveGame(env: Env, l = ledger(), windowMin = 1) {
   let game = newGame(STREAMER);
   game = l.take(apply(game, { kind: "suggest", text: "Will the streamer jump?" }, actor(ASKER), T0, env));
-  game = l.take(applyReview(game, game.suggestions[0], { approved: true, windowMin, rule: "YES if the streamer is seen in the air" }, T0, env));
+  game = l.take(applyReview(game, game.suggestions[0], { approved: true, windowMin }, T0, env));
   game = l.take(apply(game, { kind: "launch", id: game.suggestions[0].id }, actor(STREAMER), T0, env));
+  game = l.take(applyRule(game, game.live[0].id, "YES if the streamer is seen in the air", T0, env));
   for (const [i, b] of BETTORS.entries()) game = l.take(apply(game, { kind: "bet", id: game.live[0].id, side: i % 2 ? "yes" : "no", amount: 100 }, actor(b), T0, env));
   return game;
 }
@@ -44,15 +45,24 @@ function grab(game: Game, now: number, hash: string, text = `picture ${hash}`): 
   return { game: applyFrame(claim.game, claim.captures[0], { hash, text }, now, ON).game, target: claim.captures[0] };
 }
 
-test("check rule: the review's rule is stored on the suggestion and goes live with it, cleaned and cut; none means none", () => {
-  const game = liveGame(ON);
-  assert.equal(game.live[0].rule, "YES if the streamer is seen in the air");
-  let typed = apply(newGame(STREAMER), { kind: "launch", text: "Will chat win?" }, actor(STREAMER), T0, ON).game;
-  typed = applyReview(typed, typed.pending!, { approved: true, windowMin: 1, rule: `  YES if\n chat ${"x".repeat(300)}` }, T0, ON).game;
-  assert.match(typed.live[0].rule!, /^YES if chat x+$/);
-  assert.equal(typed.live[0].rule!.length, 200);
-  const bare = apply(newGame(STREAMER), { kind: "launch", text: "Will chat win?" }, actor(STREAMER), T0, ON).game;
-  assert.equal(applyReview(bare, bare.pending!, { approved: true, windowMin: 1, rule: "   " }, T0, ON).game.live[0].rule, undefined);
+test("check rule: written once the question is live (not at approval), at most twice; cleaned, links cut, cut to 200; never replaced", () => {
+  let game = apply(newGame(STREAMER), { kind: "suggest", text: "Will chat win?" }, actor(ASKER), T0, ON).game;
+  game = applyReview(game, game.suggestions[0], { approved: true, windowMin: 1 }, T0, ON).game;
+  assert.deepEqual(startAi(game, T0, ON).rules, [], "an approved suggestion gets no rule yet");
+  game = apply(game, { kind: "launch", id: game.suggestions[0].id }, actor(STREAMER), T0, ON).game;
+  const id = game.live[0].id;
+  const first = startAi(game, T0, ON);
+  assert.deepEqual(first.rules, [{ id, text: "Will chat win?" }]);
+  assert.deepEqual(startAi(first.game, T0 + 1_000, ON).rules, [], "claimed: not twice at once");
+  const second = startAi(first.game, T0 + AI_CHECK_RETRY_MS, ON);
+  assert.equal(second.rules.length, 1, "a failed write is tried once more");
+  assert.deepEqual(startAi(second.game, T0 + 2 * AI_CHECK_RETRY_MS, ON).rules, [], "then the question alone");
+  const written = applyRule(second.game, id, `  YES if\n chat wins, see https://evil.example/x or scam.io ${"x".repeat(300)}`, T0, ON).game;
+  assert.match(written.live[0].rule!, /^YES if chat wins, see or x+$/);
+  assert.equal(written.live[0].rule!.length, 200);
+  assert.equal(applyRule(written, id, "NO always", T0, ON).changed, false, "a rule is never replaced");
+  assert.equal(applyRule(second.game, id, "   ", T0, ON).game.live[0].rule, undefined);
+  assert.deepEqual(startAi(liveGame(OFF), T0, OFF).rules, [], "no AI, no rule");
 });
 
 test("frames: a grab at launch, then at most every FRAME_GAP_MS while live and up to 6 minutes after the lock; none without the AI", () => {

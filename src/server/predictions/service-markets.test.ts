@@ -243,6 +243,29 @@ async function proposed() {
   return { ...env, calls, holders, id };
 }
 
+test("audit F1: no AI on the coin: the streamer's call on a market is only a proposal an admin settles; a share holder can't make it", async () => {
+  const { calls, deps, holders } = fakeMarkets();
+  const { clock, service, look, launch } = setup(deps);
+  const id = await launch();
+  await look();
+  clock.t += MIN;
+  assert.equal((await look()).live[0].ai, "unclear");
+  holders.add(STREAMER);
+  await assert.rejects(service.act(COIN, STREAMER, { kind: "witness", id, outcome: "yes" }), /hold shares of this market/, "read on chain, like a challenge");
+  holders.delete(STREAMER);
+  await service.act(COIN, STREAMER, { kind: "witness", id, outcome: "yes" });
+  const asAdmin = (await service.view(COIN, ORACLE)).resolved[0];
+  assert.deepEqual([asAdmin.verdict?.status, asAdmin.verdict?.why, asAdmin.verdict?.aiWhy], ["disputed", "fallback", "no-keys"]);
+  const asViewer = (await service.view(COIN, "viewer")).resolved[0];
+  assert.deepEqual([asViewer.verdict?.status, asViewer.verdict?.why, asViewer.verdict?.aiWhy], ["disputed", null, null], "only admins see why");
+  clock.t += MARKET_CHALLENGE_MS + MIN;
+  await look();
+  assert.ok(!calls.some((c) => c.startsWith("resolve")), "never resolved on chain by the streamer's call alone");
+  await service.act(COIN, ORACLE, { kind: "decide", id, outcome: "yes" });
+  await look();
+  assert.ok(calls.includes(`resolve ${id} yes`), "the admin's decision resolves it");
+});
+
 test("the view shows the proposal, final at the window's end; then final", async () => {
   const { clock, look, id, calls } = await proposed();
   const r = (await look()).resolved[0];

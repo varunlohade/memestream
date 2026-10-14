@@ -29,8 +29,12 @@ export function frameUrls(streamUrl: string | null | undefined): string[] {
   return [];
 }
 
-/** `hash`: a short hash of the picture's bytes, so a picture the preview still shows isn't described again. */
-export type Frame = { url: string; mime: string; base64: string; hash: string };
+/**
+ * `hash`: a short hash of the picture's bytes, so a picture the preview still shows isn't described
+ * again. `shot`: when the CDN says the picture was made (its Last-Modified), if it says; a preview
+ * can be minutes old when grabbed.
+ */
+export type Frame = { url: string; mime: string; base64: string; hash: string; shot?: number };
 /** Hex characters of the picture's SHA-256 kept as its hash. */
 const HASH_CHARS = 16;
 export type FrameDeps = { fetch?: typeof fetch; timeoutMs?: number };
@@ -68,7 +72,9 @@ async function fetchOne(url: string, deps: FrameDeps): Promise<Frame | null> {
     }
     if (size === 0) return null;
     const bytes = Buffer.concat(chunks);
-    return { url, mime, base64: bytes.toString("base64"), hash: createHash("sha256").update(bytes).digest("hex").slice(0, HASH_CHARS) };
+    const shot = Date.parse(response.headers.get("last-modified") ?? "");
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, HASH_CHARS);
+    return { url, mime, base64: bytes.toString("base64"), hash, ...(Number.isFinite(shot) ? { shot } : {}) };
   } finally {
     clearTimeout(timer);
   }

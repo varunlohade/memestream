@@ -374,10 +374,23 @@ function WinLine({ side, preview }: { side: Side; preview: MarketPreview }) {
   );
 }
 
-const WHY: Record<"challenge" | "unresolved" | "ai", string> = {
+const WHY: Record<NonNullable<NonNullable<MarketVerdictView>["why"]>, string> = {
   challenge: "A holder challenged it",
   unresolved: "Nobody resolved it in time",
+  fallback: "The AI couldn't tell, so the streamer decided",
   ai: "The AI check disagreed with the result",
+};
+
+/** Why the AI referee couldn't tell, in plain words (admins only). */
+export const AI_WHY: Record<NonNullable<NonNullable<MarketVerdictView>["aiWhy"]>, string> = {
+  "no-picture": "no new picture after betting closed",
+  "one-picture": "only one new picture after betting closed",
+  disagree: "the pictures disagreed",
+  unclear: "the pictures didn't show it",
+  error: "the AI models kept failing",
+  deadline: "no answer in time",
+  budget: "the daily AI budget ran out",
+  "no-keys": "the AI is off for this coin (no frames or no keys)",
 };
 
 /**
@@ -409,6 +422,7 @@ function VerdictLine(props: CardProps & { verdict: NonNullable<MarketVerdictView
           <div className="mk-admin">
             <p className="pm-small">
               Proposed: {proposed}. {verdict.why ? WHY[verdict.why] : ""}
+              {verdict.why === "fallback" && verdict.aiWhy ? ` (${AI_WHY[verdict.aiWhy]})` : ""}
               {c && <>: “{c.reason}”</>}
               {c?.link && (
                 <>
