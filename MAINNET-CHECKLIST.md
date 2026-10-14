@@ -47,8 +47,9 @@ The owner's step-by-step for launch day is in RUNBOOK-mainnet.md.
       the 80/20 split is of the rest, so per trading fee: streamer 64%, memestream 16%, Meteora 20%.
 - [x] **Public URL** (the owner, 2026-10-15). Mainnet: `MEMESTREAM_PUBLIC_URL=https://www.memestream.lol`
       (baked into every mainnet coin's metadata URI forever). Devnet moves to
-      https://devnet.memestream.lol (a second Vercel project). memestream-iota.vercel.app keeps
-      redirecting to www (`next.config.ts`; never remove it). On mainnet the build refuses a public
+      https://devnet.memestream.lol (a second Vercel project). memestream-iota.vercel.app (the judges' link)
+      redirects to `MEMESTREAM_LEGACY_REDIRECT`, default https://devnet.memestream.lol, never to
+      mainnet (`src/lib/legacy-redirect.ts`, `next.config.ts`; never remove it). On mainnet the build refuses a public
       URL that isn't an https origin (`src/lib/network.ts`).
 
 ## Before creating the config
@@ -60,15 +61,17 @@ The owner's step-by-step for launch day is in RUNBOOK-mainnet.md.
       getProgramAccounts, which public RPCs rate-limit.
 - [ ] `MEMESTREAM_WALLET_CHAIN=solana:mainnet` (the owner sets it; RUNBOOK-mainnet.md). This one value
       is the mainnet switch: it forces the label "Mainnet", markets off, and Solscan links without
-      `?cluster=` (2026-10-15). A mainnet RPC URL with any other wallet chain stops the build, and
-      before building any transaction the server compares the RPC's genesis hash with the wallet
-      chain and refuses on a mismatch (`src/server/prepare-tx.ts`).
+      `?cluster=` (2026-10-15). The real guard is at runtime: before building any
+      transaction the server compares the RPC's genesis hash with the wallet chain and refuses on a
+      mismatch (`src/server/prepare-tx.ts`). The build-time check is only a cheap extra: it stops the
+      build when the RPC hostname contains "mainnet" and the wallet chain isn't mainnet; an RPC
+      whose hostname doesn't say "mainnet" passes it and is caught by the genesis check.
 - [x] Priority fees on transactions (2026-10-15). Every server-built transaction (launch, buy, sell,
       graduate, streamer and LP fee claims, market bets and redeems, the oracle's own sends, partner
-      claims, the config script) gets a compute unit limit from a simulation (+20% + 10k CU; 400k if
-      the simulation fails) and a price at the 75th percentile of `getRecentPrioritizationFees` on
-      its writable accounts, between 10,000 and `MEMESTREAM_PRIORITY_FEE_MAX` (default 1,000,000)
-      micro-lamports per CU: at most ~0.0004 SOL per 400k-CU transaction. `src/lib/priority-fee.ts`,
+      claims, the config script) gets a compute unit limit from a simulation (+20% + 10k CU; if the
+      simulation fails, the larger of 400k and the builder's own limit, e.g. migration's 600k) and a price at the 75th percentile of `getRecentPrioritizationFees` on
+      its writable accounts, between 10,000 and `MEMESTREAM_PRIORITY_FEE_MAX` (default 1,000,000,
+      clamped to a hard 5,000,000) micro-lamports per CU: at the default cap, at most ~0.0004 SOL per 400k-CU transaction. `src/lib/priority-fee.ts`,
       `src/server/prepare-tx.ts`; tests `priority-fee.test.ts`, `server-trade.surfpool.ts` (launch,
       buy, sell and graduate land with it). The double-pay hold is unchanged (it keys on the request,
       not the bytes).

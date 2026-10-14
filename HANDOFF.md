@@ -38,7 +38,7 @@ Today the streamer resolves and the AI check is only a second opinion (a disagre
 | What | Where |
 |---|---|
 | Live site (devnet) | https://www.memestream.lol (memestream.lol redirects to www) |
-| Old link (shared with judges, KEEP) | https://memestream-iota.vercel.app redirects to the same page on www. Never delete this domain or the Vercel project. |
+| Old link (shared with judges, KEEP) | https://memestream-iota.vercel.app redirects to the same page on www today. From branch `mainnet-launch` on, it redirects to MEMESTREAM_LEGACY_REDIRECT (default https://devnet.memestream.lol), so judges never land on mainnet. Never delete this domain or the Vercel project. |
 | Repo | github.com/varunlohade/memestream (private), branch `main` |
 | Up-to-date working copy | `~/chat-coins/.claude/worktrees/release-predictions` (branch `release-predictions`, pushed as `main`) |
 | Vercel project | team "varunlohade's projects", project `memestream` |

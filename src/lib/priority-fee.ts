@@ -39,10 +39,17 @@ export const DEFAULT_PRIORITY_FEE: PriorityFeeSettings = {
   fallbackUnits: 400_000,
 };
 
-/** The settings with the cap from env (micro-lamports per CU); a bad value keeps the default. */
+/**
+ * The env cap can never go above this: at 5,000,000 micro-lamports per CU a 400k-CU transaction
+ * pays at most 0.002 SOL in priority fee, so a typo can't drain users.
+ */
+export const HARD_MAX_MICRO_LAMPORTS = 5_000_000;
+
+/** The settings with the cap from env (micro-lamports per CU, at most HARD_MAX); a bad value keeps the default. */
 export function priorityFeeSettings(maxFromEnv: string | undefined): PriorityFeeSettings {
-  const max = Number(maxFromEnv);
-  if (!maxFromEnv || !Number.isSafeInteger(max) || max <= 0) return DEFAULT_PRIORITY_FEE;
+  const parsed = Number(maxFromEnv);
+  if (!maxFromEnv || !Number.isSafeInteger(parsed) || parsed <= 0) return DEFAULT_PRIORITY_FEE;
+  const max = Math.min(parsed, HARD_MAX_MICRO_LAMPORTS);
   return { ...DEFAULT_PRIORITY_FEE, maxMicroLamports: max, minMicroLamports: Math.min(DEFAULT_PRIORITY_FEE.minMicroLamports, max) };
 }
 
@@ -53,10 +60,23 @@ export function pickMicroLamports(samples: number[], settings: PriorityFeeSettin
   return Math.round(Math.min(settings.maxMicroLamports, Math.max(settings.minMicroLamports, at ?? 0)));
 }
 
-/** The limit for a simulated run (with margin), or the fallback; never above the runtime's limit. */
-export function computeUnitLimit(consumed: number | undefined, settings: PriorityFeeSettings): number {
-  const units = consumed && consumed > 0 ? Math.ceil(consumed * UNIT_MARGIN) + UNIT_PAD : settings.fallbackUnits;
+/**
+ * The limit for a simulated run (with margin). Without one: the larger of the fallback and the
+ * limit the builder set itself (migrateToDammV2 asks for 600k). Never above the runtime's limit.
+ */
+export function computeUnitLimit(consumed: number | undefined, settings: PriorityFeeSettings, builderUnits = 0): number {
+  const units = consumed && consumed > 0 ? Math.ceil(consumed * UNIT_MARGIN) + UNIT_PAD : Math.max(settings.fallbackUnits, builderUnits);
   return Math.min(MAX_COMPUTE_UNITS, units);
+}
+
+/** SetComputeUnitLimit's instruction tag in the Compute Budget program. */
+const SET_COMPUTE_UNIT_LIMIT = 2;
+
+/** The unit limit the builder's own SetComputeUnitLimit asks for (the largest, if several); 0 if none. */
+export function builderUnitLimit(tx: Transaction): number {
+  return tx.instructions
+    .filter((ix) => ix.programId.equals(ComputeBudgetProgram.programId) && ix.data[0] === SET_COMPUTE_UNIT_LIMIT && ix.data.length >= 5)
+    .reduce((most, ix) => Math.max(most, ix.data.readUInt32LE(1)), 0);
 }
 
 /** Puts exactly one unit limit and one unit price first, replacing any the builder added. */
@@ -83,6 +103,7 @@ export type PriorityFee = { units: number; microLamports: number; simulated: boo
  */
 export async function addPriorityFee(connection: Connection, tx: Transaction, settings: PriorityFeeSettings = DEFAULT_PRIORITY_FEE): Promise<PriorityFee> {
   if (!tx.feePayer || !tx.recentBlockhash) throw new Error("Set the fee payer and blockhash before the priority fee");
+  const builderUnits = builderUnitLimit(tx);
   const recent = await connection.getRecentPrioritizationFees({ lockedWritableAccounts: writableAccounts(tx) }).catch(() => []);
   const microLamports = pickMicroLamports(
     recent.map((r) => r.prioritizationFee),
@@ -94,7 +115,7 @@ export async function addPriorityFee(connection: Connection, tx: Transaction, se
     .simulateTransaction(new VersionedTransaction(tx.compileMessage()), { sigVerify: false, replaceRecentBlockhash: true, commitment: "confirmed" })
     .then((sim) => (sim.value.err ? undefined : sim.value.unitsConsumed))
     .catch(() => undefined);
-  const units = computeUnitLimit(consumed, settings);
+  const units = computeUnitLimit(consumed, settings, builderUnits);
   setComputeBudget(tx, units, microLamports);
   return { units, microLamports, simulated: consumed !== undefined };
 }

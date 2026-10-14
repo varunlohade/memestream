@@ -6,7 +6,9 @@ Never paste a secret value into a chat, a commit or a file in this repo.
 The plan:
 - The Vercel project `memestream` becomes **mainnet** on https://www.memestream.lol.
 - A new Vercel project `memestream-devnet` serves **devnet** on https://devnet.memestream.lol.
-- https://memestream-iota.vercel.app keeps redirecting to www (`next.config.ts`). Never remove it.
+- https://memestream-iota.vercel.app (the judges' link) redirects to the **devnet** site, never to
+  mainnet. `next.config.ts` sends it to `MEMESTREAM_LEGACY_REDIRECT` (default
+  https://devnet.memestream.lol). Never remove this redirect.
 - Mainnet has coins and free-points predictions. Real-SOL markets stay off (the code forces this).
 
 ## 0. Before you start
@@ -17,6 +19,31 @@ The plan:
 3. Put about 0.05 SOL on mainnet in the wallet that pays for the config (any wallet you hold a key
    file for). The config costs about 0.006 SOL.
 4. Run `npm run check` in an up-to-date checkout of `main`. It must pass.
+5. Check Git auto-deploy on the `memestream` project: Vercel dashboard > memestream > Settings > Git.
+   If a repository is connected, every push to `main` deploys production. Before mainnet, turn it
+   off, so only you deploy, after an audit:
+   ```
+   cd ~/chat-coins/.claude/worktrees/release-predictions
+   vercel git disconnect
+   ```
+   (Or keep it connected and set Settings > Git > Ignored Build Step to `exit 0`.) Do the same check
+   for `memestream-devnet` after you create it.
+
+## 0b. Don't move the judges' link before devnet is ready
+
+From this branch on, memestream-iota.vercel.app redirects to https://devnet.memestream.lol.
+- Decision: the alias stays on the `memestream` project (it is that project's own vercel.app
+  address). Leave `MEMESTREAM_LEGACY_REDIRECT` unset there; the default sends judges to devnet.
+- In `memestream-devnet`, also leave it unset. That project never serves the iota host, so the
+  redirect is inert there and can't loop. (The value can never point at the iota host itself; the
+  build refuses it.)
+- Order: create the devnet site (step 1) BEFORE you deploy this code to `memestream`. If you must
+  deploy it to `memestream` while www is still devnet, first run
+  `vercel env add MEMESTREAM_LEGACY_REDIRECT production` with `https://www.memestream.lol`, and
+  remove it (`vercel env rm MEMESTREAM_LEGACY_REDIRECT production`) before the mainnet deploy.
+- Check after every deploy of `memestream`:
+  `curl -sI https://memestream-iota.vercel.app/ | grep -i location` must show
+  `https://devnet.memestream.lol/`.
 
 ## 1. Move devnet to devnet.memestream.lol
 
@@ -173,7 +200,7 @@ vercel deploy --prod --yes
 
 Check:
 - https://www.memestream.lol shows "Mainnet" in the top bar.
-- https://memestream-iota.vercel.app redirects to https://www.memestream.lol.
+- https://memestream-iota.vercel.app redirects to https://devnet.memestream.lol (not www).
 - The home page is empty (no coins yet), with no errors.
 - A Solscan link opens without `?cluster=devnet`.
 
@@ -200,11 +227,22 @@ Tick the boxes in MAINNET-CHECKLIST.md ("After").
 
 ## Rollback
 
-- **Site problem, no money at risk:** in the Vercel dashboard, open Deployments and promote the
-  last good deployment (or `vercel rollback <deployment-url>`). A deployment keeps the env it was
-  built with, so the last devnet deployment brings devnet back on www.
+**Never put a devnet build on www.** Every `memestream` deployment from before the mainnet deploy
+is a devnet build. It keeps the env it was built with: markets on, the market oracle key, devnet
+RPC and the old Redis. Promoting one would serve devnet on the mainnet domain and put the oracle
+key back in a live build.
+
+- **Right after the mainnet deploy works:** note its deployment URL as "first good mainnet". In
+  Deployments, remove the older devnet production deployments of `memestream` (`vercel rm <url>`),
+  or at least never promote one. The devnet site lives in `memestream-devnet` now.
+- **Site problem, no money at risk:** promote the last good **mainnet** deployment only
+  (`vercel rollback <mainnet-deployment-url>`, or Deployments > Promote). Check the top bar says
+  "Mainnet" before and after.
+- **No good mainnet deployment yet:** don't roll back to devnet. Fix forward: revert the bad
+  commit on `main` and deploy again, or stop the damage by removing `MEMESTREAM_CONFIG` and
+  deploying (the site then shows errors and builds no transactions) while you fix it.
 - **After mainnet coins exist:** prefer a fix forward. Their metadata URI points at
-  www.memestream.lol forever, so a devnet build on www breaks their pictures in wallets.
+  www.memestream.lol forever.
 - **Bad config:** a config can't be changed or deleted. Create a new one with step 2 (remove
   `.keys/mainnet-config.json` first so it gets a new address), set `MEMESTREAM_CONFIG` to it, and
   deploy. Coins on the old config keep trading on chain, but the site lists only the new config's.

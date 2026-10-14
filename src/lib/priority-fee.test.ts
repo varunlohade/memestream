@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { ComputeBudgetProgram, Keypair, SystemProgram, Transaction } from "@solana/web3.js";
 import {
+  builderUnitLimit,
   computeUnitLimit,
+  HARD_MAX_MICRO_LAMPORTS,
   DEFAULT_PRIORITY_FEE,
   MAX_COMPUTE_UNITS,
   maxPriorityFeeLamports,
@@ -55,6 +57,25 @@ test("the budget goes first, once, replacing any the builder added", () => {
   assert.equal(tx.instructions[0].data.readUInt32LE(1), 60_000, "unit limit");
   assert.equal(Number(tx.instructions[1].data.readBigUInt64LE(1)), 30_000, "unit price");
   assert.deepEqual(writableAccounts(tx).map(String).sort(), [payer, to].map(String).sort());
+});
+
+test("the env cap is clamped to a hard ceiling", () => {
+  assert.equal(priorityFeeSettings("999999999").maxMicroLamports, HARD_MAX_MICRO_LAMPORTS);
+  assert.equal(priorityFeeSettings(String(HARD_MAX_MICRO_LAMPORTS)).maxMicroLamports, HARD_MAX_MICRO_LAMPORTS);
+  assert.equal(pickMicroLamports([1e12], priorityFeeSettings("999999999")), HARD_MAX_MICRO_LAMPORTS);
+});
+
+test("without a simulation, the builder's own larger unit limit wins over the fallback (migrateToDammV2's 600k)", () => {
+  const payer = Keypair.generate().publicKey;
+  const tx = new Transaction({ feePayer: payer, recentBlockhash: "11111111111111111111111111111111" }).add(
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 7 }),
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }),
+  );
+  assert.equal(builderUnitLimit(tx), 600_000, "the price instruction is ignored");
+  assert.equal(computeUnitLimit(undefined, settings, builderUnitLimit(tx)), 600_000);
+  assert.equal(computeUnitLimit(undefined, settings, 100_000), settings.fallbackUnits, "a smaller builder limit keeps the fallback");
+  assert.equal(computeUnitLimit(50_000, settings, 600_000), 70_000, "a simulation still decides when it ran");
+  assert.equal(builderUnitLimit(new Transaction()), 0);
 });
 
 test("the most a transaction pays in priority fee", () => {
