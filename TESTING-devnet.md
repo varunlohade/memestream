@@ -1,6 +1,6 @@
 # memestream: devnet test list
 
-Site: https://memestream-iota.vercel.app (devnet, test money only)
+Site: https://www.memestream.lol (devnet, test money only)
 Test journeys with pictures (private): https://claude.ai/artifact/597JtzSejT5K5J3FVCvNjG
 Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 
@@ -44,7 +44,7 @@ Graduation on devnet: 0.1 SOL. Launch fee on devnet: free.
 - [ ] With the **Viewer** wallet, the claim buttons don't appear.
 
 ## 7. Overlay and short link
-- [ ] Open https://memestream-iota.vercel.app/YOURTICKER: it goes to your coin.
+- [ ] Open https://www.memestream.lol/YOURTICKER: it goes to your coin.
 - [ ] Open /overlay/<your coin address>?layout=a (also try b and c): see-through panel with price and graduation bar; shows "Graduated" after step 4.
 - [ ] Optional: add that URL in OBS as a Browser Source (1920×1080).
 

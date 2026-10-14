@@ -16,6 +16,17 @@ const nextConfig: NextConfig = {
       { source: "/overlay/:path*", headers: safe },
     ];
   },
+  // The old Vercel address sends everyone to the real domain (wallet sign-in checks the site's address).
+  async redirects() {
+    return [
+      {
+        source: "/:path*",
+        has: [{ type: "host", value: "memestream-iota.vercel.app" }],
+        destination: "https://www.memestream.lol/:path*",
+        permanent: false,
+      },
+    ];
+  },
   // YouTube and Twitch stream pictures on coin tiles and coin icons.
   images: {
     remotePatterns: [

@@ -2,14 +2,14 @@
  * DEVNET ONLY: one full coin life on real devnet, through the LIVE site's API (not Surfpool):
  * launch (creator), buy + sell (viewer), fill to the threshold, graduate to DAMM v2, claim.
  * Two throwaway keypairs in .keys/ (git-ignored) are funded from .keys/partner.json.
- * Run:  npx tsx scripts/devnet-pass.mts [https://memestream-iota.vercel.app]
+ * Run:  npx tsx scripts/devnet-pass.mts [https://www.memestream.lol]
  */
 import { type Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
 import { sleep } from "../src/lib/poll";
 import { connectToDevnet } from "./devnet";
 import { readKeypair, readOrCreateKeypair } from "./keys";
 
-const SITE = process.argv[2] ?? "https://memestream-iota.vercel.app";
+const SITE = process.argv[2] ?? "https://www.memestream.lol";
 const connection = await connectToDevnet();
 
 const partner = readKeypair(".keys/partner.json");

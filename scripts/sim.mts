@@ -18,7 +18,7 @@ import { sleep } from "../src/lib/poll";
 import { connectToDevnet } from "./devnet";
 import { readKeypair, readOrCreateKeypair } from "./keys";
 
-const BASE_URL = (process.env.BASE_URL ?? "https://memestream-iota.vercel.app").replace(/\/$/, "");
+const BASE_URL = (process.env.BASE_URL ?? "https://www.memestream.lol").replace(/\/$/, "");
 const USERS = ["alice", "bob", "carol"] as const;
 /** Streamers: mapped to existing devnet keys, never created or copied. */
 const CREATORS: Record<string, string> = { dave: ".keys/devnet-creator.json" };

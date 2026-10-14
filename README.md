@@ -6,7 +6,7 @@ trade fee. When the curve fills, anyone can graduate the coin live on stream int
 pool. On top of the coin, viewers bet on what happens next in the stream: free points for everyone,
 and Polymarket-style YES/NO markets in devnet SOL.
 
-- **Live app:** https://memestream-iota.vercel.app (devnet, test money only)
+- **Live app:** https://www.memestream.lol (devnet, test money only)
 - **Demo video:** _[2-min video link]_
 - **Pitch deck:** _[pitch deck link]_
 - **Built for:** Colosseum (Solana track), the Meteora DBC bounty, Superteam India
