@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { assertSafeDeployment, deploymentProblems, isMainnet } from "./network";
+import { assertSafeDeployment, clusterMismatch, deploymentProblems, isMainnet, MAINNET_GENESIS_HASH } from "./network";
 
 const mainnet = { MEMESTREAM_WALLET_CHAIN: "solana:mainnet", MEMESTREAM_PUBLIC_URL: "https://www.memestream.lol", MEMESTREAM_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=x" };
 
@@ -27,7 +27,17 @@ test("the test wallet key is fine off mainnet (local dev chain)", () => {
 test("a mainnet RPC without the mainnet wallet chain is refused", () => {
   assert.match(deploymentProblems({ MEMESTREAM_RPC_URL: "https://mainnet.helius-rpc.com/?api-key=x" })[0], /points at mainnet/);
   assert.match(deploymentProblems({ MEMESTREAM_RPC_URL: "https://api.mainnet-beta.solana.com" })[0], /points at mainnet/);
+  assert.match(deploymentProblems({ MEMESTREAM_RPC_URL: "https://solana-mainnet.g.alchemy.com/v2/x" })[0], /points at mainnet/);
+  assert.match(deploymentProblems({ MEMESTREAM_RPC_URL: "https://abc.solana-mainnet.quiknode.pro/x/" })[0], /points at mainnet/);
   assert.deepEqual(deploymentProblems({ MEMESTREAM_RPC_URL: "https://devnet.helius-rpc.com/?api-key=x" }), []);
+});
+
+test("the RPC's genesis hash must match the wallet chain, whatever its hostname", () => {
+  const devnetGenesis = "EtWTRABZaYq6iMfeYKouRu166VU2xqa1wcaWoxPkrZBG";
+  assert.equal(clusterMismatch(MAINNET_GENESIS_HASH, mainnet), null);
+  assert.equal(clusterMismatch(devnetGenesis, {}), null);
+  assert.match(clusterMismatch(MAINNET_GENESIS_HASH, {}) ?? "", /is a mainnet RPC/);
+  assert.match(clusterMismatch(devnetGenesis, mainnet) ?? "", /not a mainnet RPC/);
 });
 
 test("on mainnet the public URL must be an https origin", () => {

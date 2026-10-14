@@ -9,10 +9,14 @@ export const MAINNET_CHAIN = "solana:mainnet";
 
 export const isMainnet = (env: Env = process.env) => env.MEMESTREAM_WALLET_CHAIN === MAINNET_CHAIN;
 
-/** Hostnames of RPC URLs that name mainnet (e.g. mainnet.helius-rpc.com, api.mainnet-beta.solana.com). */
+/**
+ * RPC hostnames that name mainnet anywhere (mainnet.helius-rpc.com, api.mainnet-beta.solana.com,
+ * solana-mainnet.g.alchemy.com, x.solana-mainnet.quiknode.pro). A cheap first check; the server
+ * also compares the RPC's genesis hash before building any transaction (src/server/prepare-tx.ts).
+ */
 const looksLikeMainnetRpc = (url: string | undefined) => {
   try {
-    return /(^|\.)mainnet/.test(new URL(url ?? "").hostname);
+    return /mainnet/i.test(new URL(url ?? "").hostname);
   } catch {
     return false;
   }
@@ -36,4 +40,15 @@ export function deploymentProblems(env: Env = process.env): string[] {
 export function assertSafeDeployment(env: Env = process.env): void {
   const problems = deploymentProblems(env);
   if (problems.length) throw new Error(`Unsafe memestream settings:\n- ${problems.join("\n- ")}`);
+}
+
+export const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
+
+/** Why the RPC's real cluster and the wallet chain disagree, or null if they match. */
+export function clusterMismatch(genesisHash: string, env: Env = process.env): string | null {
+  const rpcIsMainnet = genesisHash === MAINNET_GENESIS_HASH;
+  if (rpcIsMainnet === isMainnet(env)) return null;
+  return rpcIsMainnet
+    ? `MEMESTREAM_RPC_URL is a mainnet RPC but MEMESTREAM_WALLET_CHAIN is not ${MAINNET_CHAIN}.`
+    : `MEMESTREAM_WALLET_CHAIN is ${MAINNET_CHAIN} but MEMESTREAM_RPC_URL is not a mainnet RPC.`;
 }

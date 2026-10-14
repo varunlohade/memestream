@@ -60,7 +60,9 @@ The owner's step-by-step for launch day is in RUNBOOK-mainnet.md.
       getProgramAccounts, which public RPCs rate-limit.
 - [ ] `MEMESTREAM_WALLET_CHAIN=solana:mainnet` (the owner sets it; RUNBOOK-mainnet.md). This one value
       is the mainnet switch: it forces the label "Mainnet", markets off, and Solscan links without
-      `?cluster=` (2026-10-15). A mainnet RPC URL with any other wallet chain stops the build.
+      `?cluster=` (2026-10-15). A mainnet RPC URL with any other wallet chain stops the build, and
+      before building any transaction the server compares the RPC's genesis hash with the wallet
+      chain and refuses on a mismatch (`src/server/prepare-tx.ts`).
 - [x] Priority fees on transactions (2026-10-15). Every server-built transaction (launch, buy, sell,
       graduate, streamer and LP fee claims, market bets and redeems, the oracle's own sends, partner
       claims, the config script) gets a compute unit limit from a simulation (+20% + 10k CU; 400k if

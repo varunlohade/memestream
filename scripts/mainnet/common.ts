@@ -7,10 +7,10 @@ import { createInterface } from "node:readline/promises";
 import { existsSync } from "node:fs";
 import { type Connection, Keypair, PublicKey, type Transaction, VersionedTransaction } from "@solana/web3.js";
 import { isBase58Of } from "../../src/lib/base58";
+import { MAINNET_GENESIS_HASH } from "../../src/lib/network";
 import { addPriorityFee, maxPriorityFeeLamports, type PriorityFee, priorityFeeSettings } from "../../src/lib/priority-fee";
 import { readKeypair } from "../keys";
 
-export const MAINNET_GENESIS_HASH = "5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d";
 export const PUBLIC_MAINNET_RPC = "https://api.mainnet-beta.solana.com";
 
 /** The RPC from MAINNET_RPC_URL, else Solana's public one (fine for one dry run; rate-limited). */

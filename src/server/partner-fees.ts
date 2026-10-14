@@ -13,8 +13,11 @@ import { getChain } from "./chain";
 import { UserError } from "./errors";
 import { PRIORITY_FEE_RPC_CALLS, toPreparedTx } from "./prepare-tx";
 
-/** Claim transactions handed out per request; the page asks again for the rest. */
-export const MAX_CLAIM_TXS = 5;
+/**
+ * Claim transactions handed out per request. One, so each is signed with a fresh blockhash (a
+ * batch would expire while earlier ones confirm); the page asks again for the rest.
+ */
+export const MAX_CLAIM_TXS = 1;
 /** RPC calls: the config and every pool on it (one getProgramAccounts). */
 export const SUMMARY_RPC_CALLS = 4;
 /** A claim build adds the coin-account check and, per transaction, blockhash + priority fee. */

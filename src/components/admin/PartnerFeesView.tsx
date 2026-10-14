@@ -19,6 +19,8 @@ const SESSION_KEY = "memestream.predictions.session";
 const SESSION_EXPIRY_MARGIN_MS = 60_000;
 const STATUS_POLL_MS = 2_000;
 const STATUS_WAIT_MS = 90_000;
+/** Claim transactions per button press (about 4 coins each); press again for the rest. */
+const MAX_CLAIM_ROUNDS = 10;
 
 type Summary = { feeClaimer: string; canClaim: boolean; claimableSol: string; coinsWithFees: number; coins: number };
 
@@ -71,15 +73,19 @@ export function PartnerFeesView() {
 
   const load = async (auth: string) => setSummary(await fetchJson<Summary>("/api/admin/fees", { headers: { authorization: `Bearer ${auth}` } }));
 
+  /** One transaction per request, each built with a fresh blockhash just before it's signed. */
   const claim = async (auth: string) => {
-    const { transactions, more } = await fetchJson<{ transactions: PreparedTx[]; more: boolean }>("/api/admin/fees", { method: "POST", headers: { authorization: `Bearer ${auth}` } });
-    for (const [i, tx] of transactions.entries()) {
-      const signature = await signAndSend(tx.transaction);
-      const status = await waitFor(signature, tx.blockhash);
-      setLines((prev) => [...prev, `Claim ${i + 1}/${transactions.length}: ${status}. ${solscanTx(signature, chain)}`]);
-      if (status !== "confirmed") throw new Error("A claim didn't go through. Check it on Solscan, then press the button again.");
+    for (let n = 1; n <= MAX_CLAIM_ROUNDS; n++) {
+      const { transactions, more } = await fetchJson<{ transactions: PreparedTx[]; more: boolean }>("/api/admin/fees", { method: "POST", headers: { authorization: `Bearer ${auth}` } });
+      for (const tx of transactions) {
+        const signature = await signAndSend(tx.transaction);
+        const status = await waitFor(signature, tx.blockhash);
+        setLines((prev) => [...prev, `Claim ${n}: ${status}. ${solscanTx(signature, chain)}`]);
+        if (status !== "confirmed") throw new Error("A claim didn't go through. Check it on Solscan, then press the button again.");
+      }
+      if (!more) return;
     }
-    if (more) setLines((prev) => [...prev, "More fees are left. Press the button again."]);
+    setLines((prev) => [...prev, "More fees are left. Press the button again."]);
   };
 
   const onClick = async () => {

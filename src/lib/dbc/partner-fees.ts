@@ -18,6 +18,7 @@ import {
   createAssociatedTokenAccountIdempotentInstruction,
   createCloseAccountInstruction,
   getAssociatedTokenAddressSync,
+  NATIVE_MINT,
 } from "@solana/spl-token";
 import { ComputeBudgetProgram, type PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
@@ -67,6 +68,8 @@ export const partnerLaunchFee = (config: Pick<PoolConfig, "poolCreationFee">): B
 export async function loadPartnerFees(client: DynamicBondingCurveClient, config: PublicKey): Promise<PartnerFees> {
   const configState = await client.state.getPoolConfig(config);
   if (!configState) throw new InputError(`Config not found: ${config.toBase58()}`);
+  // The claim wraps and unwraps SOL; a config priced in another token needs other instructions.
+  if (!configState.quoteMint.equals(NATIVE_MINT)) throw new InputError("Partner claims support SOL-priced configs only");
   const launchFee = partnerLaunchFee(configState);
   const all = await client.state.getPoolsByConfig(config);
   const pools: PartnerFeePool[] = [];
