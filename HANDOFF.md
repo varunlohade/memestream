@@ -112,3 +112,21 @@ in the old session's scratchpad. Copy it if needed.
 - Only Varun's own Slack.
 - Varun presses submit and deploy himself.
 - Show UI previews (A/B/C) before building UI.
+
+## From chat-coins-58
+
+- **Oracle resolve (commit `a8e4756`, on main; deploy not confirmed):**
+  - Only the memestream oracle resolves predictions. For now the oracle is Varun, by hand, as an admin in `MEMESTREAM_ADMIN_WALLETS`.
+  - Streamers and mods can't resolve. After betting closes, they "witness": "It happened" or "It didn't", plus a note. This settles nothing. It only helps the admin and shows in disputes.
+  - An admin who streams or mods the coin, or who bet on the prediction, can't resolve it.
+  - Market pool fees (0.3%, to memestream's seed LP) are what pay for the oracle.
+  - `scripts/predictions-e2e.mts` still resolves as the streamer, so it fails. Give it an admin wallet. `scripts/markets-e2e.mts` is updated.
+- **Also on main:** crowd picks removed and the "Points are free..." note removed (`523528e`); no trade lock (`9ea3c02`, `156fd31`); the tagline "A prediction market for every live stream" (`5f5b1c3`).
+- **Invite-only launches (NOT merged):**
+  - Branch `invite-only` (`83e5f16`) has the first version.
+  - Branch `wip/chat-coins-58` (`45b72df`) is a snapshot of every uncommitted edit in `~/chat-coins`. It holds a newer version of the invite work, plus README, MAINNET-CHECKLIST, design mocks and demo scripts. It is based on `d65b66d`, so it needs a rebase.
+  - Rules: only a wallet in `MEMESTREAM_INVITES` (wallet:UCchannel) launches, and only on its own YouTube channel. The server seals the coin with `MEMESTREAM_VERIFY_SECRET`. Unverified coins cap buys at 0.1 SOL.
+  - Needs `YOUTUBE_API_KEY`. `MEMESTREAM_OPEN_LAUNCH=1` lets anyone launch (ignored on mainnet).
+- **Left out of git:** `~/chat-coins/demo/` videos, frames and stills (2.5 GB), and `demo/flows/.env.market-secret.local` (a secret). They stay on disk only.
+- **`~/chat-coins-invites`** (branch `oracle-resolve`) is now merged into main, so it can be removed.
+- **Colosseum Copilot** is connected (macOS keychain).
