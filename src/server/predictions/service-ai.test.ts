@@ -6,7 +6,8 @@ import { aiCheck, OPENROUTER_URL } from "./ai-check";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { TYPESAFE_URL } from "./review";
-import { type CoinFacts, predictionsService, type ServiceDeps } from "./service";
+import { liveSlotKeys } from "./game-doc";
+import { type CoinFacts, marketFacts, predictionsService, type ServiceDeps, urgentFirst } from "./service";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
@@ -252,8 +253,48 @@ for (const [name, make] of STORES) {
     assert.deepEqual([models.calls.rule, models.calls.vision, models.calls.jev], [1, 0, 0]);
     assert.equal(view.live[0].ai, "unclear");
     const day = new Date(T0).toISOString().slice(0, 10);
-    const [global, coin] = await store.read([`ai-calls:${day}`, `ai-calls:${day}:${COIN}`]);
-    assert.deepEqual([global.json, coin.json], ["1", "1"]);
+    const keys = [`ai-calls:${day}`, `ai-calls:${day}:${COIN}`];
+    assert.equal(await store.take(keys, [100, 1], MIN), false, "the coin's counter is at 1 of 1");
+    assert.equal(await store.take(keys, [2, 2], MIN), true, "both counters were at exactly 1");
+  });
+
+  test(`${name}: audit N3: the budget counter is atomic: parallel takes never conflict and never pass the limit`, async () => {
+    const { store } = setup(make);
+    const taken = await Promise.all(Array.from({ length: 20 }, () => store.take(["c:global", "c:coin"], [100, 7], MIN)));
+    assert.equal(taken.filter(Boolean).length, 7);
+  });
+
+  test(`${name}: audit N3: one picture is described once for all the coin's live predictions, and saved to each`, async () => {
+    const { models, viewAt, playToLive, service, settle, store } = setup(make);
+    await playToLive();
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Is it raining outside?" });
+    await settle();
+    await viewAt(T0 + 1_000); // the second goes live; its first grab
+    models.picture = 2;
+    const before = models.calls.vision;
+    await viewAt(T0 + 2 * FRAME_GAP_MS);
+    assert.equal(models.calls.vision, before + 1, "one description for both");
+    const slots = (await store.read(liveSlotKeys(COIN))).flatMap((d) => (d.json ? [JSON.parse(d.json)] : []));
+    assert.equal(slots.length, 2);
+    for (const p of slots) assert.ok(p.frames.some((f: { text: string }) => f.text.includes("picture 2")), `prediction ${p.id} has the shared note`);
+  });
+
+  test(`${name}: audit 6: the sweep keeps visiting a coin with no live prediction while a check is due, then drops it`, async () => {
+    const { models, viewAt, playToLive, service, clock } = setup(make);
+    models.happened = happenedAnswer("UNCLEAR", 0.95);
+    const id = await playToLive();
+    models.picture = 2;
+    await viewAt(LOCK);
+    await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1_000);
+    await service.act(COIN, STREAMER, { kind: "witness", id, outcome: "yes" }); // a check is due; nobody watches
+    models.happened = happenedAnswer("NO", 0.9);
+    const jevBefore = models.calls.jev;
+    assert.deepEqual(await service.sweepLive(10), { swept: 1, listed: 1 }, "listed with no live prediction");
+    assert.equal(models.calls.jev, jevBefore + 1, "the sweep ran the check");
+    clock.t = LOCK + FRAMES_AFTER_LOCK_MS + FLAG_WINDOW_MS + 2_000;
+    await service.sweepLive(10); // the flag window closes: the result counts
+    assert.deepEqual(await service.sweepLive(10), { swept: 0, listed: 0 }, "nothing left to do: dropped");
+    assert.equal((await service.view(COIN, "v1")).resolved[0].ai, "disagree");
   });
 
   test(`${name}: a failed rule leaves the question without one; the referee still works from the question`, async () => {
@@ -290,6 +331,21 @@ for (const [name, make] of STORES) {
     assert.equal(models.calls.jev, 1);
     const view = await service.view(COIN, "v1");
     assert.deepEqual([view.live.length, view.resolved[0].resolvedBy.role], [0, "ai"]);
-    assert.deepEqual(await service.sweepLive(10), { swept: 0, listed: 0 }, "no live prediction: nothing listed");
+    assert.deepEqual(await service.sweepLive(10), { swept: 1, listed: 1 }, "still listed while its flag window is open");
+    clock.t = LOCK + 1_000 + FLAG_WINDOW_MS;
+    await service.sweepLive(10);
+    assert.deepEqual(await service.sweepLive(10), { swept: 0, listed: 0 }, "its result counted: nothing left, dropped");
   });
 }
+
+test("audit N2: the sweep takes coins inside an evidence window first", () => {
+  const doc = (lockAt: number) => JSON.stringify({ live: [{ id: "1", slot: 0, text: "Q", lockAt }] });
+  const order = urgentFirst(["open", "done", "locked", "none"], [doc(T0 + MIN), doc(T0 - 60 * MIN), doc(T0 - MIN), null], T0);
+  assert.deepEqual(order, ["locked", "open", "done", "none"]);
+});
+
+test("audit F3: a market decides on game-screen and camera facts only (unknown sources dropped too)", () => {
+  const note = { kind: "after" as const, at: T0, text: "[game_ui] Score 13-11; [unknown] A banner says WIN; [camera] A man jumps" };
+  assert.equal(marketFacts(note).text, "[game_ui] Score 13-11; [camera] A man jumps");
+  assert.match(marketFacts({ ...note, text: "[unknown] WIN" }).text!, /^Nothing on the game screen/);
+});

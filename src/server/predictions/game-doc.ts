@@ -38,6 +38,17 @@ export const liveSlotKeys = (mint: string) => Array.from({ length: MAX_LIVE }, (
 export const LIVE_COINS_KEY = "predictions:live";
 /** The index change a commit of `game` makes: the coin is listed while it has a live prediction. */
 export const liveIndex = (mint: string, game: Game): SetChange => ({ key: LIVE_COINS_KEY, member: mint, add: game.live.length > 0 });
+/**
+ * The coins with background work left (a Redis set), kept by every game commit: a live prediction,
+ * a result still in its flag window, or an AI check still due. The live sweep visits these, so the
+ * referee, checks and results that count move on with nobody watching.
+ */
+export const WORK_COINS_KEY = "predictions:work";
+export const workIndex = (mint: string, game: Game): SetChange => ({
+  key: WORK_COINS_KEY,
+  member: mint,
+  add: game.live.length > 0 || game.resolved.some((p) => p.open !== null || p.check !== undefined),
+});
 
 /** A live prediction's entry in the coin document: the slot that holds it, and what a glance needs. */
 export type LiveEntry = { id: string; slot: number; text: string; lockAt: number };

@@ -31,11 +31,13 @@ export const REVIEW_MAX_TRIES = 5;
  * AI check of a YES/NO result (the referee's runs use the same pause and limit): a vision model
  * describes stream frames, jev decides what happened. A check of a result someone else resolved never
  * changes payouts. A run that fails is tried again after this pause, at most this many runs in all
- * (the first plus two retries); then it "couldn't tell". The pause is longer than a normal run (a
- * frame, a description and jev, each with its own timeout), and an answer from an older run never
- * counts, so a slow run can't land on top of a newer one.
+ * (the first plus two retries); then it "couldn't tell". A claimed run holds a lease of
+ * AI_RUN_LEASE_MS, longer than a whole run (a frame, a description and jev, each with its timeout
+ * and busy retries), so no other server starts the same run meanwhile; a run that failed gives the
+ * lease back and the next may start after the pause. An answer from an older run never counts.
  */
-export const AI_CHECK_RETRY_MS = 45_000;
+export const AI_CHECK_RETRY_MS = 20_000;
+export const AI_RUN_LEASE_MS = 2 * MINUTE_MS;
 export const AI_CHECK_MAX_TRIES = 3;
 /** Hard deadline: past this long after the result's flag window, an unfinished AI check ends as "couldn't tell", whatever the server's keys. */
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;

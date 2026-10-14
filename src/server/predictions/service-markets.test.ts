@@ -266,6 +266,21 @@ test("audit F1: no AI on the coin: the streamer's call on a market is only a pro
   assert.ok(calls.includes(`resolve ${id} yes`), "the admin's decision resolves it");
 });
 
+test("audit 1: a wallet holding shares of the coin's open market can't be made a mod (read on chain); an admin holding shares can't resolve", async () => {
+  const { deps, holders } = fakeMarkets();
+  const { clock, service, look, launch } = setup(deps);
+  const id = await launch();
+  await look();
+  holders.add("whale");
+  await assert.rejects(service.act(COIN, STREAMER, { kind: "mod", wallet: "whale", add: true }), /holds shares/);
+  await service.act(COIN, STREAMER, { kind: "mod", wallet: "clean", add: true });
+  assert.deepEqual((await service.view(COIN, STREAMER)).mods, ["clean"]);
+  clock.t += MIN;
+  await look();
+  holders.add(ORACLE);
+  await assert.rejects(service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" }), /hold shares of this market/);
+});
+
 test("the view shows the proposal, final at the window's end; then final", async () => {
   const { clock, look, id, calls } = await proposed();
   const r = (await look()).resolved[0];

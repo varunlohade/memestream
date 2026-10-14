@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, applyRule, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
-import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAME_NOTE_MAX, FRAMES_AFTER_LOCK_MS, MAX_FRAME_NOTES } from "./rules";
+import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, applyRule, releaseAiRun, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
+import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, AI_RUN_LEASE_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAME_NOTE_MAX, FRAMES_AFTER_LOCK_MS, MAX_FRAME_NOTES } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -54,9 +54,9 @@ test("check rule: written once the question is live (not at approval), at most t
   const first = startAi(game, T0, ON);
   assert.deepEqual(first.rules, [{ id, text: "Will chat win?" }]);
   assert.deepEqual(startAi(first.game, T0 + 1_000, ON).rules, [], "claimed: not twice at once");
-  const second = startAi(first.game, T0 + AI_CHECK_RETRY_MS, ON);
+  const second = startAi(first.game, T0 + AI_RUN_LEASE_MS, ON);
   assert.equal(second.rules.length, 1, "a failed write is tried once more");
-  assert.deepEqual(startAi(second.game, T0 + 2 * AI_CHECK_RETRY_MS, ON).rules, [], "then the question alone");
+  assert.deepEqual(startAi(second.game, T0 + 2 * AI_RUN_LEASE_MS, ON).rules, [], "then the question alone");
   const written = applyRule(second.game, id, `  YES if\n chat wins, see https://evil.example/x or scam.io ${"x".repeat(300)}`, T0, ON).game;
   assert.match(written.live[0].rule!, /^YES if chat wins, see or x+$/);
   assert.equal(written.live[0].rule!.length, 200);
@@ -187,19 +187,50 @@ test("no evidence (null verdict) ends the check with no tag", () => {
   assert.deepEqual([game.resolved[0].check, game.resolved[0].ai, game.resolved[0].disputed], [undefined, undefined, false]);
 });
 
-test("failed check runs retry after a pause, at most twice; then the result shows couldn't tell", () => {
+test("failed check runs give their lease back and retry after a pause, at most twice; then the result shows couldn't tell", () => {
   let game = resolveYes(liveGame(ON), ON);
+  const id = game.resolved[0].id;
   let t = T0 + MIN;
   for (let run = 1; run <= AI_CHECK_MAX_TRIES; run++) {
     const claim = startAi(game, t, ON);
     assert.deepEqual(claim.checks.map((c) => c.tries), [run]);
     game = claim.game;
-    assert.equal(startAi(game, t + AI_CHECK_RETRY_MS - 1, ON).checks.length, 0, "not before the pause");
-    t += AI_CHECK_RETRY_MS;
+    assert.equal(startAi(game, t + AI_RUN_LEASE_MS - 1, ON).checks.length, 0, "a running check holds its lease");
+    game = releaseAiRun(game, id, run, t + 1_000).game; // it failed
+    assert.equal(startAi(game, t + 1_000 + AI_CHECK_RETRY_MS - 1, ON).checks.length, 0, "not before the pause");
+    t += 1_000 + AI_CHECK_RETRY_MS;
   }
   assert.equal(startAi(game, t, ON).checks.length, 0, "no fourth run");
   game = apply(game, { kind: "tick" }, null, t).game;
   assert.deepEqual([game.resolved[0].check, game.resolved[0].ai?.verdict, game.resolved[0].disputed], [undefined, "unclear", false]);
+});
+
+test("audit 7: the last check run is never written off while it holds its lease; its late verdict still counts; a stale one doesn't", () => {
+  let game = resolveYes(liveGame(ON), ON);
+  const id = game.resolved[0].id;
+  let t = T0 + MIN;
+  for (let run = 1; run < AI_CHECK_MAX_TRIES; run++) {
+    game = releaseAiRun(startAi(game, t, ON).game, id, run, t).game;
+    t += AI_CHECK_RETRY_MS;
+  }
+  game = startAi(game, t, ON).game; // the last run, slow
+  game = apply(game, { kind: "tick" }, null, t + AI_RUN_LEASE_MS - 1).game;
+  assert.ok(game.resolved[0].check, "still running: not written off");
+  assert.equal(applyAiVerdict(game, id, "disagree", t + 100_000, ON, 1).changed, false, "an older run's verdict is ignored");
+  assert.equal(releaseAiRun(game, id, 1, t + 100_000).changed, false, "an older run can't give the lease back");
+  game = applyAiVerdict(game, id, "agree", t + 100_000, ON, AI_CHECK_MAX_TRIES).game;
+  assert.equal(game.resolved[0].ai?.verdict, "agree");
+});
+
+test("audit 5: an AI disagree stays a dispute when a later flag is below the threshold; the result never counts", () => {
+  const l = ledger();
+  let game = l.take(resolveYesResult(liveGame(ON, l), ON));
+  const id = game.resolved[0].id;
+  game = l.take(applyAiVerdict(game, id, "disagree", T0 + MIN + 1_000));
+  game = l.take(apply(game, { kind: "flag", id }, actor("b1"), T0 + MIN + 2_000, ON));
+  assert.deepEqual([game.resolved[0].flags, game.resolved[0].bettors, game.resolved[0].disputed], [1, 6, true], "1 flag of 6 doesn't clear it");
+  game = l.take(apply(game, { kind: "tick" }, null, T0 + MIN + FLAG_WINDOW_MS));
+  assert.deepEqual([game.resolved[0].askerReward, l.won.size], [0, 0]);
 });
 
 test("a check that never runs (keys removed, AI off) ends as couldn't tell at its hard deadline, and the result counts", () => {

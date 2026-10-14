@@ -17,6 +17,7 @@ import {
   AI_CHECK_MAX_TRIES,
   AI_CHECK_MAX_WAIT_MS,
   AI_CHECK_RETRY_MS,
+  AI_RUN_LEASE_MS,
   ASKER_REWARD,
   ASKER_REWARD_MIN_BETTORS,
   AUTO_CANCEL_CROWD_MS,
@@ -266,8 +267,10 @@ export type Actor = {
   eligible: boolean;
   holder: boolean;
   balance: number;
-  /** Holds YES or NO shares of the market a challenge or a decision is about (one budgeted read, those actions only). */
+  /** Holds YES or NO shares of the market a challenge, a decision or a resolve is about (one budgeted read, those actions only). */
   shares?: boolean;
+  /** The wallet a streamer makes a mod holds shares of one of the coin's open markets (read on chain, mod promotions only). */
+  modShares?: boolean;
 };
 /**
  * Facts from outside the coin's document: when the streamer's own heartbeat last came in, and
@@ -405,12 +408,20 @@ export type RuleTarget = { id: string; text: string };
 /** The referee's answer: a side with how it decided, or why it couldn't tell (then the streamer decides). */
 export type RefereeAnswer = ({ outcome: Side } & RefereeCall) | { unclear: RefereeWhy };
 
-/** Links and bare domains are cut from model text that is shown to people (a reason, a rule). */
-const LINKS = /\b(?:https?:\/\/|www\.)\S+|\b(?:[a-z0-9-]+\.)+(?:com|net|org|io|gg|tv|ly|co|xyz|lol|me|app|dev|info|link|site|live|fun|ai)\b\S*/gi;
+/**
+ * Links and anything that reads as a domain are cut from model text that is shown to people (a
+ * reason, a rule): any word.word with 2+ letters after the dot, spaced "x . com", and "x dot com".
+ */
+const LINKS = /\S*(?:https?:\/\/|www\.)\S*|\S+\.[a-z]{2,}\S*|\S+\s+\.\s+[a-z]{2,}\b\S*|\S+\s+dot\s+(?:com|net|org|io|gg|tv|xyz|lol|me|app|co)\b\S*/gi;
 const withoutLinks = (text: string) => text.replace(LINKS, "").replace(/\s+/g, " ").trim();
 /** A written rule: plain text on one line, no links, cut to CHECK_RULE_MAX; none if empty. */
 const cleanRule = (rule: string | null | undefined) => (rule ? withoutLinks(rule).slice(0, CHECK_RULE_MAX) : "") || undefined;
-const checkDue = (check: AiCheck, now: number) => check.tries < AI_CHECK_MAX_TRIES && (check.tries === 0 || now >= check.at + AI_CHECK_RETRY_MS);
+/**
+ * A claimed AI run holds its lease (AI_RUN_LEASE_MS, longer than a whole run with its timeouts and
+ * retries) unless it gave it back after a failure (releaseAiRun); only then may another run start.
+ */
+const leaseOver = (claim: { at: number }, now: number) => now >= claim.at + AI_RUN_LEASE_MS;
+const checkDue = (check: AiCheck, now: number) => check.tries < AI_CHECK_MAX_TRIES && (check.tries === 0 || leaseOver(check, now));
 /** A prediction with a real-SOL market (one that opened or is opening). */
 const hasMarket = (p: { market?: MarketState }) => p.market !== undefined && p.market.step !== "failed";
 /** Grabbing goes on this long after the lock: longer for a market, to catch a second preview refresh. */
@@ -419,13 +430,17 @@ export const frameWindowEnd = (live: Prediction) => live.lockAt + (hasMarket(liv
 export const refereeDeadline = (live: Prediction) => frameWindowEnd(live) + REFEREE_GRACE_MS;
 /** When a note's picture was taken: the CDN's Last-Modified when it gave one, else when it was grabbed. */
 export const shotAt = (f: FrameNote) => f.shot ?? f.at;
-/** Described pictures taken at or after the lock (a preview can be minutes old when grabbed). */
-export const freshNotes = (live: { lockAt: number; frames?: FrameNote[] }) => (live.frames ?? []).filter((f) => f.text && shotAt(f) >= live.lockAt);
+/**
+ * Described pictures taken at or after the lock (a preview can be minutes old when grabbed). For a
+ * market (`strict`), only pictures whose CDN time says so: a grab time alone proves nothing.
+ */
+export const freshNotes = (live: { lockAt: number; frames?: FrameNote[] }, strict = false) =>
+  (live.frames ?? []).filter((f) => f.text && (strict ? f.shot !== undefined && f.shot >= live.lockAt : shotAt(f) >= live.lockAt));
 const ended = (r: Referee | undefined) => r?.unclear !== undefined;
 /** A grab is due while it runs and until the frame window ends, at most every FRAME_GAP_MS, unless the referee gave up. */
 const grabDue = (live: Prediction, now: number) => !ended(live.referee) && now < frameWindowEnd(live) && (live.grabAt === undefined || now >= live.grabAt + FRAME_GAP_MS);
 /** The rule is written once the prediction is live: at most two tries, a pause apart. */
-const ruleDue = (live: Prediction, now: number) => !live.rule && (live.ruleTries ?? 0) < 2 && (live.ruleAt === undefined || now >= live.ruleAt + AI_CHECK_RETRY_MS);
+const ruleDue = (live: Prediction, now: number) => !live.rule && (live.ruleTries ?? 0) < 2 && (live.ruleAt === undefined || leaseOver({ at: live.ruleAt }, now));
 /**
  * The referee's first run waits for enough fresh pictures (one; MIN_MARKET_PICTURES for a market), or
  * the end of the frame window. An early "couldn't tell" waits for one last run at the window's end. A
@@ -434,11 +449,11 @@ const ruleDue = (live: Prediction, now: number) => !live.rule && (live.ruleTries
 function refereeDue(live: Prediction, now: number): boolean {
   if (now < live.lockAt) return false;
   const r = live.referee;
-  const enough = freshNotes(live).length >= (hasMarket(live) ? MIN_MARKET_PICTURES : 1);
+  const enough = freshNotes(live, hasMarket(live)).length >= (hasMarket(live) ? MIN_MARKET_PICTURES : 1);
   if (!r) return enough || now >= frameWindowEnd(live);
   if (ended(r)) return false;
   if (r.waitEnd) return now >= frameWindowEnd(live);
-  return r.tries < AI_CHECK_MAX_TRIES && now >= r.at + AI_CHECK_RETRY_MS;
+  return r.tries < AI_CHECK_MAX_TRIES && leaseOver(r, now);
 }
 
 /**
@@ -459,9 +474,13 @@ export const aiDue = (game: Game, now: number, env: Env) =>
   (Boolean(env.aiCheck) && game.live.some((live) => ruleDue(live, now) || grabDue(live, now) || refereeDue(live, now))) ||
   game.resolved.some((p) => p.check && checkDue(p.check, now));
 
+/** A grab joins one that is due for another prediction of the coin unless it grabbed this recently: one picture serves them all. */
+const GRAB_JOIN_MS = 10_000;
+
 /**
  * Claims every due rule, frame grab, referee run and AI check run, like startReviews: committing this
- * first means no other server starts the same one.
+ * first means no other server starts the same one. When one prediction's grab is due, every other
+ * one still in its frame window joins it, so their grabs line up and a picture is described once.
  */
 export function startAi(state: Game, now: number, env: Env): Result & { rules: RuleTarget[]; captures: CaptureTarget[]; referees: RefereeTarget[]; checks: CheckTarget[] } {
   const rules: RuleTarget[] = [];
@@ -469,6 +488,8 @@ export function startAi(state: Game, now: number, env: Env): Result & { rules: R
   const referees: RefereeTarget[] = [];
   const checks: CheckTarget[] = [];
   const result = run(state, now, env, ({ game }) => {
+    const grabbing = game.live.some((live) => grabDue(live, now) && !refereeDue(live, now));
+    const joins = (live: Prediction) => grabbing && !ended(live.referee) && now < frameWindowEnd(live) && (live.grabAt === undefined || now >= live.grabAt + GRAB_JOIN_MS);
     for (const live of env.aiCheck ? game.live : []) {
       if (ruleDue(live, now)) {
         Object.assign(live, { ruleTries: (live.ruleTries ?? 0) + 1, ruleAt: now });
@@ -478,7 +499,7 @@ export function startAi(state: Game, now: number, env: Env): Result & { rules: R
       if (refereeDue(live, now)) {
         live.referee = { tries: (live.referee?.tries ?? 0) + 1, at: now };
         referees.push({ id: live.id, text: live.text, rule, lockAt: live.lockAt, frames: live.frames ?? [], tries: live.referee.tries, market: hasMarket(live) });
-      } else if (grabDue(live, now)) {
+      } else if (grabDue(live, now) || joins(live)) {
         live.grabAt = now;
         const kind = now >= live.lockAt ? "after" : live.frames?.length ? "live" : "launch";
         captures.push({ id: live.id, text: live.text, rule, kind, at: now, hashes: (live.frames ?? []).flatMap((f) => (f.hash ? [f.hash] : [])) });
@@ -547,6 +568,20 @@ export function applyReferee(state: Game, id: string, tries: number, answer: Ref
     }
     const { outcome, model, confidence, reason, frames } = answer;
     settle(ctx, live, outcome, AI, { model: model.slice(0, 80), confidence, reason: withoutLinks(reason).slice(0, REFEREE_REASON_MAX), frames: frames.slice(0, MAX_FRAME_NOTES) });
+  });
+}
+
+/**
+ * A referee run or check run (`id`, run `tries`) that failed gives its lease back: the next run may
+ * start AI_CHECK_RETRY_MS from now. Only the current run can; anything else is left alone.
+ */
+export function releaseAiRun(state: Game, id: string, tries: number, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, ({ game }) => {
+    const released = now - AI_RUN_LEASE_MS + AI_CHECK_RETRY_MS;
+    const r = findLive(game, id)?.referee;
+    if (r && !ended(r) && !r.waitEnd && r.tries === tries && r.at > released) r.at = released;
+    const check = game.resolved.find((p) => p.id === id)?.check;
+    if (check && check.tries === tries && check.at > released) check.at = released;
   });
 }
 
@@ -807,7 +842,8 @@ function endStaleReferees({ game, now }: Ctx) {
   for (const live of game.live) {
     const r = live.referee;
     if (now < live.lockAt || r?.unclear !== undefined) continue;
-    const triedOut = r !== undefined && !r.waitEnd && r.tries >= AI_CHECK_MAX_TRIES && now >= r.at + AI_CHECK_RETRY_MS;
+    // The last run is never written off while it still holds its lease.
+    const triedOut = r !== undefined && !r.waitEnd && r.tries >= AI_CHECK_MAX_TRIES && leaseOver(r, now);
     if (triedOut) live.referee = { ...r, unclear: now, why: "error" };
     else if (now >= refereeDeadline(live)) live.referee = { tries: r?.tries ?? 0, at: r?.at ?? now, unclear: now, why: r?.why ?? "deadline" };
   }
@@ -817,7 +853,7 @@ function endStaleReferees({ game, now }: Ctx) {
 function endStaleChecks({ game, now }: Ctx) {
   for (const p of game.resolved) {
     if (!p.check) continue;
-    const triedOut = p.check.tries >= AI_CHECK_MAX_TRIES && now >= p.check.at + AI_CHECK_RETRY_MS;
+    const triedOut = p.check.tries >= AI_CHECK_MAX_TRIES && leaseOver(p.check, now);
     // Also ends when no run will ever come (keys removed, AI off): a result can never wait forever.
     const pastDeadline = now >= p.resolvedAt + FLAG_WINDOW_MS + AI_CHECK_MAX_WAIT_MS;
     if (!triedOut && !pastDeadline) continue;
@@ -1135,6 +1171,8 @@ function resolve(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"resolve">) {
   if (!p) throw new GameError("Nothing to resolve");
   if (now < p.lockAt) throw new GameError("Betting is still open");
   if (Object.hasOwn(p.bets, actor.wallet)) throw new GameError("You have a bet on this one, so you can't resolve it");
+  // No points bet is not proof of no stake: the market's shares are read on chain too.
+  if (hasMarket(p) && actor.shares) throw new GameError("You hold shares of this market, so you can't resolve it");
   settle(ctx, p, outcome, actor.wallet);
 }
 
@@ -1174,7 +1212,8 @@ function flagResult({ game, now }: Ctx, actor: Actor, id: string) {
   if (mine[2]) throw new GameError("You already flagged this");
   mine[2] = 1;
   p.flags += 1;
-  p.disputed = p.flags * 100 >= DISPUTE_PERCENT * p.bettors;
+  // Flags only add a reason: an AI check's disagree stays, whatever the flag count.
+  p.disputed ||= p.flags * 100 >= DISPUTE_PERCENT * p.bettors;
 }
 
 function changeMods({ game }: Ctx, actor: Actor, { wallet, add }: ActionOf<"mod">) {
@@ -1186,6 +1225,7 @@ function changeMods({ game }: Ctx, actor: Actor, { wallet, add }: ActionOf<"mod"
   if (wallet === game.creator || game.mods.includes(wallet)) return;
   if (game.mods.length >= MAX_MODS) throw new GameError(`At most ${MAX_MODS} mods`);
   if (game.live.some((p) => Object.hasOwn(p.bets, wallet))) throw new GameError("That wallet has a bet on a live prediction");
+  if (actor.modShares) throw new GameError("That wallet holds shares of one of this coin's markets");
   game.mods.push(wallet);
 }
 
@@ -1229,6 +1269,7 @@ function decideMarket(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"decide"
   const m = p?.market;
   if (!p || !m || m.step !== "open" || (!m.challenge && !needsAdmin(p))) throw new GameError("Nothing to decide");
   if (m.challenge?.by === actor.wallet) throw new GameError("Admins can't decide a challenge they made");
+  if (actor.shares) throw new GameError("You hold shares of this market, so you can't decide it");
   if (m.decision) throw new GameError("This market is already decided");
   m.decision = { outcome, by: actor.wallet, at: now };
   const c = m.challenge;

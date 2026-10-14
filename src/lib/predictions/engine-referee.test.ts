@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Actor, AI, apply, applyFrame, applyMarketDone, applyReferee, applyReview, applyRule, type Env, frameWindowEnd, type Game, GameError, marketFinal, needsAdmin, newGame, type RefereeAnswer, refereeDeadline, refereeState, refereeWhy, type Result, startAi, startMarkets } from "./engine";
-import { AI_CHECK_MAX_TRIES, AI_CHECK_RETRY_MS, AUTO_CANCEL_MS, FLAG_WINDOW_MS, FRAMES_AFTER_LOCK_MS, MARKET_CHALLENGE_MS, MARKET_DECISION_MS, MARKET_FRAMES_AFTER_LOCK_MS, REFEREE_GRACE_MS, REFEREE_REASON_MAX } from "./rules";
+import { type Actor, AI, apply, applyFrame, applyMarketDone, applyReferee, applyReview, applyRule, releaseAiRun, type Env, frameWindowEnd, type Game, GameError, marketFinal, needsAdmin, newGame, type RefereeAnswer, refereeDeadline, refereeState, refereeWhy, type Result, startAi, startMarkets } from "./engine";
+import { AI_CHECK_MAX_TRIES, AI_CHECK_RETRY_MS, AI_RUN_LEASE_MS, AUTO_CANCEL_MS, FLAG_WINDOW_MS, FRAMES_AFTER_LOCK_MS, MARKET_CHALLENGE_MS, MARKET_DECISION_MS, MARKET_FRAMES_AFTER_LOCK_MS, REFEREE_GRACE_MS, REFEREE_REASON_MAX } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -99,10 +99,11 @@ test("referee: a result counts only from its latest run; a stale or ended run is
   let game = grab(liveGame(ON), LOCK, "b");
   const first = claimReferee(game, LOCK);
   game = first.game;
-  const second = claimReferee(game, LOCK + AI_CHECK_RETRY_MS); // the first run hung; a retry starts
+  assert.equal(startAi(game, LOCK + AI_RUN_LEASE_MS - 1, ON).referees.length, 0, "a running run holds its lease");
+  const second = claimReferee(game, LOCK + AI_RUN_LEASE_MS); // the first run's server died; a retry starts
   assert.equal(second.target.tries, 2);
-  assert.equal(applyReferee(second.game, first.target.id, 1, YES, LOCK + AI_CHECK_RETRY_MS + 1, ON).changed, false, "run 1 is stale");
-  assert.equal(applyReferee(second.game, first.target.id, 2, YES, LOCK + AI_CHECK_RETRY_MS + 1, ON).game.resolved[0].resolvedBy, AI);
+  assert.equal(applyReferee(second.game, first.target.id, 1, YES, LOCK + AI_RUN_LEASE_MS + 1, ON).changed, false, "run 1 is stale");
+  assert.equal(applyReferee(second.game, first.target.id, 2, YES, LOCK + AI_RUN_LEASE_MS + 1, ON).game.resolved[0].resolvedBy, AI);
   assert.equal(applyReferee(game, game.live[0].id, 7, YES, LOCK, ON).changed, false, "a run never claimed");
   assert.equal(applyReferee(grab(liveGame(ON), LOCK, "b"), "1", 0, YES, LOCK, ON).changed, false, "no run at all");
 });
@@ -155,6 +156,16 @@ test("fallback: coins without the AI (Kick, no keys) go to the streamer at the l
   assert.deepEqual([game.resolved[0].outcome, game.resolved[0].resolvedBy, game.resolved[0].fallback, game.resolved[0].check], ["no", STREAMER, "no-keys", undefined]);
 });
 
+test("audit 1: a wallet holding the coin's market shares can't be made a mod; an admin holding shares can't resolve or decide", () => {
+  const game = liveGame(MARKETS);
+  const id = game.live[0].id;
+  refused(() => apply(game, { kind: "mod", wallet: "b9", add: true }, { ...actor(STREAMER), modShares: true }, T0, MARKETS), /holds shares/);
+  assert.ok(apply(game, { kind: "mod", wallet: "b9", add: true }, actor(STREAMER), T0, MARKETS).game.mods.includes("b9"));
+  refused(() => apply(game, { kind: "resolve", id, outcome: "yes" }, actor(ORACLE, true), LOCK, MARKETS), /hold shares of this market/);
+  const fallback = apply(liveGame({ ...OFF, markets: true }), { kind: "witness", id, outcome: "yes" }, actor(STREAMER), LOCK, OFF).game;
+  refused(() => apply(fallback, { kind: "decide", id, outcome: "yes" }, actor(ORACLE, true), LOCK + MIN, OFF), /hold shares of this market/);
+});
+
 test("fallback: a viewer can't decide; staff with a points bet or the market's shares can't decide (an admin must)", () => {
   const game = liveGame(OFF);
   const id = game.live[0].id;
@@ -183,11 +194,13 @@ test("markets: a streamer's fallback call is only a proposal: it waits for an ad
   }
 });
 
-test("markets: the referee needs two fresh pictures (it grabs for longer); one picture is not enough", () => {
-  let game = grab(liveGame(MARKETS), LOCK, "b", MARKETS);
+test("markets: the referee needs two pictures the CDN dates after the lock (it grabs for longer); one, or grab times alone, are not enough", () => {
+  let game = grab(liveGame(MARKETS), LOCK, "b", MARKETS, LOCK);
   assert.equal(frameWindowEnd(game.live[0]), LOCK + MARKET_FRAMES_AFTER_LOCK_MS);
   assert.equal(startAi(game, LOCK + 1_000, MARKETS).referees.length, 0, "one fresh picture: wait for another");
-  game = grab(game, LOCK + 5 * MIN, "c", MARKETS);
+  const undated = grab(game, LOCK + 5 * MIN, "c", MARKETS);
+  assert.equal(startAi(undated, LOCK + 5 * MIN + 1_000, MARKETS).referees.length, 0, "no CDN time: not fresh for a market");
+  game = grab(game, LOCK + 5 * MIN, "c", MARKETS, LOCK + 4 * MIN);
   const { target } = claimReferee(game, LOCK + 5 * MIN, MARKETS);
   assert.deepEqual([target.market, target.frames.length], [true, 2]);
   const one = claimReferee(grab(liveGame(MARKETS), LOCK, "b", MARKETS), LOCK + MARKET_FRAMES_AFTER_LOCK_MS, MARKETS);
@@ -195,7 +208,7 @@ test("markets: the referee needs two fresh pictures (it grabs for longer); one p
 });
 
 test("markets: the referee's YES is only a proposal: 2 h to challenge, then final; a challenge goes to an admin", () => {
-  let game = grab(grab(liveGame(MARKETS), LOCK, "b", MARKETS), LOCK + 5 * MIN, "c", MARKETS);
+  let game = grab(grab(liveGame(MARKETS), LOCK, "b", MARKETS, LOCK), LOCK + 5 * MIN, "c", MARKETS, LOCK + 4 * MIN);
   const id = game.live[0].id;
   const claim = claimReferee(game, LOCK + 5 * MIN, MARKETS);
   game = applyReferee(claim.game, id, claim.target.tries, YES, LOCK + 5 * MIN, MARKETS).game;
@@ -219,19 +232,35 @@ test("admins can always resolve once betting closes, even while the referee work
   assert.equal(applyReferee(game, id, claim.target.tries, YES, LOCK + 2_000, ON).changed, false);
 });
 
-test("referee: failed runs retry after a pause, three in all; then it couldn't tell, why 'error'", () => {
+test("referee: failed runs give their lease back and retry after a pause, three in all; then it couldn't tell, why 'error'", () => {
   let game = grab(liveGame(ON), LOCK, "b");
+  const id = game.live[0].id;
   let t = LOCK;
   for (let run = 1; run <= AI_CHECK_MAX_TRIES; run++) {
     const claim = startAi(game, t, ON);
     assert.deepEqual(claim.referees.map((r) => r.tries), [run]);
-    game = claim.game;
+    game = releaseAiRun(claim.game, id, run, t).game;
     assert.equal(startAi(game, t + AI_CHECK_RETRY_MS - 1, ON).referees.length, 0, "not before the pause");
     t += AI_CHECK_RETRY_MS;
   }
   assert.equal(startAi(game, t, ON).referees.length, 0, "no fourth run");
   game = apply(game, { kind: "tick" }, null, t, ON).game;
   assert.deepEqual([refereeState(game.live[0], t, ON), refereeWhy(game.live[0], ON)], ["unclear", "error"]);
+});
+
+test("audit 7: the last referee run is never written off while it holds its lease; its late answer counts", () => {
+  let game = grab(liveGame(ON), LOCK, "b");
+  const id = game.live[0].id;
+  let t = LOCK;
+  for (let run = 1; run < AI_CHECK_MAX_TRIES; run++) {
+    game = releaseAiRun(startAi(game, t, ON).game, id, run, t).game;
+    t += AI_CHECK_RETRY_MS;
+  }
+  game = startAi(game, t, ON).game; // the last run, slow (busy retries)
+  game = apply(game, { kind: "tick" }, null, t + AI_RUN_LEASE_MS - 1, ON).game;
+  assert.equal(refereeState(game.live[0], t + AI_RUN_LEASE_MS - 1, ON), "checking", "not written off while it runs");
+  game = applyReferee(game, id, AI_CHECK_MAX_TRIES, YES, t + 90_000, ON).game;
+  assert.equal(game.resolved[0].resolvedBy, AI, "its answer counts");
 });
 
 test("referee: no answer by its deadline (window + grace) means the streamer decides, why 'deadline'", () => {
