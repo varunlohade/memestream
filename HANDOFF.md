@@ -13,8 +13,11 @@ Today the streamer resolves and the AI check is only a second opinion (a disagre
    answers YES or NO, that is the PROPOSED result. It goes through the existing 2 h challenge window, and
    holders can still challenge. The card says "Proposed by AI: YES".
 2. **Streamer fallback:** if the AI says UNCLEAR, fails, times out or has no frames (YouTube often has none),
-   the streamer's Resolve Yes / No / Cancel buttons switch on, as today. The card says "AI couldn't tell, the
+   the streamer's Resolve Yes / No / Cancel buttons switch on. The card says "AI couldn't tell, the
    streamer decides".
+   **Conflict:** commit `a8e4756` (see "From chat-coins-58" below) took resolve away from streamers. Only an admin
+   can resolve now, and streamers only "witness". Varun's newer words win: the streamer decides when the AI can't.
+   Keep the admin for disputes, and keep the rule that a streamer who bet can't resolve.
 3. **Points-only predictions** follow the same rule.
 4. **Keep:** the challenge window, the admin decision on disputes, the 24 h auto-void, and no early resolve.
 5. **This is a money-path change** (it decides real-SOL market payouts). It needs tests, a fresh security
