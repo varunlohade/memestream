@@ -23,8 +23,8 @@ async function sweep(request: Request, guard: RpcGuard): Promise<Response> {
 }
 
 /**
- * /api/predictions/tick -> { swept, listed }, for a scheduler (Vercel Cron every minute): POST with
- * x-cron-secret, or GET as Vercel Cron sends it. Grabs stream frames and runs the AI referee for live
+ * /api/predictions/tick -> { swept, listed }, for a scheduler (the Railway worker in worker/, every minute): POST with
+ * x-cron-secret or "Authorization: Bearer <secret>", or GET. Grabs stream frames and runs the AI referee for live
  * predictions even when nobody watches the coin, and runs their clock.
  */
 export const POST = withRpcGuard({ name: "predictions-tick", burst: 2, perSecond: 1 }, (request: Request, _context: unknown, guard) => sweep(request, guard));
