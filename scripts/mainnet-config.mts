@@ -20,7 +20,7 @@ import { signatureStatus } from "../src/lib/tx-status";
 import BN from "bn.js";
 import { readOrCreateKeypair } from "./keys";
 import { argValue, clusterName, mainnetRpcUrl, priorityLine, rpcHost, signerFrom, typedConfirmation } from "./mainnet/common";
-import { prepareMainnetConfig } from "./mainnet/config-tx";
+import { existingConfigProblems, prepareMainnetConfig } from "./mainnet/config-tx";
 
 const DEFAULT_CONFIG_KEY = ".keys/mainnet-config.json";
 const argv = process.argv.slice(2);
@@ -37,9 +37,20 @@ console.log(`memestream mainnet config: ${send ? "SEND" : "dry run (nothing is s
 console.log(`RPC host: ${rpcHost(rpcUrl)} (cluster: ${cluster})`);
 console.log(`Config key file: ${configKeyPath} (git-ignored; keep it until the config exists)`);
 
-if (await connection.getAccountInfo(configKey.publicKey)) {
-  console.log(`\nA config already exists at ${configKey.publicKey.toBase58()}. Nothing to do.`);
-  console.log(`Set MEMESTREAM_CONFIG=${configKey.publicKey.toBase58()}`);
+const existing = await connection.getAccountInfo(configKey.publicKey);
+if (existing) {
+  // Something already lives at this address. Trust it only if it is exactly our mainnet config.
+  const address = configKey.publicKey.toBase58();
+  if (cluster !== "mainnet") throw new Error(`An account exists at ${address}, but this RPC isn't mainnet. Stopping.`);
+  const problems = await existingConfigProblems(connection, configKey.publicKey, existing);
+  if (problems.length) {
+    console.error(`\nAn account exists at ${address}, but it is NOT our mainnet config. Don't use it.`);
+    for (const p of problems) console.error(`  - ${p}`);
+    console.error("Check --config-key. To create a new config, point --config-key at a new file.");
+    process.exit(1);
+  }
+  console.log(`\nOur mainnet config already exists at ${address}, and every value matches. Nothing to send.`);
+  console.log(`Set MEMESTREAM_CONFIG=${address}`);
   process.exit(0);
 }
 
