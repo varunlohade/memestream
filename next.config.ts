@@ -1,4 +1,9 @@
 import type { NextConfig } from "next";
+import { assertSafeDeployment } from "./src/lib/network";
+
+// Fails `next build` and `next start` loudly on unsafe settings (e.g. the test wallet key on mainnet).
+// The server checks again on first chain access (src/server/chain.ts), for hosts that skip this file.
+assertSafeDeployment(process.env);
 
 const nextConfig: NextConfig = {
   cacheComponents: true,

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 /** Imports that mean a route can make RPC calls. */
-const CHAIN_IMPORTS = ["@/server/chain", "@/server/markets", "@/server/coins", "@/server/transactions", "@/server/metadata", "@solana/web3.js", "@meteora-ag/", "@/server/predictions"];
+const CHAIN_IMPORTS = ["@/server/chain", "@/server/markets", "@/server/coins", "@/server/transactions", "@/server/partner-fees", "@/server/metadata", "@solana/web3.js", "@meteora-ag/", "@/server/predictions"];
 
 function routeFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {

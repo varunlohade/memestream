@@ -15,24 +15,14 @@ import { prepareTrade, quoteTrade, type TradeInput } from "@/lib/dbc/trade";
 import { type DammSnapshot, graduatedPoolAddress, isCoinSolPool, loadDammSnapshot } from "@/lib/damm/pool";
 import { prepareDammTrade, quoteDammTrade } from "@/lib/damm/trade";
 import { buildClaimPoolFeesTx, lpPositionsOf } from "@/lib/damm/positions";
-import type { BuiltTx } from "@/lib/dbc/tx";
 import { baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, solToLamports } from "@/lib/dbc/units";
 import { coinForTicker, parseTicker } from "@/lib/short-link";
 import { metadataUri, parseStreamLink } from "@/lib/stream-link";
-import { getChain, poolForMint, rememberBuilt } from "./chain";
+import { getChain, poolForMint } from "./chain";
 import { listCoins } from "./coins";
 import { asUserFacing, UserError } from "./errors";
+import { toPreparedTx } from "./prepare-tx";
 import { assertNotSelfBuy } from "./rules";
-
-async function toPreparedTx(built: BuiltTx): Promise<PreparedTx> {
-  const { connection } = getChain();
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
-  built.tx.recentBlockhash = blockhash;
-  if (built.localSigners.length) built.tx.partialSign(...built.localSigners);
-  rememberBuilt(built.tx);
-  const bytes = built.tx.serialize({ requireAllSignatures: false, verifySignatures: false });
-  return { transaction: bytes.toString("base64"), blockhash };
-}
 
 /** Runs a build step, turning library input/state errors into user-facing ones. */
 async function userFacing<T>(work: () => Promise<T>): Promise<T> {

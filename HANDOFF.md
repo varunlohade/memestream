@@ -2,6 +2,15 @@
 
 Read this first in a new session. Everything below is current as of commit `acf473f` on `origin/main`.
 
+## Mainnet prep (branch `mainnet-launch`, 2026-10-15)
+
+Owner decisions and what's built are in MAINNET-CHECKLIST.md; the owner's launch steps are in
+RUNBOOK-mainnet.md. In short: priority fees on every server-built tx (`src/lib/priority-fee.ts`,
+`src/server/prepare-tx.ts`); `MEMESTREAM_WALLET_CHAIN=solana:mainnet` forces markets off and the
+label "Mainnet", and the build stops if `MEMESTREAM_DEV_WALLET_KEY` is set (`src/lib/network.ts`);
+`scripts/mainnet-config.mts` (dry run by default) and `scripts/claim-partner-fees.mts`; admin page
+`/admin/fees` for the owner's browser wallet to claim partner fees. Nothing was sent or deployed.
+
 ## NEXT TASK (Varun, 2026-10-14): the AI resolves first, the streamer is the fallback
 
 Varun's words: "let the ai check first if the said thing is true or not, if the ai doesnt say or

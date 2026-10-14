@@ -1,6 +1,7 @@
 import { buildMarketRedeemForWallet, buildMarketTradeForWallet, getMarket, previewMarketTrade } from "@/server/markets";
 import { registeredMarket } from "@/server/predictions";
 import { type MarketAction, parseMarketRequest } from "@/server/market-requests";
+import { PRIORITY_FEE_RPC_CALLS } from "@/server/prepare-tx";
 import { busy, withRpcGuard } from "@/server/rpc-guard";
 import { failOrBusy, jsonBody, ok } from "../../respond";
 
@@ -9,8 +10,9 @@ import { failOrBusy, jsonBody, ok } from "../../respond";
  * Each pool read is the pool plus the clock (x2 pools); the question is one more; odds with a wallet
  * reads its two token accounts and balance (one call); a build adds the blockhash; redeem also reads
  * the wallet's two token accounts. Only registered markets (the oracle made them) get this far.
+ * A build (trade, redeem) adds the priority fee's calls (recent fees and a simulation).
  */
-const RPC_CALLS: Record<MarketAction, number> = { odds: 6, preview: 5, trade: 6, redeem: 8 };
+const RPC_CALLS: Record<MarketAction, number> = { odds: 6, preview: 5, trade: 6 + PRIORITY_FEE_RPC_CALLS, redeem: 8 + PRIORITY_FEE_RPC_CALLS };
 
 export const POST = withRpcGuard({ name: "markets", burst: 10, perSecond: 1 }, async (request: Request, { params }: RouteContext<"/api/markets/[action]">, guard) => {
   try {

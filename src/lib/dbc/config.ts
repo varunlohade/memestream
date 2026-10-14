@@ -33,13 +33,16 @@ export function buildCreateConfigParams(
   return params;
 }
 
-/** Creates the config at a fresh address; that keypair is returned in `localSigners`. */
+/**
+ * Creates the config at a fresh address (or at `configKey`, e.g. one saved to a file so a dry run
+ * and the real send use the same address); that keypair is returned in `localSigners`.
+ */
 export async function buildCreateConfigTx(
   client: DynamicBondingCurveClient,
   preset: CoinPreset,
   wallets: Omit<ConfigAccounts, "config">,
+  configKey: Keypair = Keypair.generate(),
 ): Promise<BuiltTx & { config: PublicKey }> {
-  const configKey = Keypair.generate();
   const params = buildCreateConfigParams(preset, { ...wallets, config: configKey.publicKey });
   const tx = await client.partner.createConfig(params);
   return { ...built(tx, wallets.payer, [configKey]), config: configKey.publicKey };
