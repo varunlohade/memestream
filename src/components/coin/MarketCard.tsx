@@ -109,8 +109,10 @@ type CardProps = {
   betWindow?: [number, number] | null;
   /** Open the buy box on this side at once (picked from a compact row). */
   initialTicket?: Side | null;
-  /** After the streamer's result: the proposal, its challenge window, and the final outcome. */
+  /** After the result: the proposal, its challenge window, and the final outcome. */
   verdict?: MarketVerdictView;
+  /** The AI referee gave the result: what it saw (null when someone else gave it). */
+  aiReason?: string | null;
   /** Signed in to predictions (a challenge needs the session); an admin settles challenges. */
   signedIn?: boolean;
   admin?: boolean;
@@ -375,7 +377,7 @@ function WinLine({ side, preview }: { side: Side; preview: MarketPreview }) {
 const WHY: Record<"challenge" | "unresolved" | "ai", string> = {
   challenge: "A holder challenged it",
   unresolved: "Nobody resolved it in time",
-  ai: "The AI check disagreed with the streamer",
+  ai: "The AI check disagreed with the result",
 };
 
 /**
@@ -391,6 +393,7 @@ function VerdictLine(props: CardProps & { verdict: NonNullable<MarketVerdictView
   const [busy, setBusy] = useState(false);
   const holds = held(market.position?.yes) || held(market.position?.no);
   const proposed = OUTCOME_TEXT[verdict.proposed];
+  const byAi = props.aiReason != null;
 
   if (verdict.status === "final") {
     return <p className="pm-small mk-verdict">Final: {verdict.final ? OUTCOME_TEXT[verdict.final] : ""}. Paying out shortly.</p>;
@@ -438,8 +441,8 @@ function VerdictLine(props: CardProps & { verdict: NonNullable<MarketVerdictView
     <div className="mk-verdict">
       <div className="mk-result">
         <span className="pm-small num">
-          Proposed: {proposed}
-          {left !== null ? ` · final in ${countdown(left)}` : ""}
+          {byAi ? `AI says ${proposed}` : `Proposed: ${proposed}`}
+          {left !== null ? (byAi ? ` · ${countdown(left)} to challenge` : ` · final in ${countdown(left)}`) : ""}
         </span>
         {holds && !open && (
           <button type="button" className="mbtn off" onClick={() => setOpen(true)} disabled={!signedIn} title={signedIn ? undefined : "Sign in to challenge"}>
@@ -447,6 +450,7 @@ function VerdictLine(props: CardProps & { verdict: NonNullable<MarketVerdictView
           </button>
         )}
       </div>
+      {byAi && props.aiReason && <p className="mute pm-small">{props.aiReason}</p>}
       {open && (
         <div className="mk-box">
           <input className="slot pm-in" placeholder="Why is the result wrong?" maxLength={CHALLENGE_REASON_MAX} value={reason} onChange={(e) => setReason(e.target.value)} aria-label="Reason" />

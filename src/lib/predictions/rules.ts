@@ -28,14 +28,31 @@ export const QUESTION_MAX = 80;
 export const REVIEW_RETRY_MS = 5_000;
 export const REVIEW_MAX_TRIES = 5;
 /**
- * AI check of a YES/NO result: a vision model describes stream frames, jev decides what happened.
- * It never changes payouts. A run that fails is tried again after this pause, at most this many
- * runs in all (the first plus two retries); then the result shows "couldn't tell".
+ * AI check of a YES/NO result (the referee's runs use the same pause and limit): a vision model
+ * describes stream frames, jev decides what happened. A check of a result someone else resolved never
+ * changes payouts. A run that fails is tried again after this pause, at most this many runs in all
+ * (the first plus two retries); then it "couldn't tell".
  */
 export const AI_CHECK_RETRY_MS = 20_000;
 export const AI_CHECK_MAX_TRIES = 3;
 /** Hard deadline: past this long after the result's flag window, an unfinished AI check ends as "couldn't tell", whatever the server's keys. */
 export const AI_CHECK_MAX_WAIT_MS = 5 * 60_000;
+/**
+ * The AI referee: it decides a prediction first; if it can't, the streamer (or a mod) decides.
+ * While a prediction runs, and for FRAMES_AFTER_LOCK_MS after betting closes, the server grabs the
+ * stream's preview picture at most every FRAME_GAP_MS. Twitch renews that picture only about every
+ * 5 minutes, so a picture seen before is not described again, and grabbing goes on past the lock to
+ * catch the next one. At most MAX_FRAME_NOTES descriptions are kept (the first and the newest).
+ */
+export const FRAME_GAP_MS = 50_000;
+export const FRAMES_AFTER_LOCK_MS = 6 * MINUTE_MS;
+export const MAX_FRAME_NOTES = 12;
+/** With no YES or NO from the referee this long after betting closed, it "couldn't tell": the streamer decides. */
+export const REFEREE_DEADLINE_MS = 10 * MINUTE_MS;
+/** The referee's check rule (what on stream decides YES or NO), written when the question is approved. */
+export const CHECK_RULE_MAX = 200;
+/** The referee's short reason (what it saw), shown under its result. */
+export const REFEREE_REASON_MAX = 160;
 /**
  * On-chain markets (MEMESTREAM_MARKETS): claiming a market's server steps (create, close trading,
  * resolve) holds them this long, longer than a whole run can take (a create sends up to four
@@ -49,8 +66,8 @@ export const MARKET_RETRY_MS = 5 * 60_000;
 export const MARKET_FAILED_RETRY_MS = 30_000;
 export const MARKET_CREATE_MAX_TRIES = 3;
 /**
- * Challenge window (UMA style), markets only: the streamer's YES, NO or cancel is only proposed;
- * it goes on chain this long after, unless a holder challenges it with a points bond. An admin
+ * Challenge window (UMA style), markets only: a YES, NO or cancel (the AI referee's, the streamer's
+ * or an admin's) is only proposed; it goes on chain this long after, unless a holder challenges it with a points bond. An admin
  * (MEMESTREAM_ADMIN_WALLETS, never the coin's streamer) then decides the outcome; the bond is lost
  * if the proposal stands, comes back on a refund, and comes back plus a reward if the other side
  * wins. Markets nobody resolved, or where the AI check disagreed, also wait for an admin. No

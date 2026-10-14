@@ -441,6 +441,7 @@ export function Predictions({
             source={r.source ?? streamUrl}
             betWindow={r.launchedAt !== null && r.lockAt !== null ? [r.launchedAt, r.lockAt] : null}
             verdict={r.verdict}
+            aiReason={r.resolvedBy.role === "ai" ? (r.aiReason ?? "") : null}
             signedIn={Boolean(me)}
             admin={me?.admin ?? false}
             onChallenge={(reason, link) => act({ kind: "challenge", id: r.id, reason, ...(link.trim() ? { link: link.trim() } : {}) })}
@@ -467,7 +468,8 @@ type LiveView = PredictionsView["live"][number];
 
 /**
  * A live prediction, open: countdown, pools (tap a side to bet), and the bet box. Once betting
- * closes, staff say what happened (a witness) and an admin, the memestream oracle, resolves.
+ * closes, the AI referee checks the stream; if it can't tell, the streamer or a mod decides. An
+ * admin, the memestream oracle, may always resolve.
  */
 function LiveCard(props: {
   mint: string;
@@ -490,10 +492,10 @@ function LiveCard(props: {
   const locked = now !== null && now >= live.lockAt;
   const resolve = (
     <>
+      {locked && <RefereeLine ai={live.ai} />}
       {locked && <WitnessLine witness={live.witness} />}
-      {staff && <WitnessButtons locked={locked} busy={busy} witness={live.witness} onWitness={props.onWitness} />}
+      {staff && <WitnessButtons locked={locked} decide={live.ai === "unclear"} busy={busy} onWitness={props.onWitness} />}
       {admin && !staff && locked && <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />}
-      {!admin && !staff && locked && <p className="mute pm-small">The memestream oracle resolves this.</p>}
     </>
   );
   if (marketUp(live.market)) {
@@ -544,7 +546,7 @@ function LiveCard(props: {
           <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${sideLabel(live.myBet.side)}` : ""}</span>
         </div>
       )}
-      {staff && !locked && <p className="mute pm-small">Resolve once betting closes.</p>}
+      {!staff && !admin && locked && <RefereeLine ai={live.ai} />}
     </div>
   );
 }
@@ -650,18 +652,26 @@ function WitnessLine({ witness }: { witness: LiveView["witness"] }) {
   );
 }
 
-/** Staff can't resolve: once betting closes they tell the oracle what happened, with an optional note. */
-function WitnessButtons({ locked, busy, witness, onWitness }: { locked: boolean; busy: boolean; witness: LiveView["witness"]; onWitness: (outcome: Side, note: string) => void }) {
+/** Where the result stands once betting closed: the AI referee checking, or the streamer deciding. */
+function RefereeLine({ ai }: { ai: LiveView["ai"] }) {
+  if (ai === "checking") return <p className="mute pm-small">AI is checking the stream…</p>;
+  if (ai === "unclear") return <p className="mute pm-small">AI couldn&apos;t tell. The streamer decides.</p>;
+  return null;
+}
+
+/** Staff decide only when the AI referee couldn't tell (`decide`): YES or NO, with an optional note. */
+function WitnessButtons(props: { locked: boolean; decide: boolean; busy: boolean; onWitness: (outcome: Side, note: string) => void }) {
+  const { locked, decide, busy, onWitness } = props;
   const [note, setNote] = useState("");
-  if (!locked) return <p className="mute pm-small">When betting closes, tell memestream what happened. The memestream oracle resolves it.</p>;
+  if (!locked) return <p className="mute pm-small">When betting closes, the AI checks the stream. If it can&apos;t tell, you decide.</p>;
+  if (!decide) return null;
   return (
     <div>
-      <p className="mute pm-small">What happened? The memestream oracle resolves it; your answer helps if there&apos;s a dispute.</p>
       <input className="slot pm-amt" style={{ width: "100%", marginBottom: 8 }} placeholder="Optional note (what the stream showed)" maxLength={WITNESS_NOTE_MAX} value={note} onChange={(e) => setNote(e.target.value)} disabled={busy} />
       <div className="pm-res3">
         {(["yes", "no"] as const).map((side) => (
-          <button key={side} type="button" className={`mbtn ${witness?.outcome === side ? RESOLVE_CLASSES[side] : "off"}`} disabled={busy} onClick={() => onWitness(side, note.trim())}>
-            {side === "yes" ? "It happened" : "It didn't"}
+          <button key={side} type="button" className={`mbtn ${RESOLVE_CLASSES[side]}`} disabled={busy} onClick={() => onWitness(side, note.trim())}>
+            {side === "yes" ? "Decide: YES" : "Decide: NO"}
           </button>
         ))}
       </div>
@@ -702,7 +712,7 @@ function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
 function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void; bare?: boolean }) {
   const result = betOutcome(r.my, r.outcome);
   const { role, wallet } = r.resolvedBy;
-  const by = role === "auto" ? "auto-cancelled" : role === "admin" ? "memestream oracle" : wallet ? `${role} ${shortAddress(wallet)}` : role;
+  const by = role === "auto" ? "auto-cancelled" : role === "ai" ? "AI referee" : role === "admin" ? "memestream oracle" : wallet ? `${role} ${shortAddress(wallet)}` : role;
   const at = new Date(r.resolvedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
     <div className="pm-rr num">
@@ -722,6 +732,11 @@ function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result:
         </button>
       ) : (
         <span className="pm-flag mute">{r.my?.flagged ? "Flagged" : ""}</span>
+      )}
+      {!bare && role === "ai" && r.aiReason && (
+        <span className="mute pm-small" style={{ gridColumn: "1 / -1" }}>
+          AI saw: {r.aiReason}
+        </span>
       )}
       {r.witness && r.verdict && r.verdict.status !== "final" && (
         <span className="mute pm-small" style={{ gridColumn: "1 / -1" }}>

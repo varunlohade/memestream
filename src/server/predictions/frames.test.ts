@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { fetchFrame, frameUrls, MAX_FRAME_BYTES } from "./frames";
 
@@ -47,7 +48,8 @@ test("fetchFrame: the first preview that loads, no redirects; a 404 falls throug
     return String(url).includes("maxres") ? new Response("nope", { status: 404, headers: { "content-type": "image/jpeg" } }) : jpeg(3);
   };
   const frame = await fetchFrame(urls, { fetch });
-  assert.deepEqual(frame, { url: urls[1], mime: "image/jpeg", base64: Buffer.from([7, 7, 7]).toString("base64") });
+  const hash = createHash("sha256").update(Buffer.from([7, 7, 7])).digest("hex").slice(0, 16);
+  assert.deepEqual(frame, { url: urls[1], mime: "image/jpeg", base64: Buffer.from([7, 7, 7]).toString("base64"), hash });
   assert.deepEqual(seen.map((s) => s.redirect), ["error", "error"]);
 });
 

@@ -8,7 +8,7 @@ import type { Outcome, Side } from "./rules";
 export type MarketStepView = "opening" | "open" | "closed" | "resolved" | "failed" | null;
 
 /**
- * Where a resolved prediction's market stands (markets only): "proposed" (the streamer's result,
+ * Where a resolved prediction's market stands (markets only): "proposed" (the AI's, streamer's or admin's result,
  * final at `finalAt` unless challenged), "disputed" (challenged, or waiting for an admin because
  * nobody resolved it or the AI check disagreed), or "final" (`final` is what the market pays).
  */
@@ -64,8 +64,13 @@ export type PredictionsView = {
     market: MarketStepView;
     /** What the market resolves from: the streamer's official link, else null (the stream decides). */
     source: string | null;
-    /** What the streamer or a mod says happened, once betting closed (the admin resolves). */
+    /** What the streamer or a mod says happened, once betting closed. */
     witness: WitnessView;
+    /**
+     * Once betting closed: "checking" while the AI referee decides; "unclear" when it couldn't tell
+     * (or the coin has no AI): then the streamer or a mod decides. null while betting is open.
+     */
+    ai: "checking" | "unclear" | null;
   }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;
@@ -82,12 +87,14 @@ export type PredictionsView = {
     text: string;
     outcome: Outcome;
     resolvedAt: number;
-    /** "admin": the memestream oracle. `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto"). */
-    resolvedBy: { role: "admin" | "streamer" | "mod" | "auto"; wallet: string | null };
+    /** "ai": the AI referee; "admin": the memestream oracle. `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto" and "ai"). */
+    resolvedBy: { role: "ai" | "admin" | "streamer" | "mod" | "auto"; wallet: string | null };
     witness: WitnessView;
     disputed: boolean;
-    /** The AI check's second opinion: "checking" while it runs; null if no check ran. */
+    /** The AI check's second opinion on a result someone else gave: "checking" while it runs; null if no check ran. */
     ai: "checking" | "agree" | "disagree" | "unclear" | null;
+    /** What the AI referee saw, when it decided the result. */
+    aiReason: string | null;
     /** Flags are taken until then (ms); null once the result counts. */
     flagUntil: number | null;
     my: { bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;

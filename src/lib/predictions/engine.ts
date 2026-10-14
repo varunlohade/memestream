@@ -6,9 +6,10 @@
  * Flow: signed-in holders of the coin suggest YES/NO questions (10 points, back when it goes live)
  * and upvote them (free); the streamer or a mod launches them, or their own question (crowd picks
  * are off in the app). Up to MAX_LIVE live predictions at a time, 20 per stream. Viewers bet on a
- * side of each until it locks. Then the streamer or a mod can say what happened (a witness), and the
- * memestream oracle, an admin by hand for now, resolves it YES/NO/Cancel; winners split that
- * prediction's losing pool (parimutuel, no house fee). Markets then go through the challenge window.
+ * side of each until it locks. Then the AI referee decides first, from stream frames grabbed while it
+ * ran. If it can't tell (or the coin has no frames), the streamer or a mod decides YES/NO. An admin
+ * (the memestream oracle) may always resolve, YES/NO/Cancel. Winners split that prediction's losing
+ * pool (parimutuel, no house fee). Markets then go through the challenge window.
  * A result counts for leaderboards and the asker reward only after its flag window, if not disputed.
  */
 import {
@@ -26,8 +27,14 @@ import {
   DEFAULT_WINDOW_MIN,
   DISPUTE_PERCENT,
   FLAG_WINDOW_MS,
+  CHECK_RULE_MAX,
+  FRAME_GAP_MS,
   FRAME_NOTE_MAX,
+  FRAMES_AFTER_LOCK_MS,
   isBetWindow,
+  MAX_FRAME_NOTES,
+  REFEREE_DEADLINE_MS,
+  REFEREE_REASON_MAX,
   MAX_BET,
   MAX_BETTORS,
   MAX_HISTORY,
@@ -76,6 +83,8 @@ export type Suggestion = {
   review?: Review;
   /** The AI review's betting window, if it gave one. */
   windowMin?: number;
+  /** The referee's check rule, written when the review approved it. */
+  rule?: string;
 };
 /** An AI review in progress: checks started so far, and when the last one started. */
 export type Review = { tries: number; at: number };
@@ -84,14 +93,27 @@ export type PendingLaunch = { id: string; text: string; by: string; at: number; 
 /** A short note for one wallet (or every staff wallet, `to: STAFF`) until `until`. */
 export type Notice = { to: string; text: string; until: number };
 export type BetRecord = { side: Side; amount: number; eligible: boolean };
-/** When a stream frame is grabbed for the AI check. */
-export type FrameKind = "launch" | "lock" | "resolve";
-/** A frame grabbed at `at`, as a short description (null: not described yet, or no frame). Never the image. */
-export type FrameNote = { kind: FrameKind; at: number; text: string | null };
+/**
+ * When a stream frame was grabbed: the first at launch, "live" while betting is open, "after" once it
+ * closed, "resolve" for a check after someone else resolved it ("lock": older games only).
+ */
+export type FrameKind = "launch" | "live" | "after" | "lock" | "resolve";
+/**
+ * A frame grabbed at `at`, as a short description (null: an older game's empty claim). `hash`: a
+ * short hash of the picture, so the same picture is described once. Never the image.
+ */
+export type FrameNote = { kind: FrameKind; at: number; text: string | null; hash?: string };
 /** The AI check's second opinion on the streamer's result. */
 export type AiVerdict = "agree" | "disagree" | "unclear";
-/** An AI check waiting for its verdict: runs started so far, when the last one started, the frames grabbed earlier. */
-export type AiCheck = { tries: number; at: number; frames: FrameNote[] };
+/** An AI check waiting for its verdict: runs started so far, when the last one started, the frames grabbed earlier, the check rule. */
+export type AiCheck = { tries: number; at: number; frames: FrameNote[]; rule?: string };
+/**
+ * The AI referee on a live prediction once betting closed: runs started so far, when the last one
+ * started, and when it gave up (`unclear`): from then on the streamer or a mod decides.
+ */
+export type Referee = { tries: number; at: number; unclear?: number };
+/** How the referee decided a result: jev's model, its confidence, what it saw, and the frames' times. */
+export type RefereeCall = { model: string; confidence: number; reason: string; frames: number[] };
 /**
  * A prediction's on-chain market (MEMESTREAM_MARKETS). Its resolution: opening -> open -> resolved,
  * or failed when it couldn't be created. Its trading, apart: `closed` once the oracle took its
@@ -109,7 +131,7 @@ export type MarketState = {
   challenge?: Challenge;
   decision?: Decision;
 };
-/** The streamer's (or a mod's) account of what happened, for the admin who resolves: a witness, never the decider. */
+/** The streamer's (or a mod's) account of what happened: for the admin, or the decision once the AI referee couldn't tell. */
 export type Witness = { outcome: Side; note?: string; by: string; at: number };
 /** A holder's challenge of the admin's proposed result, with its points bond. */
 export type Challenge = { by: string; at: number; reason: string; link?: string; bond: number };
@@ -131,10 +153,16 @@ export type Prediction = {
   yes: number;
   no: number;
   bettors: number;
-  /** Frames grabbed for the AI check (only on a coin whose stream has frames, with the check set up). */
+  /** Frames grabbed for the AI referee (only on a coin whose stream has frames, with the AI set up). */
   frames?: FrameNote[];
+  /** When the last frame grab started (one per FRAME_GAP_MS). */
+  grabAt?: number;
+  /** What on stream decides YES or NO, from the review; without one, the question alone. */
+  rule?: string;
+  /** The AI referee's runs once betting closed. */
+  referee?: Referee;
   market?: MarketState;
-  /** What the streamer or a mod says happened, once betting closed. */
+  /** What the streamer or a mod says happened, once betting closed (in the fallback, their decision). */
   witness?: Witness;
   /** The official source the streamer named for a real-world question (an http(s) link); else the stream decides. */
   source?: string;
@@ -152,7 +180,7 @@ export type Summary = {
   no: number;
   bettors: number;
   resolvedAt: number;
-  /** "auto" (nobody resolved in time) or the admin wallet that resolved it. */
+  /** "auto" (nobody resolved in time), "ai" (the referee), or the wallet that resolved it (an admin, the streamer or a mod). */
   resolvedBy: string;
   askerReward: number;
   flags: number;
@@ -168,6 +196,8 @@ export type Summary = {
   window?: [number, number];
   /** What the streamer or a mod said happened. */
   witness?: Witness;
+  /** How the AI referee decided it (resolvedBy "ai" only). */
+  referee?: RefereeCall;
 };
 export type FlagWindow = {
   /** Each bettor's [stake, payout, flagged (1) or not (0)]. */
@@ -233,7 +263,7 @@ export type Actor = {
 export type Env = {
   streamerSeenAt: number | null;
   streamStartedAt?: number | null;
-  /** The coin's stream has frames and the AI check is set up (keys present). */
+  /** The coin's stream has frames and the AI is set up (keys present): the referee decides first. */
   aiCheck?: boolean;
   /** On-chain markets are on (MEMESTREAM_MARKETS): each prediction that goes live gets one. */
   markets?: boolean;
@@ -263,6 +293,8 @@ const BALANCE_PER_BET_POINT = 2;
 export const CROWD = "crowd";
 /** `resolvedBy` for a prediction nobody resolved in time. */
 export const AUTO = "auto";
+/** `resolvedBy` for a prediction the AI referee decided. */
+export const AI = "ai";
 /** `Notice.to` for a note every staff wallet sees. */
 export const STAFF = "staff";
 
@@ -293,8 +325,8 @@ export const reviewsDue = (game: Game, now: number) =>
   [...game.suggestions, ...(game.pending ? [game.pending] : [])].some((item) => item.review && reviewDue(item.review, now));
 /** The question a verdict is about: a suggestion or the staff launch, by id. */
 export type ReviewTarget = { id: string; text: string };
-/** `windowMin`: the AI's betting window, if it gave one (one not in BET_WINDOWS_MIN is ignored). */
-export type ReviewVerdict = { approved: true; windowMin?: number | null } | { approved: false; text: string };
+/** `windowMin`: the AI's betting window, if it gave one (one not in BET_WINDOWS_MIN is ignored). `rule`: the referee's check rule, if one was written. */
+export type ReviewVerdict = { approved: true; windowMin?: number | null; rule?: string | null } | { approved: false; text: string };
 
 export const hasUpvoted = (suggestion: Suggestion, wallet: string) =>
   suggestion.upvoters.includes(wallet) || suggestion.extra.includes(upvoteFingerprint(wallet));
@@ -340,59 +372,125 @@ export function startReviews(state: Game, now: number, env: Env = { streamerSeen
  */
 export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVerdict, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, (ctx) => {
-    if (verdict.approved) approveReview(ctx, target, isBetWindow(verdict.windowMin) ? verdict.windowMin : undefined);
+    if (verdict.approved) approveReview(ctx, target, isBetWindow(verdict.windowMin) ? verdict.windowMin : undefined, cleanRule(verdict.rule));
     else rejectReview(ctx, target, verdict.text, false);
   });
 }
 
-/** A frame to grab and describe for a live prediction. */
-export type CaptureTarget = { id: string; text: string; kind: FrameKind };
-/** A result to check: its question, the streamer's outcome, the frames grabbed before, and which run this is. */
-export type CheckTarget = { id: string; text: string; outcome: Side; frames: FrameNote[]; tries: number };
+/** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has. */
+export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; hashes: string[] };
+/** A result to check: its question, the outcome someone else gave, the frames grabbed before, and which run this is. */
+export type CheckTarget = { id: string; text: string; rule: string | null; outcome: Side; frames: FrameNote[]; tries: number };
+/** A locked prediction for the referee to decide, from its frames; `tries` counts this run. */
+export type RefereeTarget = { id: string; text: string; rule: string | null; lockAt: number; frames: FrameNote[]; tries: number };
+/** The referee's answer: a side with how it decided, or "unclear" (the streamer decides). */
+export type RefereeAnswer = ({ outcome: Side } & RefereeCall) | "unclear";
 
+/** A rule from the review: plain text on one line, cut to CHECK_RULE_MAX; none if empty. */
+const cleanRule = (rule: string | null | undefined) => rule?.replace(/\s+/g, " ").trim().slice(0, CHECK_RULE_MAX) || undefined;
 const checkDue = (check: AiCheck, now: number) => check.tries < AI_CHECK_MAX_TRIES && (check.tries === 0 || now >= check.at + AI_CHECK_RETRY_MS);
-const capturesFor = (live: Prediction, now: number): FrameKind[] =>
-  (["launch", "lock"] as const).filter((kind) => (kind === "launch" || now >= live.lockAt) && !live.frames?.some((f) => f.kind === kind));
-/** Whether a frame grab or an AI check is due now. */
-export const aiDue = (game: Game, now: number, env: Env) =>
-  (Boolean(env.aiCheck) && game.live.some((live) => capturesFor(live, now).length > 0)) || game.resolved.some((p) => p.check && checkDue(p.check, now));
+/** A grab is due while it runs and a while after betting closes, at most every FRAME_GAP_MS, until the referee starts. */
+const grabDue = (live: Prediction, now: number) =>
+  !live.referee && now < live.lockAt + FRAMES_AFTER_LOCK_MS && (live.grabAt === undefined || now >= live.grabAt + FRAME_GAP_MS);
+/** A picture from after betting closed is in: the preview has refreshed since. */
+const freshFrame = (live: Prediction) => Boolean(live.frames?.some((f) => f.text && f.at >= live.lockAt));
+/** The referee's first run waits for a fresh picture, or FRAMES_AFTER_LOCK_MS; a failed run is tried again after a pause. */
+function refereeDue(live: Prediction, now: number): boolean {
+  if (now < live.lockAt) return false;
+  const r = live.referee;
+  if (!r) return freshFrame(live) || now >= live.lockAt + FRAMES_AFTER_LOCK_MS;
+  return r.unclear === undefined && r.tries < AI_CHECK_MAX_TRIES && now >= r.at + AI_CHECK_RETRY_MS;
+}
 
 /**
- * Claims every due frame grab (launch; lock once betting closes) and AI check run, like
- * startReviews: committing this first means no other server starts the same one.
+ * Where a live prediction's result stands: null while betting is open; "checking" while the AI
+ * referee works on it; "unclear" once it couldn't tell, or when the coin has no AI (no frames, no
+ * keys): then the streamer or a mod decides.
  */
-export function startAi(state: Game, now: number, env: Env): Result & { captures: CaptureTarget[]; checks: CheckTarget[] } {
+export function refereeState(live: Prediction, now: number, env: Env): "checking" | "unclear" | null {
+  if (now < live.lockAt) return null;
+  return !env.aiCheck || live.referee?.unclear !== undefined ? "unclear" : "checking";
+}
+
+/** Whether a frame grab, a referee run or an AI check is due now. */
+export const aiDue = (game: Game, now: number, env: Env) =>
+  (Boolean(env.aiCheck) && game.live.some((live) => grabDue(live, now) || refereeDue(live, now))) || game.resolved.some((p) => p.check && checkDue(p.check, now));
+
+/**
+ * Claims every due frame grab, referee run and AI check run, like startReviews: committing this
+ * first means no other server starts the same one.
+ */
+export function startAi(state: Game, now: number, env: Env): Result & { captures: CaptureTarget[]; referees: RefereeTarget[]; checks: CheckTarget[] } {
   const captures: CaptureTarget[] = [];
+  const referees: RefereeTarget[] = [];
   const checks: CheckTarget[] = [];
   const result = run(state, now, env, ({ game }) => {
     for (const live of env.aiCheck ? game.live : []) {
-      for (const kind of capturesFor(live, now)) {
-        live.frames = [...(live.frames ?? []), { kind, at: now, text: null }];
-        captures.push({ id: live.id, text: live.text, kind });
+      const rule = live.rule ?? null;
+      if (refereeDue(live, now)) {
+        live.referee = { tries: (live.referee?.tries ?? 0) + 1, at: now };
+        referees.push({ id: live.id, text: live.text, rule, lockAt: live.lockAt, frames: live.frames ?? [], tries: live.referee.tries });
+      } else if (grabDue(live, now)) {
+        live.grabAt = now;
+        const kind = now >= live.lockAt ? "after" : live.frames?.length ? "live" : "launch";
+        captures.push({ id: live.id, text: live.text, rule, kind, at: now, hashes: (live.frames ?? []).flatMap((f) => (f.hash ? [f.hash] : [])) });
       }
     }
     for (const p of game.resolved) {
       if (!p.check || !checkDue(p.check, now) || p.outcome === "cancel") continue;
       p.check = { ...p.check, tries: p.check.tries + 1, at: now };
-      checks.push({ id: p.id, text: p.text, outcome: p.outcome, frames: p.check.frames, tries: p.check.tries });
+      checks.push({ id: p.id, text: p.text, rule: p.check.rule ?? null, outcome: p.outcome, frames: p.check.frames, tries: p.check.tries });
     }
   });
-  return { ...result, captures, checks };
+  return { ...result, captures, referees, checks };
 }
 
-/** A grabbed frame's description (null: no frame). Only fills a claimed, empty note; anything else is left alone. */
-export function applyFrame(state: Game, target: CaptureTarget, text: string | null, now: number, env: Env = { streamerSeenAt: null }): Result {
+/** Adds a described picture to `notes`, in time order; past MAX_FRAME_NOTES the first and the newest stay. */
+function withNote(notes: FrameNote[], note: FrameNote): FrameNote[] {
+  const all = [...notes.filter((f) => f.text), note].sort((a, b) => a.at - b.at);
+  return all.length <= MAX_FRAME_NOTES ? all : [all[0], ...all.slice(-(MAX_FRAME_NOTES - 1))];
+}
+
+/**
+ * A grabbed frame's description (null: no frame). A picture already described (same hash) is not
+ * added again. It goes to the live prediction, or to the check of a result resolved meanwhile.
+ */
+export function applyFrame(state: Game, target: CaptureTarget, frame: { hash: string; text: string } | null, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, ({ game }) => {
-    const notes = game.live.find((p) => p.id === target.id)?.frames ?? game.resolved.find((p) => p.id === target.id)?.check?.frames;
-    const note = notes?.find((f) => f.kind === target.kind && f.text === null);
-    if (note && text) note.text = text.slice(0, FRAME_NOTE_MAX);
+    if (!frame || !frame.text) return;
+    const note: FrameNote = { kind: target.kind, at: target.at, text: frame.text.slice(0, FRAME_NOTE_MAX), hash: frame.hash };
+    const live = findLive(game, target.id);
+    const check = live ? null : game.resolved.find((p) => p.id === target.id)?.check;
+    const notes = live ? (live.frames ?? []) : check?.frames;
+    if (!notes || notes.some((f) => f.hash === frame.hash)) return;
+    if (live) live.frames = withNote(notes, note);
+    else if (check) check.frames = withNote(notes, note);
   });
 }
 
 /**
- * The AI check's verdict on a result (null: no evidence, so no check). A disagree marks it
- * disputed, as bettors' flags do; since the result counts only after its check ends, a late
- * verdict still keeps it off the leaderboards and the asker reward. A result already checked is left alone.
+ * The referee's answer on a locked prediction. YES or NO resolves it ("ai"), as an admin's resolve
+ * would: points are paid, a market goes into its challenge window. "unclear": the streamer or a mod
+ * decides from now on. Only a claimed run that hasn't ended counts; anything else is left alone.
+ */
+export function applyReferee(state: Game, id: string, answer: RefereeAnswer, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, (ctx) => {
+    const live = findLive(ctx.game, id);
+    if (!live?.referee || live.referee.unclear !== undefined || now < live.lockAt) return;
+    if (answer === "unclear") {
+      live.referee = { ...live.referee, unclear: now };
+      return;
+    }
+    const { outcome, model, confidence, reason, frames } = answer;
+    settle(ctx, live, outcome, AI, { model: model.slice(0, 80), confidence, reason: reason.slice(0, REFEREE_REASON_MAX), frames: frames.slice(0, MAX_FRAME_NOTES) });
+  });
+}
+
+/**
+ * The AI check's verdict on a result someone else resolved (null: no evidence, so no check). A
+ * disagree marks it disputed, as bettors' flags do; since the result counts only after its check
+ * ends, a late verdict still keeps it off the leaderboards and the asker reward. A result already
+ * checked is left alone.
  */
 export function applyAiVerdict(state: Game, id: string, verdict: AiVerdict | null, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, ({ game }) => {
@@ -412,10 +510,10 @@ const marketRetryDue = (m: MarketState, now: number) => m.tries === 0 || now >= 
 /** The market still needs a server step: to open, to resolve, or to close (its seed comes back then). */
 const marketPending = (m: MarketState | undefined) => m !== undefined && m.step !== "failed" && (m.step !== "resolved" || !m.closed);
 
-/** When the streamer's proposed result goes final if nobody challenges it. */
+/** When a proposed result goes final if nobody challenges it. */
 export const challengeEndsAt = (p: Summary, env: Env) => p.resolvedAt + (env.challengeMs ?? MARKET_CHALLENGE_MS);
 
-/** The streamer's proposal for a market: their YES/NO, or a cancel, which proposes a refund. */
+/** The proposal for a market: the YES/NO given, or a cancel, which proposes a refund. */
 export const proposedOutcome = (p: Summary): MarketOutcome => (p.outcome === "cancel" ? "refund" : p.outcome);
 
 /**
@@ -565,6 +663,7 @@ function tick(ctx: Ctx) {
   expireSuggestions(ctx);
   expireNotices(ctx);
   autoCancelUnresolved(ctx);
+  endStaleReferees(ctx);
   endStaleChecks(ctx);
   endUnopenedMarkets(ctx);
   voidUndecided(ctx);
@@ -597,20 +696,21 @@ function notify({ game, now }: Ctx, to: string, text: string) {
   game.notices = [...game.notices.filter((n) => n.to !== to), { to, text, until: now + NOTICE_MS }].slice(-MAX_NOTICES);
 }
 
-/** `aiWindowMin`: the AI review's betting window; without one, the question gets DEFAULT_WINDOW_MIN. */
-function approveReview(ctx: Ctx, target: ReviewTarget, aiWindowMin?: number) {
+/** `aiWindowMin`: the AI review's betting window; without one, the question gets DEFAULT_WINDOW_MIN. `rule`: the referee's check rule. */
+function approveReview(ctx: Ctx, target: ReviewTarget, aiWindowMin?: number, rule?: string) {
   const { game } = ctx;
   const s = game.suggestions.find((x) => x.id === target.id && x.text === target.text && x.review);
   if (s) {
     delete s.review;
     if (aiWindowMin !== undefined) s.windowMin = aiWindowMin;
+    if (rule) s.rule = rule;
     return;
   }
   const p = game.pending;
   if (!p || p.id !== target.id || p.text !== target.text) return;
   game.pending = null;
   if (game.live.length >= MAX_LIVE || game.launched >= MAX_PREDICTIONS_PER_STREAM) return notify(ctx, STAFF, "Not launched: no slot was free");
-  launch(ctx, { id: p.id, text: p.text, source: p.source }, p.by, aiWindowMin ?? DEFAULT_WINDOW_MIN);
+  launch(ctx, { id: p.id, text: p.text, source: p.source, rule }, p.by, aiWindowMin ?? DEFAULT_WINDOW_MIN);
 }
 
 /** `refund`: only when no review could decide (stuck, removed by hand); a question jev rejected keeps its cost, so rejected spam is never free. */
@@ -631,6 +731,19 @@ function rejectReview(ctx: Ctx, target: ReviewTarget, text: string, refund: bool
 /** A locked prediction nobody resolved cancels by itself: full refunds. */
 function autoCancelUnresolved(ctx: Ctx) {
   for (const p of ctx.game.live.filter((x) => ctx.now >= autoCancelAt(x))) settle(ctx, p, "cancel", AUTO);
+}
+
+/**
+ * A referee that ran out of tries, or has no YES or NO REFEREE_DEADLINE_MS after betting closed
+ * (whatever the server's keys), couldn't tell: the streamer or a mod decides.
+ */
+function endStaleReferees({ game, now }: Ctx) {
+  for (const live of game.live) {
+    const r = live.referee;
+    if (now < live.lockAt || r?.unclear !== undefined) continue;
+    const triedOut = r !== undefined && r.tries >= AI_CHECK_MAX_TRIES && now >= r.at + AI_CHECK_RETRY_MS;
+    if (triedOut || now >= live.lockAt + REFEREE_DEADLINE_MS) live.referee = { tries: r?.tries ?? 0, at: r?.at ?? now, unclear: now };
+  }
 }
 
 /** An AI check whose every run failed, or that passed its hard deadline, ends as "couldn't tell". */
@@ -697,7 +810,7 @@ function launchCrowdPick(ctx: Ctx) {
   }
 }
 
-function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string; source?: string }, by: string, windowMin: number) {
+function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string; source?: string; rule?: string }, by: string, windowMin: number) {
   const { game, now } = ctx;
   let id: string;
   let asker: string | null = null;
@@ -723,11 +836,15 @@ function launch(ctx: Ctx, from: Suggestion | { id?: string; text: string; source
     bettors: 0,
     ...(ctx.env.markets ? { market: { step: "opening" as const, tries: 0, at: now } } : {}),
     ...("source" in from && from.source ? { source: from.source } : {}),
+    ...(from.rule ? { rule: from.rule } : {}),
   });
 }
 
-/** Pays out live prediction `p` at once; winnings for leaderboards and the asker reward wait for the flag window. */
-function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string) {
+/**
+ * Pays out live prediction `p` at once; winnings for leaderboards and the asker reward wait for the
+ * flag window. `call`: how the referee decided it (by AI only).
+ */
+function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string, call?: RefereeCall) {
   const { game, now } = ctx;
   const bets = Object.entries(p.bets).map(([wallet, b]) => ({ wallet, side: b.side, amount: b.amount }));
   const paid = payouts(bets, outcome);
@@ -741,8 +858,9 @@ function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string) {
   const { id, text, asker, yes, no, bettors } = p;
   game.live = game.live.filter((x) => x !== p);
   const summary: Summary = { id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } };
-  // A YES/NO result gets an AI check when the coin's stream has frames; a cancel needs none.
-  if (outcome !== "cancel" && ctx.env.aiCheck) summary.check = { tries: 0, at: now, frames: p.frames ?? [] };
+  // A YES/NO someone else gave gets an AI check when the coin's stream has frames; a cancel or the referee's own result needs none.
+  if (outcome !== "cancel" && ctx.env.aiCheck && by !== AI) summary.check = { tries: 0, at: now, frames: p.frames ?? [], ...(p.rule ? { rule: p.rule } : {}) };
+  if (call) summary.referee = call;
   if (p.market) Object.assign(summary, { market: p.market, window: [p.launchedAt, p.lockAt] });
   if (p.source) summary.source = p.source;
   if (p.witness) summary.witness = p.witness;
@@ -938,8 +1056,8 @@ function approveByHand(ctx: Ctx, actor: Actor, id: string) {
 }
 
 /**
- * The memestream oracle, by hand for now: only an admin resolves, never the coin's own streamer or
- * a mod (they can only say what happened, as a witness). Markets then go through the challenge window.
+ * The memestream oracle, by hand: an admin may always resolve once betting closed, even while the AI
+ * referee works, but never on a coin they stream or mod. Markets then go through the challenge window.
  */
 function resolve(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"resolve">) {
   const { game, now, env } = ctx;
@@ -953,8 +1071,10 @@ function resolve(ctx: Ctx, actor: Actor, { id, outcome }: ActionOf<"resolve">) {
 }
 
 /**
- * The streamer or a mod tells the admin what happened (YES or NO, with an optional note), once
- * betting closed and until the result is final. It can be changed; it never settles anything itself.
+ * The streamer or a mod says what happened (YES or NO, with an optional note), once betting closed
+ * and until the result is final. Once the AI referee couldn't tell (or the coin has no AI), this is
+ * the decision: it resolves the prediction as an admin's resolve would, unless they bet on it (then
+ * an admin decides). Before that it only informs the admin, and can be changed.
  */
 function witness(ctx: Ctx, actor: Actor, { id, outcome, note }: ActionOf<"witness">) {
   const { game, now, env } = ctx;
@@ -966,7 +1086,13 @@ function witness(ctx: Ctx, actor: Actor, { id, outcome, note }: ActionOf<"witnes
   if (live && now < live.lockAt) throw new GameError("Betting is still open");
   if (done && (!done.market || done.market.step !== "open" || marketFinal(done, now, env) !== null)) throw new GameError("This result is already final");
   const cleaned = note?.trim().replace(/\s+/g, " ").slice(0, WITNESS_NOTE_MAX);
-  target.witness = { outcome, by: actor.wallet, at: now, ...(cleaned ? { note: cleaned } : {}) };
+  const said: Witness = { outcome, by: actor.wallet, at: now, ...(cleaned ? { note: cleaned } : {}) };
+  if (live && refereeState(live, now, env) === "unclear") {
+    if (Object.hasOwn(live.bets, actor.wallet)) throw new GameError("You have a bet on this one, so an admin decides it");
+    live.witness = said;
+    return settle(ctx, live, outcome, actor.wallet);
+  }
+  target.witness = said;
 }
 
 function flagResult({ game, now }: Ctx, actor: Actor, id: string) {
@@ -994,7 +1120,7 @@ function changeMods({ game }: Ctx, actor: Actor, { wallet, add }: ActionOf<"mod"
 }
 
 /**
- * A holder challenges the streamer's proposal (YES, NO or a cancel) during its window, once per
+ * A holder challenges the proposal (YES, NO or a cancel) during its window, once per
  * market, posting CHALLENGE_BOND points. The market then waits for an admin's decision.
  */
 function challengeResult(ctx: Ctx, actor: Actor, { id, reason, link }: ActionOf<"challenge">) {

@@ -104,7 +104,7 @@ export function GoLiveView() {
         </label>
         <div className="earn">
           <Sprite name="heart" />
-          <span>80% of trade fees go to you. memestream won&apos;t let your wallet buy your own coin.</span>
+          <span>80% of trade fees go to you; memestream&apos;s 20% pays for the AI referee. memestream won&apos;t let your wallet buy your own coin.</span>
         </div>
         {(!feeKnown || Number(launchFeeSol) > 0) && (
           <p className="mute" style={{ fontSize: 22, margin: "-8px 0 16px" }}>

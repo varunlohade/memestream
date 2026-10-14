@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS } from "@/lib/predictions/rules";
+import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAMES_AFTER_LOCK_MS } from "@/lib/predictions/rules";
 import { newProfile } from "@/lib/predictions/watch";
 import { aiCheck, OPENROUTER_URL } from "./ai-check";
 import { happenedAnswer, visionAnswer } from "./jev-fake";
@@ -11,12 +11,14 @@ import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
 const T0 = Date.parse("2026-10-12T12:00:00.000Z");
+const LOCK = T0 + MIN;
 const COIN = "coin";
 const STREAMER = "streamer";
-/** The memestream oracle: the admin who resolves. */
+/** The memestream oracle: the admin who may always resolve. */
 const ORACLE = "oracle";
 const TWITCH = "https://twitch.tv/lofigirl";
 const BETTORS = ["v1", "v2", "v3", "v4", "v5", "v6"];
+const RULE = "YES if a person is seen on screen; NO otherwise.";
 
 const fengari = loadFengari();
 type Clock = { t: number };
@@ -27,20 +29,33 @@ const STORES: [string, (clock: Clock) => PredictionStore][] = [
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 /**
- * Fake models behind one fake fetch (no test reaches a real API): the frame CDN, OpenRouter and
- * jev. `happened` is jev's answer; `fail` makes a model call fail; `frame: false` is an offline stream.
+ * Fake models behind one fake fetch (no test reaches a real API): the frame CDN, OpenRouter (the
+ * check rule and frame descriptions) and jev. `picture` is what the preview shows now (its bytes);
+ * `happened` is jev's answer; `fail` makes the model calls fail; `frame: false` is an offline stream.
  */
 function fakeModels() {
-  const models = { happened: happenedAnswer("YES") as unknown, fail: false, frame: true, calls: { frame: 0, vision: 0, jev: 0 }, jevBodies: [] as string[] };
+  const models = {
+    happened: happenedAnswer("YES") as unknown,
+    fail: false,
+    ruleFails: false,
+    frame: true,
+    picture: 1,
+    calls: { frame: 0, rule: 0, vision: 0, jev: 0 },
+    jevBodies: [] as string[],
+  };
   const fetch: typeof globalThis.fetch = async (url, init) => {
     const u = String(url);
     if (u.startsWith("https://static-cdn.jtvnw.net/")) {
       models.calls.frame++;
-      return models.frame ? new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/jpeg" } }) : Promise.reject(new TypeError("redirect"));
+      return models.frame ? new Response(new Uint8Array([models.picture, 2, 3]), { headers: { "content-type": "image/jpeg" } }) : Promise.reject(new TypeError("redirect"));
     }
     if (u === OPENROUTER_URL) {
+      if (String(init!.body).includes("You write the check rule")) {
+        models.calls.rule++;
+        return models.ruleFails ? json({}, 500) : json(visionAnswer(RULE));
+      }
       models.calls.vision++;
-      return models.fail ? json({}, 500) : json(visionAnswer("A girl with headphones writes at a desk."));
+      return models.fail ? json({}, 500) : json(visionAnswer(`A girl with headphones writes at a desk (picture ${models.picture}).`));
     }
     assert.equal(u, TYPESAFE_URL);
     models.calls.jev++;
@@ -56,13 +71,13 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
   const store = make(clock);
   const { models, ai } = fakeModels();
   const deferred: (() => Promise<void>)[] = [];
-  const coins = new Map<string, CoinFacts>([[COIN, { creator: STREAMER, status: "trading", streamUrl }]]);
+  const coin: CoinFacts = { creator: STREAMER, status: "trading", streamUrl };
   const service = predictionsService({
     store,
     now: () => clock.t,
     secret: "test-secret-test-secret-test-secret",
     domain: "memestream.lol",
-    coin: async (mint) => coins.get(mint) ?? null,
+    coin: async (mint) => (mint === COIN ? coin : null),
     holds: async () => true,
     review: async () => ({ approved: true, windowMin: 1 }),
     ai: withAi ? ai : null,
@@ -80,124 +95,159 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     await store.commit({ docs: [{ key: `watch:${wallet}`, v: doc.v, json: JSON.stringify(profile) }], moves: [{ wallet, delta: 1_000, floor: 0 }], won: [] });
   };
   const balance = async (wallet: string) => (await store.balances([wallet]))[0];
-  /** A typed staff question live at T0 (1-minute window), bets on both sides, then betting closes. */
+  /** A view at `t` (the clock moves there), with its after-work done. */
+  const viewAt = async (t: number, wallet = "v1") => {
+    clock.t = t;
+    await service.view(COIN, wallet);
+    await settle();
+    return service.view(COIN, wallet);
+  };
+  /** A typed staff question live at T0 (1-minute window), its launch frame, bets on both sides. */
   let liveId = "";
-  const playToLock = async () => {
+  const playToLive = async () => {
     for (const v of BETTORS) await fund(v);
     await service.act(COIN, STREAMER, { kind: "launch", text: "Is there a person on screen?" });
-    await settle(); // review approves, the question goes live
-    await service.view(COIN, null);
-    await settle(); // the launch frame
-    liveId = (await service.view(COIN, "v1")).live[0].id;
+    await settle(); // review approves (and the rule is written); the question goes live
+    liveId = (await viewAt(T0)).live[0].id; // the launch frame
     for (const [i, v] of BETTORS.entries()) await service.act(COIN, v, { kind: "bet", id: liveId, side: i % 2 ? "yes" : "no", amount: 100 });
-    clock.t = T0 + MIN;
-    await service.view(COIN, "v1");
-    await settle(); // the lock frame
+    return liveId;
   };
-  const resolve = async (outcome: "yes" | "no" | "cancel") => {
-    await service.act(COIN, ORACLE, { kind: "resolve", id: liveId, outcome });
-    return (await service.view(COIN, "v1")).resolved[0];
-  };
-  return { clock, service, models, settle, balance, playToLock, resolve, store };
+  return { clock, coin, service, models, settle, balance, viewAt, playToLive, store, id: () => liveId };
 }
 
 for (const [name, make] of STORES) {
-  test(`${name}: AI check agrees: frames at launch, lock and resolve; "checking" until it lands; payouts untouched`, async () => {
-    const { models, settle, balance, playToLock, resolve, service, clock } = setup(make);
-    await playToLock();
-    assert.equal(models.calls.vision, 2, "launch and lock frames described");
+  test(`${name}: AI first: rule at approval, deduped frames past the lock, then the referee's YES resolves it as "ai"`, async () => {
+    const { models, balance, viewAt, playToLive, service, clock } = setup(make);
+    await playToLive();
+    assert.deepEqual([models.calls.rule, models.calls.vision], [1, 1], "rule written once; launch frame described");
+    await viewAt(T0 + FRAME_GAP_MS); // the same picture: fetched, not described
+    assert.deepEqual([models.calls.frame, models.calls.vision], [2, 1]);
+    const locked = await viewAt(LOCK + FRAME_GAP_MS);
+    assert.equal(locked.live[0].ai, "checking", "the same picture after the lock: the referee waits");
+    assert.equal(models.calls.jev, 0);
     const before = await Promise.all(BETTORS.map(balance));
-    assert.equal((await resolve("yes")).ai, "checking");
-    const paid = await Promise.all(BETTORS.map(balance));
-    await settle();
-    const r = (await service.view(COIN, "v1")).resolved[0];
-    assert.deepEqual([r.ai, r.disputed], ["agree", false]);
-    assert.deepEqual(await Promise.all(BETTORS.map(balance)), paid, "the check moves no points");
-    assert.notDeepEqual(paid, before, "the resolve itself paid out");
-    assert.equal(models.calls.vision, 3);
+    models.picture = 2; // the preview refreshes
+    await viewAt(LOCK + 2 * FRAME_GAP_MS); // the new picture is described
+    const decided = await viewAt(LOCK + 2 * FRAME_GAP_MS + 1_000); // the referee runs
+    assert.deepEqual([models.calls.vision, models.calls.jev], [2, 1]);
+    assert.equal(decided.live.length, 0);
+    const r = decided.resolved[0];
+    assert.deepEqual([r.outcome, r.resolvedBy.role, r.ai], ["yes", "ai", null]);
+    assert.match(r.aiReason ?? "", /picture 2/);
     const sent = JSON.parse(models.jevBodies[0]);
-    assert.deepEqual(sent.state.frames.map((f: { grabbed: string }) => f.grabbed), ["launch", "lock", "resolve"]);
-    assert.doesNotMatch(models.jevBodies[0], /"yes"|"no"|outcome/, "jev never sees the streamer's outcome");
-    clock.t = T0 + MIN + FLAG_WINDOW_MS;
-    assert.equal((await service.view(COIN, "v1")).leaderboard.stream.length, 3, "an agreed result counts");
+    assert.equal(sent.state.check_rule, RULE);
+    assert.deepEqual(sent.state.frames.map((f: { grabbed: string }) => f.grabbed), ["launch", "after"]);
+    assert.doesNotMatch(models.jevBodies[0], /outcome/);
+    const after = await Promise.all(BETTORS.map(balance));
+    assert.deepEqual(after.map((b, i) => b - before[i]), [0, 200, 0, 200, 0, 200], "YES bettors are paid");
+    clock.t = LOCK + FLAG_WINDOW_MS + 5 * MIN;
+    assert.equal((await service.view(COIN, "v1")).leaderboard.stream.length, 3, "the AI's result counts");
   });
 
-  test(`${name}: AI check disagrees with good confidence: the result is disputed and off the leaderboard`, async () => {
-    const { models, settle, playToLock, resolve, service, clock } = setup(make);
-    models.happened = happenedAnswer("YES", 0.9);
-    await playToLock();
-    await resolve("no");
-    await settle();
-    let r = (await service.view(COIN, "v1")).resolved[0];
-    assert.deepEqual([r.ai, r.disputed], ["disagree", true]);
-    clock.t = T0 + MIN + FLAG_WINDOW_MS;
-    const view = await service.view(COIN, "v1");
-    r = view.resolved[0];
-    assert.equal(r.flagUntil, null, "the result closed");
-    assert.deepEqual(view.leaderboard.stream, [], "a disputed result counts for no one");
-  });
-
-  test(`${name}: AI check unsure (low confidence or UNCLEAR) shows couldn't tell; never disputes`, async () => {
+  test(`${name}: the referee unsure (low confidence or UNCLEAR): the streamer decides; their call gets the usual check`, async () => {
     for (const happened of [happenedAnswer("YES", 0.6), happenedAnswer("UNCLEAR", 0.95)]) {
-      const { models, settle, playToLock, resolve, service } = setup(make);
+      const { models, viewAt, playToLive, service, settle } = setup(make);
       models.happened = happened;
-      await playToLock();
-      await resolve("no");
+      const id = await playToLive();
+      models.picture = 2;
+      await viewAt(LOCK);
+      const view = await viewAt(LOCK + 1_000);
+      assert.equal(view.live[0].ai, "unclear");
+      await assert.rejects(service.act(COIN, "v1", { kind: "witness", id, outcome: "yes" }), /streamer or a mod/);
+      models.happened = happenedAnswer("NO", 0.9);
+      await service.act(COIN, STREAMER, { kind: "witness", id, outcome: "yes" });
       await settle();
       const r = (await service.view(COIN, "v1")).resolved[0];
-      assert.deepEqual([r.ai, r.disputed], ["unclear", false]);
+      assert.deepEqual([r.outcome, r.resolvedBy.role, r.ai, r.disputed], ["yes", "streamer", "disagree", true], "a later frame that says otherwise disputes it");
     }
   });
 
-  test(`${name}: a malformed jev answer or failing models never disagree: two retries, then couldn't tell`, async () => {
-    for (const broken of ["malformed", "error"] as const) {
-      const { models, settle, playToLock, resolve, service, clock } = setup(make);
-      await playToLock();
-      if (broken === "malformed") models.happened = { answers: { happened: { choice: "YES", probabilities: { YES: 2 }, confidence: 0.99 } } };
-      else models.fail = true;
-      await resolve("no");
-      await settle();
-      assert.equal((await service.view(COIN, "v1")).resolved[0].ai, "checking", "a failed run waits for its retry");
-      for (let retry = 1; retry <= 2; retry++) {
-        clock.t += AI_CHECK_RETRY_MS;
-        await service.view(COIN, "v1");
-        await settle();
-      }
-      const r = (await service.view(COIN, "v1")).resolved[0];
-      assert.deepEqual([r.ai, r.disputed], ["unclear", false], broken);
-      assert.equal(models.calls.jev, broken === "malformed" ? 3 : 0, "three runs in all");
-    }
+  test(`${name}: before the referee is done the streamer's answer only informs; an admin may resolve at any time`, async () => {
+    const { viewAt, playToLive, service } = setup(make);
+    const id = await playToLive();
+    assert.equal((await viewAt(LOCK)).live[0].ai, "checking");
+    await service.act(COIN, STREAMER, { kind: "witness", id, outcome: "no" });
+    const still = await service.view(COIN, "v1");
+    assert.deepEqual([still.live.length, still.live[0].witness?.outcome], [1, "no"]);
+    await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "cancel" });
+    assert.deepEqual((await service.view(COIN, "v1")).resolved[0].resolvedBy.role, "admin");
   });
 
-  test(`${name}: no check (no tag) for a cancel, a Kick stream, an offline stream, or no keys`, async () => {
-    const cancelled = setup(make);
-    await cancelled.playToLock();
-    assert.equal((await cancelled.resolve("cancel")).ai, null);
+  test(`${name}: failing models never pick a side: three referee runs, then the streamer decides`, async () => {
+    const { models, viewAt, playToLive } = setup(make);
+    await playToLive();
+    models.picture = 2;
+    await viewAt(LOCK);
+    models.fail = true;
+    let t = LOCK + 1_000;
+    assert.equal((await viewAt(t)).live[0].ai, "checking", "a failed run waits for its retry");
+    for (let retry = 1; retry <= 2; retry++) {
+      t += AI_CHECK_RETRY_MS;
+      await viewAt(t);
+    }
+    const view = await viewAt(t + 1);
+    assert.deepEqual([view.live.length, view.live[0].ai, models.calls.jev], [1, "unclear", 3]);
+  });
 
+  test(`${name}: no AI (Kick stream, no keys): no model calls; the streamer decides at the lock`, async () => {
     for (const [streamUrl, withAi] of [["https://kick.com/somebody", true], [TWITCH, false]] as const) {
       const s = setup(make, streamUrl, withAi);
-      await s.playToLock();
-      assert.equal((await s.resolve("yes")).ai, null);
+      const id = await s.playToLive();
+      assert.equal((await s.viewAt(T0)).live[0].ai, null, "betting open");
+      assert.equal((await s.viewAt(LOCK)).live[0].ai, "unclear");
+      await s.service.act(COIN, STREAMER, { kind: "witness", id, outcome: "no" });
       await s.settle();
-      assert.deepEqual(s.models.calls, { frame: 0, vision: 0, jev: 0 });
+      const r = (await s.service.view(COIN, "v1")).resolved[0];
+      assert.deepEqual([r.outcome, r.resolvedBy.role, r.ai], ["no", "streamer", null]);
+      assert.deepEqual(s.models.calls, { frame: 0, rule: 0, vision: 0, jev: 0 });
     }
-
-    const offline = setup(make);
-    offline.models.frame = false;
-    await offline.playToLock();
-    await offline.resolve("yes");
-    await offline.settle();
-    const r = (await offline.service.view(COIN, "v1")).resolved[0];
-    assert.deepEqual([r.ai, r.disputed, offline.models.calls.vision, offline.models.calls.jev], [null, false, 0, 0]);
   });
 
-  test(`${name}: a check is claimed once: parallel runs ask jev once and commit one verdict`, async () => {
-    const { models, settle, playToLock, resolve, service } = setup(make);
-    await playToLock();
-    await resolve("yes");
-    await Promise.all([service.aiRun(COIN, { creator: STREAMER, status: "trading", streamUrl: TWITCH }), settle()]);
+  test(`${name}: an offline stream (no frames): the referee asks no model and hands over 6 minutes after the lock`, async () => {
+    const { models, viewAt, playToLive } = setup(make);
+    models.frame = false;
+    await playToLive();
+    assert.equal((await viewAt(LOCK + FRAMES_AFTER_LOCK_MS - 1)).live[0].ai, "checking");
+    const view = await viewAt(LOCK + FRAMES_AFTER_LOCK_MS);
+    assert.equal((await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1)).live[0].ai, "unclear");
+    assert.equal(view.live.length, 1);
+    assert.deepEqual([models.calls.vision, models.calls.jev], [0, 0]);
+  });
+
+  test(`${name}: a failed rule leaves the question without one; the referee still works from the question`, async () => {
+    const { models, viewAt, playToLive } = setup(make);
+    models.ruleFails = true;
+    await playToLive();
+    models.picture = 2;
+    await viewAt(LOCK);
+    await viewAt(LOCK + 1_000);
+    assert.equal(JSON.parse(models.jevBodies[0]).state.check_rule, undefined);
+  });
+
+  test(`${name}: a referee run is claimed once: parallel runs ask jev once and resolve once`, async () => {
+    const { models, viewAt, playToLive, service, settle, coin, clock } = setup(make);
+    await playToLive();
+    models.picture = 2;
+    await viewAt(LOCK);
+    clock.t = LOCK + 1_000;
+    await Promise.all([service.aiRun(COIN, coin), service.aiRun(COIN, coin), service.view(COIN, "v1").then(settle)]);
     await settle();
     assert.equal(models.calls.jev, 1);
-    assert.equal((await service.view(COIN, "v1")).resolved[0].ai, "agree");
+    assert.equal((await service.view(COIN, "v1")).resolved[0].resolvedBy.role, "ai");
+  });
+
+  test(`${name}: the live sweep grabs frames and runs the referee with nobody watching`, async () => {
+    const { models, service, playToLive, clock, settle } = setup(make);
+    await playToLive();
+    models.picture = 2;
+    clock.t = LOCK;
+    assert.deepEqual(await service.sweepLive(10), { swept: 1, listed: 1 });
+    clock.t = LOCK + 1_000;
+    await service.sweepLive(10);
+    await settle();
+    assert.equal(models.calls.jev, 1);
+    const view = await service.view(COIN, "v1");
+    assert.deepEqual([view.live.length, view.resolved[0].resolvedBy.role], [0, "ai"]);
+    assert.deepEqual(await service.sweepLive(10), { swept: 0, listed: 0 }, "no live prediction: nothing listed");
   });
 }

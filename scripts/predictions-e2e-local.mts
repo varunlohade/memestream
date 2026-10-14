@@ -12,6 +12,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { sleep } from "../src/lib/poll";
+import { readOrCreateKeypair } from "./keys";
 
 const ENV_FILE = ".env.e2e.local";
 const REDIS_VARS = ["UPSTASH_REDIS_REST_URL", "UPSTASH_REDIS_REST_TOKEN", "KV_REST_API_URL", "KV_REST_API_TOKEN"];
@@ -73,6 +74,10 @@ const env: NodeJS.ProcessEnv = {
   MEMESTREAM_PREDICTIONS: "1",
   MEMESTREAM_PREDICTIONS_SECRET: randomBytes(32).toString("hex"),
   MEMESTREAM_PREDICTIONS_PREFIX: prefix,
+  // The admin wallet predictions-e2e.mts cancels with (public key only).
+  MEMESTREAM_ADMIN_WALLETS: readOrCreateKeypair(".keys/e2e-admin.json").publicKey.toBase58(),
+  // No AI referee: the streamer decides every result at the lock, so the run is quick and exact.
+  OPENROUTER_API_KEY: "",
 };
 
 console.log(`run ${runId}: building into .next-e2e`);
