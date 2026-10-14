@@ -2,6 +2,22 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { ago, compact, formatSol, fractionOf, minusReserve, percentChange, shortAddress, signedPercent } from "./format";
 
+test("compact keeps the zeros of whole numbers and trims only after the point", () => {
+  assert.equal(compact(100), "100");
+  assert.equal(compact(120), "120");
+  assert.equal(compact(200), "200");
+  assert.equal(compact(990), "990");
+  assert.equal(compact(-100), "-100");
+  assert.equal(compact(-120.4), "-120");
+  assert.equal(compact(10), "10");
+  assert.equal(compact(1.5), "1.5");
+  assert.equal(compact(2.0), "2");
+  assert.equal(compact(99.999), "100", "rounding across a whole number");
+  assert.equal(compact(99.5), "99.5");
+  assert.equal(compact(199.6), "200");
+  assert.equal(compact(-1.1), "-1.1");
+});
+
 test("compact numbers", () => {
   assert.equal(compact(42100), "42.1K");
   assert.equal(compact(3.2), "3.2");

@@ -7,7 +7,8 @@ export function compact(value: number): string {
   if (abs >= 1e9) return `${(value / 1e9).toFixed(1)}B`;
   if (abs >= 1e6) return `${(value / 1e6).toFixed(1)}M`;
   if (abs >= 1e3) return `${(value / 1e3).toFixed(1)}K`;
-  if (abs >= 1) return value.toFixed(abs >= 100 ? 0 : 2).replace(/\.?0+$/, "");
+  // Trim zeros only after a decimal point: 100 stays "100", 1.50 becomes "1.5".
+  if (abs >= 1) return value.toFixed(abs >= 100 ? 0 : 2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
   if (abs === 0) return "0";
   if (abs < 0.000001) return "<0.000001";
   return String(Number(value.toPrecision(3)));

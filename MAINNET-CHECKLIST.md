@@ -127,6 +127,12 @@ The owner's step-by-step for launch day is in RUNBOOK-mainnet.md.
 MEMESTREAM_MARKETS stays off on mainnet until every box is ticked (security audits 2026-10-12).
 Since 2026-10-15 the code enforces it: markets are off whenever the wallet chain is mainnet.
 
+- [ ] **BLOCKER: the betting cutoff is not enforced on chain** (third review, 2026-10-15). After
+      lockAt, the market's DAMM v2 pool still accepts swaps until the oracle withdraws its
+      liquidity. Only our HTTP route refuses late bets: a prebuilt transaction or a direct swap on
+      the pool skips that check, so someone who already knows the result can still buy. Markets need
+      an execution-layer cutoff (e.g. a pool that stops trading at lockAt, or liquidity pulled at
+      lockAt by an on-chain or always-on mechanism) before any mainnet market.
 - [ ] **Admin paging:** a challenged, unresolved or AI-disputed market waits for an admin
       (MEMESTREAM_ADMIN_WALLETS). Page an admin at once and answer well under 24 hours; the 24-hour
       auto-void is the last resort only.

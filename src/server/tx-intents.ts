@@ -126,6 +126,8 @@ export function intentKey(parsed: ParsedTx): string {
 }
 
 const TOKEN = /^([0-9a-f]{32})\.([0-9a-f-]{36})$/;
+/** Where the build's issuance is kept (same store, its own key), so reports can be checked against it. */
+const issuedKey = (key: string, id: string) => `issued:${key}.${id}`;
 export const isIntentToken = (token: string) => TOKEN.test(token);
 
 export function txIntents(store: IntentStore) {
@@ -152,8 +154,12 @@ export function txIntents(store: IntentStore) {
      */
     remember: async (key: string, blockhash: string, now: number): Promise<string | null> => {
       const id = randomUUID();
-      const added = await safely(() => store.add(key, { id, blockhash, at: now, signature: null }, BUILD_HOLD_MS), true);
-      return added ? `${key}.${id}` : null;
+      const record = { id, blockhash, at: now, signature: null };
+      const added = await safely(() => store.add(key, record, BUILD_HOLD_MS), true);
+      if (!added) return null;
+      // What this server issued, kept past the build hold: a late report may only revive a real build.
+      await safely(() => store.set(issuedKey(key, id), record, SIGNED_HOLD_MS), undefined);
+      return `${key}.${id}`;
     },
 
     /** The wallet rejected it: nothing was signed, so the same trade may be built again at once. */
@@ -174,10 +180,14 @@ export function txIntents(store: IntentStore) {
         const [, key, id] = match;
         const record = await store.get(key);
         if (!record) {
-          // The popup outlasted the build hold: the build was at least BUILD_HOLD_MS ago. Never overwrites.
-          if (signature && status === "pending") {
-            await store.add(key, { id, blockhash, at: now - BUILD_HOLD_MS, signature }, SIGNED_HOLD_MS - BUILD_HOLD_MS);
-          }
+          // The popup outlasted the build hold. Hold it again only for an intent this server really
+          // built with this blockhash (never from a token someone made up), until SIGNED_HOLD_MS after
+          // that build. Never overwrites.
+          if (!signature || status !== "pending") return;
+          const issued = await store.get(issuedKey(key, id));
+          if (!issued || issued.id !== id || issued.blockhash !== blockhash) return;
+          const left = SIGNED_HOLD_MS - (now - issued.at);
+          if (left > 0) await store.add(key, { ...issued, signature }, left);
           return;
         }
         if (record.id !== id || record.blockhash !== blockhash) return;

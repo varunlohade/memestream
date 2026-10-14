@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { PositionState } from "@meteora-ag/cp-amm-sdk";
 import { type AccountInfo, Keypair, type PublicKey } from "@solana/web3.js";
-import { heldPositions, type LpPosition } from "./positions";
+import { heldPositions, type LpPosition, MAX_SCANNED_NFTS, scanPositionNfts } from "./positions";
 
 const key = () => Keypair.generate().publicKey;
 const owner = key();
@@ -58,6 +58,36 @@ test("a moved NFT next to one still in place: the wallet scan runs and both are 
   });
   assert.equal(scans, 1);
   assert.deepEqual(held.map((p) => p.position.toBase58()), [positions[0].publicKey.toBase58(), positions[1].publicKey.toBase58()]);
+});
+
+test("the wallet scan finds the pool's position after 50 NFTs of other pools, and charges the extra page", async () => {
+  const target = key();
+  const nfts = Array.from({ length: 51 }, () => ({ positionNft: key(), positionNftAccount: key() }));
+  const pages: number[] = [];
+  const charged: number[] = [];
+  const found = await scanPositionNfts(
+    nfts,
+    target,
+    async (addresses) => {
+      const start = pages.reduce((a, b) => a + b, 0);
+      pages.push(addresses.length);
+      // Only the 51st NFT is in the target pool.
+      return addresses.map((_, k) => ({ pool: start + k === 50 ? target : key() }) as unknown as PositionState);
+    },
+    async (n) => void charged.push(n),
+  );
+  assert.deepEqual(pages, [50, 1]);
+  assert.deepEqual(charged, [1]);
+  assert.equal(found.length, 1);
+  assert.ok(found[0].positionNftAccount.equals(nfts[50].positionNftAccount));
+});
+
+test("a wallet with too many position NFTs is refused, never answered with a partial list", async () => {
+  const nfts = Array.from({ length: MAX_SCANNED_NFTS + 1 }, () => ({ positionNft: key(), positionNftAccount: key() }));
+  await assert.rejects(
+    scanPositionNfts(nfts, key(), async () => assert.fail("no reads"), async () => {}),
+    /can't check them all/,
+  );
 });
 
 test("no positions in the pool: no reads at all", async () => {

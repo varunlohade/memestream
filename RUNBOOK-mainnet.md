@@ -160,7 +160,7 @@ Set:
 | `MEMESTREAM_WALLET_CHAIN` | `solana:mainnet` | no |
 | `MEMESTREAM_NETWORK_LABEL` | `Mainnet` (the code forces it anyway) | no |
 | `MEMESTREAM_PREDICTIONS` | `1` | no |
-| `MEMESTREAM_PREDICTIONS_SECRET` | a NEW random value, 32+ characters (`openssl rand -hex 32`) | **yes** |
+| `MEMESTREAM_PREDICTIONS_SECRET` | a NEW random value, 32+ characters (`openssl rand -hex 32`). Also signs admin sessions for /admin/fees, so keep it set even if predictions are off | **yes** |
 | `MEMESTREAM_ADMIN_WALLETS` | `BxfZSzPDJVRyPrBQVDEJzgonQgHeVXJU34FAf2MQ6Enf` | no |
 | `MEMESTREAM_PRIORITY_FEE_MAX` | optional; default 1000000 micro-lamports per CU | no |
 | `TYPESAFE_API_KEY` | as today | **yes** |

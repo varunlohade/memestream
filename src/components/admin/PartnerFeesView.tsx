@@ -1,7 +1,7 @@
 "use client";
 /**
  * /admin/fees: memestream's own fees on the shared config (launch fees and its trading fee share).
- * Plain text and one button. The button signs in (the predictions session; the server checks the
+ * Plain text and one button. The button signs in (an admin session, separate from predictions; the server checks the
  * wallet is an admin), then shows what's claimable, then claims: the server builds the claim
  * transactions unsigned and the connected wallet, the config's fee claimer, signs each one.
  */
@@ -14,8 +14,8 @@ import { newNonce, MESSAGE_TTL_MS, sessionMessage, signInInput } from "@/lib/pre
 import type { Session } from "@/lib/predictions/view";
 import { solscanTx } from "@/lib/explorer";
 
-/** Same storage key as the predictions panel, so one sign-in serves both. */
-const SESSION_KEY = "memestream.predictions.session";
+/** The admin session (its own key: it works with predictions turned off). */
+const SESSION_KEY = "memestream.admin.session";
 const SESSION_EXPIRY_MARGIN_MS = 60_000;
 const STATUS_POLL_MS = 2_000;
 const STATUS_WAIT_MS = 90_000;
@@ -33,9 +33,10 @@ function savedToken(wallet: string): string | null {
   }
 }
 
-function saveSession(session: Session) {
+function saveSession(session: Session | null) {
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    else localStorage.removeItem(SESSION_KEY);
   } catch {
     // storage blocked: sign in again next time
   }
@@ -66,7 +67,7 @@ export function PartnerFeesView() {
     if (!signIn) throw new Error("This wallet can't sign in");
     const request = { domain: window.location.host, wallet, nonce: newNonce(), expiresAt: Date.now() + MESSAGE_TTL_MS };
     const { signedMessage, signature } = await signIn(signInInput(request), new TextEncoder().encode(sessionMessage(request)));
-    const session = await postJson<Session>("/api/predictions/session", { message: new TextDecoder().decode(signedMessage), signature: bs58.encode(signature) });
+    const session = await postJson<Session>("/api/admin/session", { message: new TextDecoder().decode(signedMessage), signature: bs58.encode(signature) });
     saveSession(session);
     return session.token;
   };
@@ -97,6 +98,8 @@ export function PartnerFeesView() {
       if (summary?.canClaim && summary.coinsWithFees > 0) await claim(auth);
       await load(auth);
     } catch (e) {
+      // A refused token (expired, or the secret changed): forget it, so the next press signs in again.
+      if ((e as { status?: number }).status === 401) saveSession(null);
       setError((e as Error).message);
     } finally {
       setBusy(false);

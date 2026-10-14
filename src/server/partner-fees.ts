@@ -6,7 +6,6 @@
 import "server-only";
 import { PublicKey } from "@solana/web3.js";
 import type { PreparedTx } from "@/lib/api-types";
-import { isBase58Of } from "@/lib/base58";
 import { buildPartnerClaimTxs, loadPartnerFees } from "@/lib/dbc/partner-fees";
 import { lamportsToSol } from "@/lib/dbc/units";
 import { getChain } from "./chain";
@@ -22,14 +21,6 @@ export const MAX_CLAIM_TXS = 1;
 export const SUMMARY_RPC_CALLS = 4;
 /** A claim build adds the coin-account check and, per transaction, blockhash + priority fee. */
 export const CLAIM_RPC_CALLS = SUMMARY_RPC_CALLS + 1 + MAX_CLAIM_TXS * (1 + PRIORITY_FEE_RPC_CALLS);
-
-/** MEMESTREAM_ADMIN_WALLETS: a comma list; entries that aren't addresses are ignored. */
-export const isAdmin = (wallet: string) =>
-  (process.env.MEMESTREAM_ADMIN_WALLETS ?? "")
-    .split(",")
-    .map((w) => w.trim())
-    .filter((w) => isBase58Of(w, 32))
-    .includes(wallet);
 
 export type PartnerFeesSummary = {
   feeClaimer: string;

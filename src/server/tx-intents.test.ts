@@ -86,6 +86,29 @@ test("a popup open longer than the build hold: a late signature report blocks an
   assert.equal(await intents.pending(key, clock.t), null, "it lapses at most SIGNED_HOLD_MS after the build");
 });
 
+test("a made-up token can never create a hold (no build, or the wrong blockhash or id)", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  // An attacker who knows the victim's trade inputs forges a token: no build ever happened.
+  await intents.report(`${key}.00000000-0000-4000-8000-000000000000`, HASH, SIG, "pending", clock.t);
+  assert.equal(await intents.pending(key, clock.t), null, "no 409 for the victim");
+  assert.notEqual(await intents.remember(key, HASH, clock.t), null, "the victim's trade builds");
+
+  // A real build whose hold lapsed: a report with another blockhash, or another id, does nothing.
+  clock.t += BUILD_HOLD_MS + 1;
+  const real = (await txIntents(memoryIntentStore(() => clock.t)).remember(key, HASH, clock.t)) as string;
+  const store = memoryIntentStore(() => clock.t);
+  const fresh = txIntents(store);
+  const token = (await fresh.remember(key, HASH, clock.t)) as string;
+  clock.t += BUILD_HOLD_MS + 1;
+  await fresh.report(token, "x".repeat(43), SIG, "pending", clock.t);
+  await fresh.report(real, HASH, SIG, "pending", clock.t);
+  assert.equal(await fresh.pending(key, clock.t), null, "a wrong blockhash or a token from elsewhere adds no hold");
+  await fresh.report(token, HASH, SIG, "pending", clock.t);
+  assert.deepEqual(await fresh.pending(key, clock.t), { signature: SIG }, "the real build's late report still holds");
+});
+
 test("a late report never overwrites a newer build's record", async () => {
   const clock = { t: T0 };
   const intents = txIntents(memoryIntentStore(() => clock.t));
