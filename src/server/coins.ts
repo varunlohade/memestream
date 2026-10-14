@@ -18,7 +18,7 @@ import { streamLinkFromUri } from "@/lib/stream-link";
 import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
 import { getChain, poolForMint } from "./chain";
 import { BusyError } from "./errors";
-import { takeRpcBudget } from "./rpc-budget";
+import { chargeRpcBudget, takeRpcBudget } from "./rpc-budget";
 import { loadMetadata, MAX_ACCOUNTS_PER_CALL } from "./metadata";
 
 async function withMetadata(connection: Connection, views: PoolView[]): Promise<CoinView[]> {
@@ -376,7 +376,7 @@ async function lpFeesOf(meteoraPool: string | null, owner: PublicKey): Promise<H
   const { connection } = getChain();
   const pool = new PublicKey(meteoraPool);
   try {
-    const [positions, [state]] = await Promise.all([lpPositionsOf(connection, pool, owner), fetchDammPools(connection, [pool])]);
+    const [positions, [state]] = await Promise.all([lpPositionsOf(connection, pool, owner, chargeRpcBudget), fetchDammPools(connection, [pool])]);
     if (positions.length === 0 || !state) return null;
     const { coins, lamports } = unclaimedPoolFees(state, positions);
     return { sol: lamportsToSol(lamports), coins: baseUnitsToCoins(coins) };

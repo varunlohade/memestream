@@ -22,6 +22,7 @@ import { getChain, poolForMint } from "./chain";
 import { listCoins } from "./coins";
 import { asUserFacing, UserError } from "./errors";
 import { toPreparedTx } from "./prepare-tx";
+import { chargeRpcBudget } from "./rpc-budget";
 import { assertNotSelfBuy } from "./rules";
 
 /** Runs a build step, turning library input/state errors into user-facing ones. */
@@ -165,7 +166,7 @@ export async function buildClaimPoolFeesForWallet(req: { wallet: string; mint: s
     if (snapshot.status !== "graduated") throw new UserError("Pool fees start once the coin graduates");
     const pool = await graduatedPool(snapshot);
     const owner = walletKey(req.wallet);
-    const positions = await lpPositionsOf(connection, pool.address, owner);
+    const positions = await lpPositionsOf(connection, pool.address, owner, chargeRpcBudget);
     return toPreparedTx(await buildClaimPoolFeesTx(connection, pool, owner, positions));
   });
 }

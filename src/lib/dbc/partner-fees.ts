@@ -22,6 +22,7 @@ import {
 } from "@solana/spl-token";
 import { ComputeBudgetProgram, type PublicKey, Transaction, type TransactionInstruction } from "@solana/web3.js";
 import BN from "bn.js";
+import { MAX_ACCOUNTS_PER_CALL } from "../accounts";
 import { InputError } from "./errors";
 import { type BuiltTx, built } from "./tx";
 
@@ -161,13 +162,23 @@ export async function buildPartnerClaimTxs(client: DynamicBondingCurveClient, fe
   const { configState, feeClaimer } = fees;
   const baseProgram = getTokenProgram(configState.tokenType);
   const coinAccounts = fees.pools.map((p) => getAssociatedTokenAddressSync(p.baseMint, feeClaimer, true, baseProgram));
-  const existing = await client.connection.getMultipleAccountsInfo(coinAccounts);
+  // Read which coin accounts exist lazily, at most 100 per call (the RPC's limit), and only for
+  // the pools this batch reaches: a small `maxTxs` costs one call however many pools there are.
+  const existing: boolean[] = [];
+  const coinAccountExists = async (i: number) => {
+    if (existing[i] === undefined) {
+      const start = i - (i % MAX_ACCOUNTS_PER_CALL);
+      const infos = await client.connection.getMultipleAccountsInfo(coinAccounts.slice(start, start + MAX_ACCOUNTS_PER_CALL));
+      infos.forEach((info, k) => (existing[start + k] = info !== null));
+    }
+    return existing[i];
+  };
 
   const txs: Transaction[] = [];
   let current: { trading: boolean; ixs: TransactionInstruction[] }[] = [];
   for (const [i, pool] of fees.pools.entries()) {
     if (txs.length >= maxTxs) break;
-    const group = { trading: !pool.tradingLamports.isZero(), ixs: await claimInstructions(client, fees, pool, existing[i] !== null) };
+    const group = { trading: !pool.tradingLamports.isZero(), ixs: await claimInstructions(client, fees, pool, await coinAccountExists(i)) };
     if (current.length && !fits(claimTx(fees, [...current, group]))) {
       txs.push(claimTx(fees, current));
       current = [];

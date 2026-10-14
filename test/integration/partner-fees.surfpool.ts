@@ -87,3 +87,35 @@ test("batched claims land, pay the claimer what was listed, and leave nothing to
   const coinAccounts = mints.map((m) => getAssociatedTokenAddressSync(m, partner.publicKey));
   assert.ok((await client.connection.getMultipleAccountsInfo(coinAccounts)).every((a) => a === null), "the temporary coin accounts were closed");
 });
+
+test("101 coins with fees: claims still build, reading at most 100 accounts per call, and only what the batch needs", async () => {
+  for (let i = 0; i < 101; i++) {
+    const launch = await buildCreateStreamCoinTx(client, { name: `Many${i}`, symbol: `MANY${i}`, uri: "https://x.io/m" }, { config, creator: streamer.publicKey });
+    await sendAndConfirm(client.connection, launch, [streamer]);
+  }
+  const fees = await loadPartnerFees(client, config);
+  assert.equal(fees.pools.length, 101, "every new launch fee is claimable");
+
+  const reads: number[] = [];
+  const real = client.connection.getMultipleAccountsInfo.bind(client.connection);
+  client.connection.getMultipleAccountsInfo = async (keys, config) => {
+    assert.ok(keys.length <= 100, `one read of ${keys.length} accounts`);
+    reads.push(keys.length);
+    return real(keys, config);
+  };
+  try {
+    const one = await buildPartnerClaimTxs(client, fees, partner.publicKey, 1);
+    assert.equal(one.length, 1);
+    assert.equal(reads.length, 1, "a one-transaction batch reads once");
+    const { simulation } = await prepareAndSimulate(client.connection, one[0].tx);
+    assert.ok(simulation.ok, `simulation: ${simulation.error}`);
+
+    reads.length = 0;
+    const all = await buildPartnerClaimTxs(client, fees, partner.publicKey);
+    assert.deepEqual(reads, [100, 1], "all 101 coin accounts, in two reads");
+    const claimed = all.reduce((n, b) => n + b.tx.instructions.filter((ix) => ix.programId.equals(client.partner.program.programId)).length, 0);
+    assert.equal(claimed, 101, "one launch-fee claim per coin");
+  } finally {
+    client.connection.getMultipleAccountsInfo = real;
+  }
+});

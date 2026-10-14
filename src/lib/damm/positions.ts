@@ -19,6 +19,7 @@ import {
 import { createCloseAccountInstruction, getAssociatedTokenAddressSync } from "@solana/spl-token";
 import { type Connection, PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
+import { accountReadCalls, getAccountsChunked } from "../accounts";
 import { InputError } from "../dbc/errors";
 import { built, type BuiltTx } from "../dbc/tx";
 
@@ -26,20 +27,44 @@ export type LpPosition = { position: PublicKey; positionNftAccount: PublicKey; p
 
 /** Position NFTs read per wallet in the fallback scan: bounds the work one request can cause. */
 const MAX_POSITION_NFTS = 50;
-
 /**
  * The positions `owner` holds in `pool`. The pool's own positions are found first (graduation
  * makes two: streamer and platform), then each position's NFT account is checked for `owner`.
  * Junk token accounts in a wallet can't hide a position this way. Only if a position's NFT has
- * left its original account (the holder transferred it) does this fall back to scanning the
- * wallet's position NFTs (capped). Usually 2 RPC calls.
+ * left its original account (the holder transferred it) does this also scan the wallet's position
+ * NFTs (capped) and merge what it finds. Usually 2 RPC calls.
  */
-export async function lpPositionsOf(connection: Connection, pool: PublicKey, owner: PublicKey): Promise<LpPosition[]> {
+export async function lpPositionsOf(
+  connection: Connection,
+  pool: PublicKey,
+  owner: PublicKey,
+  /**
+   * Called (and awaited) before reads beyond what callers budget for: one more call per extra 100
+   * positions in the pool (callers already budget the first read and the wallet scan). May throw.
+   */
+  chargeExtraCalls: (calls: number) => Promise<void> = async () => {},
+): Promise<LpPosition[]> {
   const program = new CpAmm(connection)._program;
-  const inPool = (await program.account.position.all([positionByPoolFilter(pool)])) as { publicKey: PublicKey; account: PositionState }[];
+  const inPool = (await program.account.position.all([positionByPoolFilter(pool)])) as PoolPosition[];
+  return heldPositions(connection, inPool, owner, chargeExtraCalls, () => walletScan(connection, pool, owner));
+}
+
+type PoolPosition = { publicKey: PublicKey; account: PositionState };
+
+/** Which of the pool's positions `owner` holds (lpPositionsOf after the pool read; exported for tests). */
+export async function heldPositions(
+  connection: Pick<Connection, "getMultipleAccountsInfo">,
+  inPool: PoolPosition[],
+  owner: PublicKey,
+  chargeExtraCalls: (calls: number) => Promise<void>,
+  scanWallet: () => Promise<LpPosition[]>,
+): Promise<LpPosition[]> {
   if (inPool.length === 0) return [];
+  const extraReads = accountReadCalls(inPool.length) - 1;
+  if (extraReads > 0) await chargeExtraCalls(extraReads);
   const nftAccounts = inPool.map((p) => derivePositionNftAccount(p.account.nftMint));
-  const infos = await connection.getMultipleAccountsInfo(nftAccounts);
+  // A pool can hold more than 100 positions (anyone can open one), so read in chunks.
+  const infos = await getAccountsChunked(connection, nftAccounts);
 
   const held: LpPosition[] = [];
   let anyMoved = false;
@@ -48,8 +73,12 @@ export async function lpPositionsOf(connection: Connection, pool: PublicKey, own
     if (!holder) anyMoved = true;
     else if (holder.equals(owner)) held.push({ position: p.publicKey, positionNftAccount: nftAccounts[i], positionState: p.account });
   });
-  if (held.length > 0 || !anyMoved) return held;
-  return walletScan(connection, pool, owner);
+  if (!anyMoved) return held;
+  // Some NFT left its original account: it may be this wallet's, in another token account. Scan
+  // the wallet and merge, so a moved position is never dropped next to one still in place.
+  const scanned = await scanWallet();
+  const seen = new Set(held.map((p) => p.position.toBase58()));
+  return [...held, ...scanned.filter((p) => !seen.has(p.position.toBase58()))];
 }
 
 /** The owner of a token account holding exactly 1 (an NFT), or null. Token account: mint 0..32, owner 32..64, amount u64 @64. */
