@@ -393,6 +393,25 @@ export function applyReview(state: Game, target: ReviewTarget, verdict: ReviewVe
   });
 }
 
+/** What the asker sees when the daily AI budget stops reviews. */
+export const REVIEW_PAUSED_TEXT = "The AI review is paused for today. The streamer can approve your question by hand.";
+
+/**
+ * The daily AI budget stopped a question's review: no more checks are tried (it is stuck, so the
+ * streamer or a mod approves or removes it by hand), and its asker (or the staff) is told why. A
+ * question no longer under review is left alone.
+ */
+export function applyReviewPaused(state: Game, target: ReviewTarget, now: number, env: Env = { streamerSeenAt: null }): Result {
+  return run(state, now, env, (ctx) => {
+    const { game } = ctx;
+    const s = game.suggestions.find((x) => x.id === target.id && x.text === target.text && x.review);
+    const item = s ?? (game.pending?.id === target.id && game.pending.text === target.text ? game.pending : null);
+    if (!item?.review) return;
+    item.review = { ...item.review, tries: REVIEW_MAX_TRIES };
+    notify(ctx, s ? s.asker : STAFF, REVIEW_PAUSED_TEXT);
+  });
+}
+
 /** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has. */
 export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; hashes: string[] };
 /** A result to check: its question, the outcome someone else gave, the frames grabbed before, and which run this is. */
@@ -534,19 +553,26 @@ function withNote(notes: FrameNote[], note: FrameNote): FrameNote[] {
  * said (never later than the grab). A picture already described (same hash) is not added again. It
  * goes to the live prediction, or to the check of a result resolved meanwhile.
  */
-export function applyFrame(state: Game, target: CaptureTarget, frame: { hash: string; text: string; shot?: number } | null, now: number, env: Env = { streamerSeenAt: null }): Result {
+export const applyFrame = (state: Game, target: CaptureTarget, frame: Evidence | null, now: number, env: Env = { streamerSeenAt: null }): Result => applyFrames(state, [target], frame, now, env);
+
+/** A grabbed frame's description, as applyFrame, for every prediction it was grabbed for: one transition, so the clock's movements are all kept. */
+export function applyFrames(state: Game, targets: CaptureTarget[], frame: Evidence | null, now: number, env: Env = { streamerSeenAt: null }): Result {
   return run(state, now, env, ({ game }) => {
     if (!frame || !frame.text) return;
-    const shot = frame.shot !== undefined && Number.isFinite(frame.shot) ? Math.min(frame.shot, target.at) : undefined;
-    const note: FrameNote = { kind: target.kind, at: target.at, text: frame.text.slice(0, FRAME_NOTE_MAX), hash: frame.hash, ...(shot !== undefined ? { shot } : {}) };
-    const live = findLive(game, target.id);
-    const check = live ? null : game.resolved.find((p) => p.id === target.id)?.check;
-    const notes = live ? (live.frames ?? []) : check?.frames;
-    if (!notes || notes.some((f) => f.hash === frame.hash)) return;
-    if (live) live.frames = withNote(notes, note);
-    else if (check) check.frames = withNote(notes, note);
+    for (const target of targets) {
+      const shot = frame.shot !== undefined && Number.isFinite(frame.shot) ? Math.min(frame.shot, target.at) : undefined;
+      const note: FrameNote = { kind: target.kind, at: target.at, text: frame.text.slice(0, FRAME_NOTE_MAX), hash: frame.hash, ...(shot !== undefined ? { shot } : {}) };
+      const live = findLive(game, target.id);
+      const check = live ? null : game.resolved.find((p) => p.id === target.id)?.check;
+      const notes = live ? (live.frames ?? []) : check?.frames;
+      if (!notes || notes.some((f) => f.hash === frame.hash)) continue;
+      if (live) live.frames = withNote(notes, note);
+      else if (check) check.frames = withNote(notes, note);
+    }
   });
 }
+/** A described piece of evidence: its text, a hash of the media, and when it was taken, if known. */
+type Evidence = { hash: string; text: string; shot?: number };
 
 /**
  * The referee's answer from run `tries` on a locked prediction; an answer from an older run, or one

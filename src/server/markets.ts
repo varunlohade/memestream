@@ -24,6 +24,7 @@ import { buildCreateMarketTxs, buildMarketMetadataTx } from "@/lib/markets/creat
 import { isPredictionId, MIN_MARKET_SECRET_CHARS, type Outcome, type Side } from "@/lib/markets/math";
 import { loadMarketPool, MARKET_FEE_BPS, type MarketKeys, marketKeys, marketKeysFromId, marketOdds, type MarketPool, OUTCOME_DECIMALS, verifyMarketPool } from "@/lib/markets/pool";
 import { poolOwnership, positionNftFor } from "@/lib/markets/provenance";
+import { holdsAnyOf } from "@/lib/markets/holdings";
 import type { MarketPosition, MarketPreview, MarketRecord, MarketView } from "@/lib/markets/record";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "@/lib/markets/settle";
 import { type MarketOrder, type MarketQuote, prepareMarketTrade, quoteMarketTrade } from "@/lib/markets/trade";
@@ -184,11 +185,16 @@ async function positionOf(keys: MarketKeys, wallet: PublicKey): Promise<MarketPo
   return { yes: toTokens(tokenAmount(yes?.data)), no: toTokens(tokenAmount(no?.data)), sol: lamportsToSol(new BN(sol?.lamports ?? 0)) };
 }
 
-/** Whether `wallet` holds any YES or NO of a registered market: one read, from the site's RPC budget. */
+/**
+ * Whether `wallet` holds any YES or NO of a registered market, in any token account it owns (not
+ * only the associated ones): two reads, from the site's RPC budget. The one stake check for
+ * challenges, resolves, decisions, a streamer's call and mod promotions. It sees one address only:
+ * it can't prove an admin has no stake through other wallets.
+ */
 export async function walletHoldsShares(record: MarketRecord, wallet: string): Promise<boolean> {
-  if (!(await takeRpcBudget(1))) throw new BusyError();
-  const { yes, no } = await positionOf(keysOf(record), publicKey(wallet, "wallet"));
-  return Number(yes) > 0 || Number(no) > 0;
+  if (!(await takeRpcBudget(SIDES.length))) throw new BusyError();
+  const keys = keysOf(record);
+  return holdsAnyOf(getChain().connection, publicKey(wallet, "wallet"), SIDES.map((side) => keys.mints[side]));
 }
 
 /** Odds and state of a registered market: open for bets, closed, or resolved (and how it paid). */

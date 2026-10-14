@@ -7,8 +7,8 @@
 import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, AI, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary, type Witness } from "@/lib/predictions/engine";
-import { applyReview, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
-import { aiDue, type AiVerdict, applyAiVerdict, applyFrame, applyReferee, applyRule, releaseAiRun, type CaptureTarget, type CheckTarget, type FrameNote, freshNotes } from "@/lib/predictions/engine";
+import { applyReview, applyReviewPaused, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
+import { aiDue, type AiVerdict, applyAiVerdict, applyFrames, applyReferee, applyRule, releaseAiRun, type CaptureTarget, type CheckTarget, type FrameNote, freshNotes } from "@/lib/predictions/engine";
 import { type RefereeAnswer, refereeState, type RefereeTarget, refereeWhy, type RuleTarget, startAi } from "@/lib/predictions/engine";
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
@@ -18,9 +18,10 @@ import type { LeaderRow, MarketStepView, PredictionsView, Standing, WitnessView 
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { type Asked, BudgetSpent, NO_EVIDENCE, type Spend } from "./ai-check";
 import { frameUrls } from "./frames";
+import { ReviewBudgetSpent } from "./review";
 import { coinKey, GAME_KEY_COUNT, gameKeys, LIVE_COINS_KEY, liveIndex, liveSlotKeys, loadGame, WORK_COINS_KEY, workIndex } from "./game-doc";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
-import type { Commit, PredictionStore } from "./store";
+import type { Commit, PredictionStore, SetChange } from "./store";
 
 /** A prediction open for bets on some coin, as the live-coins index finds it; `market` only while its market takes trades. */
 export type LiveAcross = { mint: string; id: string; text: string; lockAt: number; yes: number; no: number; bettors: number; market: MarketRecord | null };
@@ -77,8 +78,11 @@ export type ServiceDeps = {
   coin: (mint: string) => Promise<CoinFacts | null>;
   /** Whether `wallet` holds at least 1 whole coin (cached, budgeted read). */
   holds: (mint: string, wallet: string) => Promise<boolean>;
-  /** The AI review of a typed question; throws if it fails (timeout, error, no key, malformed answer). */
-  review: (question: string) => Promise<ReviewVerdict>;
+  /**
+   * The AI review of a typed question; throws if it fails (timeout, error, no key, malformed answer),
+   * or ReviewBudgetSpent when `spend` (called before every HTTP attempt) says the daily AI budget is used up.
+   */
+  review: (question: string, spend: Spend) => Promise<ReviewVerdict>;
   /** The AI check of results; null or absent when it isn't set up (no keys). */
   ai?: AiCheckDeps | null;
   /** On-chain markets; null or absent when MEMESTREAM_MARKETS is off (then nothing changes). */
@@ -131,6 +135,8 @@ const presenceKey = (mint: string) => `presence:${mint}`;
 const marketKey = (mint: string, predictionId: string) => `market:${mint}:${predictionId}`;
 /** Coins with a market that still needs a server step: the close-due sweep's list (a few dozen at most). */
 const OPEN_MARKETS_KEY = "markets:open";
+/** Marks the one-time fill of the work index from the older indexes (see backfillWork). */
+const WORK_BACKFILL_KEY = "predictions:work-backfill:v1";
 /** The streamer's last heartbeat on their coin, and when this stream started (after 2+ hours away). */
 type Presence = { at: number; since?: number };
 const DEFAULT_COMMIT_ATTEMPTS = 12;
@@ -151,9 +157,15 @@ const LEADERBOARD_CACHE_MS = 15_000;
 const PUBLIC_VIEW_CACHE_MS = 1_500;
 /** Entries kept per in-process cache; the oldest goes first. */
 const MAX_CACHE_ENTRIES = 1_000;
-/** The GET response lists at most this many waiting suggestions, recent results and top leaders. */
+/**
+ * The GET response lists at most this many waiting suggestions, recent results and top leaders.
+ * Older results whose market still needs someone (in its challenge window, waiting for an admin, or
+ * paying out to redeem) are listed too: the game keeps them, so the list stays bounded.
+ */
 const QUEUE_SHOWN = 20;
 const RESOLVED_SHOWN = 5;
+/** A result's market that people may still act on: open (proposal, challenge, admin) or resolved (redeem). */
+const marketActionable = (p: Summary) => p.market?.step === "open" || p.market?.step === "resolved";
 const LEADERS_SHOWN = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** The daily AI budget's defaults (MEMESTREAM_AI_DAILY_CALLS, MEMESTREAM_AI_DAILY_CALLS_PER_COIN). */
@@ -314,7 +326,7 @@ function verdictView(p: Summary, now: number, env: Env, admin: boolean): Predict
 const marketStepView = (m: MarketState | undefined): MarketStepView => (!m ? null : m.step === "open" && m.closed ? "closed" : m.step);
 
 function resolvedView(game: Game, wallet: string | null, staff: boolean, now: number, env: Env, admin: boolean): PredictionsView["resolved"] {
-  return game.resolved.slice(0, RESOLVED_SHOWN).map((p) => ({
+  return game.resolved.filter((p, i) => i < RESOLVED_SHOWN || marketActionable(p)).map((p) => ({
     id: p.id,
     text: p.text,
     outcome: p.outcome,
@@ -517,8 +529,9 @@ export function predictionsService(deps: ServiceDeps) {
     const { creator } = coin;
     let verdict: ReviewVerdict;
     try {
-      verdict = await deps.review(target.text);
+      verdict = await deps.review(target.text, () => spendAi(mint));
     } catch (error) {
+      if (error instanceof ReviewBudgetSpent) return void (await commitGame(mint, creator, (game, env) => applyReviewPaused(game, target, now(), env)));
       console.warn(`predictions: review check failed (${error instanceof Error ? error.message : "unknown error"}); it stays under review`);
       return;
     }
@@ -624,14 +637,8 @@ export function predictionsService(deps: ServiceDeps) {
       return;
     }
     const note = saved;
-    await commitGame(mint, creator, (game, env) => {
-      let result = applyFrame(game, targets[0], note, now(), aiEnv(env));
-      for (const target of targets.slice(1)) {
-        const next = applyFrame(result.game, target, note, now(), aiEnv(env));
-        result = { ...next, changed: result.changed || next.changed };
-      }
-      return result;
-    });
+    // One transition for every target, so whatever the clock settles meanwhile is committed whole.
+    await commitGame(mint, creator, (game, env) => applyFrames(game, targets, note, now(), aiEnv(env)));
   }
 
   /** jev's side for `notes`, or why not (unsure, or the budget is spent). */
@@ -864,26 +871,43 @@ export function predictionsService(deps: ServiceDeps) {
       return status === "ok" ? all : RETRY;
     });
     const batch = listed.slice(0, limit);
-    const done = new Set<string>();
+    /** Coins that looked done, with their streamer (null: not a memestream coin). */
+    const done = new Map<string, string | null>();
     for (const mint of batch) {
       try {
         const coin = await facts(mint);
         await ticked(mint, coin);
         await runMarketsOnce(mint, coin);
         const { game } = await readGame(mint, coin.creator, []);
-        if (!hasPendingMarkets(game)) done.add(mint);
+        if (!hasPendingMarkets(game)) done.set(mint, coin.creator);
       } catch (error) {
-        if (error instanceof UnknownCoinError) done.add(mint);
+        if (error instanceof UnknownCoinError) done.set(mint, null);
         else console.warn(`predictions: the market sweep failed on ${mint} (${(error as Error).message})`);
       }
     }
     if (done.size > 0) {
+      // Each coin's game is read again and its version goes into the same commit: a market created
+      // since the check above keeps the coin listed (or the commit conflicts and it's checked again).
       await retryOnConflict(async () => {
         const [doc] = await store.read([OPEN_MARKETS_KEY]);
-        const now: string[] = doc.json ? JSON.parse(doc.json) : [];
-        const next = now.filter((m) => !done.has(m));
-        if (next.length === now.length) return true;
-        const status = await store.commit({ docs: [{ key: OPEN_MARKETS_KEY, v: doc.v, json: JSON.stringify(next) }], moves: [], won: [] });
+        const listedNow: string[] = doc.json ? JSON.parse(doc.json) : [];
+        const guards: Commit["docs"] = [];
+        const sets: SetChange[] = [];
+        const drop = new Set<string>();
+        for (const mint of listedNow.filter((m) => done.has(m))) {
+          const creator = done.get(mint);
+          if (creator) {
+            const { game, save } = await readGame(mint, creator, []);
+            if (hasPendingMarkets(game)) continue;
+            const saved = save(game);
+            guards.push(...saved.docs);
+            sets.push(...saved.sets);
+          }
+          drop.add(mint);
+        }
+        if (drop.size === 0) return true;
+        const next = listedNow.filter((m) => !drop.has(m));
+        const status = await store.commit({ docs: [{ key: OPEN_MARKETS_KEY, v: doc.v, json: JSON.stringify(next) }, ...guards], sets, moves: [], won: [] });
         return status === "ok" ? true : RETRY;
       });
     }
@@ -908,6 +932,7 @@ export function predictionsService(deps: ServiceDeps) {
    * coin. Coins are swept side by side; each AI step has its own timeout.
    */
   async function sweepLive(limit: number): Promise<{ swept: number; listed: number }> {
+    await backfillWork();
     const all = await store.members(WORK_COINS_KEY);
     const batch = await sweepOrder(all, limit);
     await Promise.all(
@@ -916,13 +941,44 @@ export function predictionsService(deps: ServiceDeps) {
           const coin = await facts(mint);
           if (aiOn(coin)) await runAiOnce(mint, coin);
           await ticked(mint, coin);
+          await dropIfIdle(mint, coin.creator);
         } catch (error) {
-          if (!(error instanceof UnknownCoinError)) console.warn(`predictions: the live sweep failed on ${mint} (${(error as Error).message})`);
+          if (error instanceof UnknownCoinError) await store.commit({ docs: [], sets: [{ key: WORK_COINS_KEY, member: mint, add: false }], moves: [], won: [] });
+          else console.warn(`predictions: the live sweep failed on ${mint} (${(error as Error).message})`);
         }
       }),
     );
     return { swept: batch.length, listed: all.length };
   }
+
+  /**
+   * Once per store: games saved before the work index existed join it from the older indexes (coins
+   * with a live prediction, coins with an open market). Idempotent: a marker document says it's done,
+   * and its version makes a second sweep's run a no-op. Coins with nothing left are dropped by the
+   * sweep (dropIfIdle). Results in their flag window on a coin with neither index wait for its next
+   * view (at most FLAG_WINDOW_MS after the upgrade).
+   */
+  async function backfillWork() {
+    const [marker, openDoc] = await store.read([WORK_BACKFILL_KEY, OPEN_MARKETS_KEY]);
+    if (marker.json) return;
+    const open: string[] = openDoc.json ? JSON.parse(openDoc.json) : [];
+    const mints = [...new Set([...(await store.members(LIVE_COINS_KEY)), ...open])];
+    await store.commit({
+      docs: [{ key: WORK_BACKFILL_KEY, v: marker.v, json: JSON.stringify({ at: now(), coins: mints.length }) }],
+      sets: mints.map((member) => ({ key: WORK_COINS_KEY, member, add: true })),
+      moves: [],
+      won: [],
+    });
+  }
+
+  /** Drops a coin from the work index once its game has nothing left to do, in a commit guarded by the game's version. */
+  const dropIfIdle = (mint: string, creator: string) =>
+    retryOnConflict(async () => {
+      const { game, save } = await readGame(mint, creator, []);
+      if (workIndex(mint, game).add) return true;
+      const status = await store.commit({ ...save(game), moves: [], won: [] });
+      return status === "ok" ? true : RETRY;
+    });
 
   /** Only wallets with 30+ minutes watched appear on leaderboards. */
   async function eligibleLeaders(candidates: LeaderRow[]): Promise<LeaderRow[]> {

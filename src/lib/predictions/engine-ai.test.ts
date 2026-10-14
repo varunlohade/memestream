@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, applyRule, releaseAiRun, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
-import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, AI_RUN_LEASE_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAME_NOTE_MAX, FRAMES_AFTER_LOCK_MS, MAX_FRAME_NOTES } from "./rules";
+import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyFrames, applyReview, applyRule, releaseAiRun, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
+import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, AI_RUN_LEASE_MS, SUGGEST_COST, SUGGEST_TTL_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAME_NOTE_MAX, FRAMES_AFTER_LOCK_MS, MAX_FRAME_NOTES } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -220,6 +220,18 @@ test("audit 7: the last check run is never written off while it holds its lease;
   assert.equal(releaseAiRun(game, id, 1, t + 100_000).changed, false, "an older run can't give the lease back");
   game = applyAiVerdict(game, id, "agree", t + 100_000, ON, AI_CHECK_MAX_TRIES).game;
   assert.equal(game.resolved[0].ai?.verdict, "agree");
+});
+
+test("audit 2: one shared picture for several predictions is one transition: what the clock settles meanwhile is kept", () => {
+  let game = liveGame(ON, ledger(), 30);
+  game = apply(game, { kind: "launch", text: "Is it raining outside?" }, actor(STREAMER), T0, ON).game;
+  game = applyReview(game, game.pending!, { approved: true, windowMin: 30 }, T0, ON).game;
+  game = apply(game, { kind: "suggest", text: "Will a cat appear?" }, actor("late"), T0, ON).game; // stays under review
+  const claim = startAi(game, T0 + SUGGEST_TTL_MS - 1_000, ON);
+  assert.equal(claim.captures.length, 2, "both grab together");
+  const saved = applyFrames(claim.game, claim.captures, { hash: "x", text: "A cat on a sofa" }, T0 + SUGGEST_TTL_MS, ON);
+  assert.equal(saved.moves.get("late")?.delta, SUGGEST_COST, "the expired suggestion's points come back in the same commit");
+  assert.ok(saved.game.live.every((p) => p.frames!.some((f) => f.hash === "x")), "both predictions got the note");
 });
 
 test("audit 5: an AI disagree stays a dispute when a later flag is below the threshold; the result never counts", () => {

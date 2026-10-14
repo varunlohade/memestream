@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BET_WINDOWS_MIN } from "@/lib/predictions/rules";
 import { jevAnswer, REASON_IDS, STREAM_QUESTIONS, WINDOW_IDS } from "./jev-fake";
-import { APPROVE_MIN_CONFIDENCE, parseVerdict, requestBody, ReviewFailed, reviewClient, TYPESAFE_URL } from "./review";
+import { APPROVE_MIN_CONFIDENCE, parseVerdict, requestBody, ReviewBudgetSpent, ReviewFailed, reviewClient, TYPESAFE_URL } from "./review";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const noSleep = async () => {};
@@ -119,4 +119,15 @@ test("reviewClient: no key, a dropped connection or a timeout is a failure", asy
   const hang: typeof fetch = (_url, init) =>
     new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
   await assert.rejects(reviewClient({ apiKey: "k", fetch: hang, timeoutMs: 20 })("Will it rain?"), /timed out/);
+});
+
+test("audit 6: every review attempt takes a call from the daily budget, retries included; spent, nothing is sent", async () => {
+  let sent = 0;
+  let spent = 0;
+  const busyThenOk = reviewClient({ apiKey: "k", sleep: async () => {}, fetch: async () => (++sent < 3 ? new Response("{}", { status: 429 }) : Response.json(jevAnswer("APPROVE"))) });
+  await busyThenOk("Will he jump?", async () => (spent++, true));
+  assert.deepEqual([sent, spent], [3, 3]);
+  sent = 0;
+  await assert.rejects(busyThenOk("Will he jump?", async () => false), (e: Error) => e instanceof ReviewBudgetSpent);
+  assert.equal(sent, 0);
 });

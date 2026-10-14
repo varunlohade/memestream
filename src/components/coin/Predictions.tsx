@@ -40,6 +40,7 @@ const SESSION_KEY = "memestream.predictions.session";
 const SESSION_EXPIRY_MARGIN_MS = 60_000;
 /** Bets top out at 1,000 points, so the amount box takes at most 4 digits. */
 const MAX_BET_DIGITS = 4;
+/** Recent results shown; older ones stay while their market is up (challenge, decision, redeem). */
 const RESOLVED_SHOWN = 5;
 /** How often a compact market row refreshes its odds. */
 const ROW_ODDS_POLL_MS = 5_000;
@@ -427,7 +428,7 @@ export function Predictions({
       {viewer && notHolder && <p className="mute pm-small">Hold at least {MIN_HOLDING_COINS} ${symbol} to suggest and upvote.</p>}
 
       {view.resolved.length > 0 && <div className="pm-subh">Resolved</div>}
-      {view.resolved.slice(0, RESOLVED_SHOWN).map((r) =>
+      {view.resolved.filter((r, i) => i < RESOLVED_SHOWN || marketUp(r.market)).map((r) =>
         marketUp(r.market) ? (
           // Remounted when the market's step changes, so it reads the result once it's resolved.
           <MarketCard

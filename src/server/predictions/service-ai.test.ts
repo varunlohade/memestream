@@ -5,7 +5,8 @@ import { newProfile } from "@/lib/predictions/watch";
 import { aiCheck, OPENROUTER_URL } from "./ai-check";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
-import { TYPESAFE_URL } from "./review";
+import { REVIEW_PAUSED_TEXT } from "@/lib/predictions/engine";
+import { ReviewBudgetSpent, TYPESAFE_URL } from "./review";
 import { liveSlotKeys } from "./game-doc";
 import { type CoinFacts, marketFacts, predictionsService, type ServiceDeps, urgentFirst } from "./service";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
@@ -83,7 +84,11 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     domain: "memestream.lol",
     coin: async (mint) => (mint === COIN ? coin : null),
     holds: async () => true,
-    review: async () => ({ approved: true, windowMin: 1 }),
+    // The review takes its call from the budget, as the real client does before every attempt.
+    review: async (_question, spend) => {
+      if (!(await spend())) throw new ReviewBudgetSpent("The daily AI budget is used up");
+      return { approved: true, windowMin: 1 };
+    },
     ai: withAi ? ai : null,
     admins: [ORACLE],
     ...(aiBudget ? { aiBudget } : {}),
@@ -243,8 +248,8 @@ for (const [name, make] of STORES) {
     assert.deepEqual([view.live[0].ai, view.live[0].aiWhy, models.calls.jev], ["unclear", "no-picture", 0]);
   });
 
-  test(`${name}: audit F5: the daily AI budget stops model calls (here: the rule takes the only one)`, async () => {
-    const { models, viewAt, playToLive, store } = setup(make, TWITCH, true, { daily: 100, perCoin: 1 });
+  test(`${name}: audit F5: the daily AI budget stops model calls (here: the review and the rule take the only two)`, async () => {
+    const { models, viewAt, playToLive, store } = setup(make, TWITCH, true, { daily: 100, perCoin: 2 });
     await playToLive();
     models.picture = 2;
     await viewAt(LOCK);
@@ -254,8 +259,19 @@ for (const [name, make] of STORES) {
     assert.equal(view.live[0].ai, "unclear");
     const day = new Date(T0).toISOString().slice(0, 10);
     const keys = [`ai-calls:${day}`, `ai-calls:${day}:${COIN}`];
-    assert.equal(await store.take(keys, [100, 1], MIN), false, "the coin's counter is at 1 of 1");
-    assert.equal(await store.take(keys, [2, 2], MIN), true, "both counters were at exactly 1");
+    assert.equal(await store.take(keys, [100, 2], MIN), false, "the coin's counter is at 2 of 2");
+    assert.equal(await store.take(keys, [3, 3], MIN), true, "both counters were at exactly 2");
+  });
+
+  test(`${name}: audit 6: question reviews take from the budget too; spent, the question waits for the streamer, who is told why`, async () => {
+    const { service, settle } = setup(make, TWITCH, true, { daily: 100, perCoin: 0 });
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Is there a person on screen?" });
+    await service.view(COIN, STREAMER);
+    await settle();
+    const view = await service.view(COIN, STREAMER);
+    assert.deepEqual([view.live.length, view.pending?.stuck, view.me?.notice], [0, true, REVIEW_PAUSED_TEXT], "not live; stuck for a hand decision");
+    await service.act(COIN, STREAMER, { kind: "approve", id: view.pending!.id });
+    assert.equal((await service.view(COIN, STREAMER)).live.length, 1, "the streamer approves it by hand");
   });
 
   test(`${name}: audit N3: the budget counter is atomic: parallel takes never conflict and never pass the limit`, async () => {
@@ -277,6 +293,24 @@ for (const [name, make] of STORES) {
     const slots = (await store.read(liveSlotKeys(COIN))).flatMap((d) => (d.json ? [JSON.parse(d.json)] : []));
     assert.equal(slots.length, 2);
     for (const p of slots) assert.ok(p.frames.some((f: { text: string }) => f.text.includes("picture 2")), `prediction ${p.id} has the shared note`);
+  });
+
+  test(`${name}: audit 5: a store from before the work index is backfilled once (live and market coins); idle ones are dropped`, async () => {
+    const { models, service, playToLive, clock, store } = setup(make);
+    await playToLive();
+    // As main left it: no work index, no marker; a coin listed for markets with nothing to do here.
+    const unlist = { docs: [], sets: [{ key: "predictions:work", member: COIN, add: false }], moves: [], won: [] };
+    await store.commit(unlist);
+    const [open] = await store.read(["markets:open"]);
+    await store.commit({ docs: [{ key: "markets:open", v: open.v, json: JSON.stringify(["ghost"]) }], moves: [], won: [] });
+    assert.deepEqual(await store.members("predictions:work"), []);
+    models.picture = 2;
+    clock.t = LOCK;
+    assert.deepEqual(await service.sweepLive(10), { swept: 2, listed: 2 }, "both backfilled and swept");
+    assert.equal(models.calls.vision, 2, "the live prediction got its frame with nobody watching");
+    assert.deepEqual(await store.members("predictions:work"), [COIN], "the unknown coin is dropped, the live one kept");
+    await store.commit(unlist);
+    assert.deepEqual(await service.sweepLive(10), { swept: 0, listed: 0 }, "once only: the marker stops a second backfill");
   });
 
   test(`${name}: audit 6: the sweep keeps visiting a coin with no live prediction while a check is due, then drops it`, async () => {
