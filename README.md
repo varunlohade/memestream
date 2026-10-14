@@ -1,8 +1,8 @@
 # memestream
 
 **A prediction market for every live stream.** Each stream gets its own coin on Meteora's Dynamic
-Bonding Curve (DBC). Viewers buy the stream they think will pop, and the streamer earns 80% of every
-trade fee. When the curve fills, anyone can graduate the coin live on stream into a Meteora DAMM v2
+Bonding Curve (DBC). Viewers buy the stream they think will pop, and the streamer earns 64% of every
+trade fee (Meteora takes 20%, memestream 16%). When the curve fills, anyone can graduate the coin live on stream into a Meteora DAMM v2
 pool. On top of the coin, viewers bet on what happens next in the stream: free points for everyone,
 and Polymarket-style YES/NO markets in devnet SOL.
 
@@ -33,7 +33,8 @@ the predictions around it.
 **Coins (Meteora DBC)**
 - One coin per stream, all on one shared memestream DBC config.
 - Anti-sniper launch fee: it falls from 50% to 1% in 60 seconds. The trade box shows a countdown.
-- 80% of creator trading fees go to the streamer.
+- Each curve trading fee: 64% to the streamer, 16% to memestream, 20% to Meteora (Meteora takes its
+  20% first; the streamer gets 80% of the rest).
 - `swap2` partial fill: the last buy fills exactly up to the graduation threshold.
 - Permissionless graduation to DAMM v2, then trading on the graduated pool, inside memestream.
 - Streamer LP fee claims on the graduated pool.
@@ -73,7 +74,7 @@ the predictions around it.
 | Go live | A streamer launches a coin in one transaction | DBC pool on our shared config |
 | First minute | The launch fee falls from 50% to 1% in 60 s | DBC fee scheduler + dynamic fee |
 | Trade | Buy and sell on the curve; the last buy fills only up to the threshold | DBC `swap2` partial fill |
-| Earn | The streamer claims 80% of every trade fee, any time | DBC creator trading fee claim |
+| Earn | The streamer claims 64% of every trade fee, any time | DBC creator trading fee claim |
 | Graduate | Anyone migrates the full curve, live on stream | DBC to DAMM v2 migration |
 | After graduation | Trading goes on in memestream, in the coin's DAMM v2 pool | DAMM v2 swaps |
 | Forever | The streamer's locked LP position NFT earns pool fees; claim in one click | DAMM v2 position fees |
@@ -83,8 +84,9 @@ the predictions around it.
 
 | Who | Before graduation | After graduation (mainnet preset) |
 |---|---|---|
-| Streamer | 80% of curve trading fees | 100% of the pool's LP fees (all graduated liquidity is theirs, locked forever) |
-| Platform | 20% of curve trading fees + a 0.05 SOL launch fee | none |
+| Streamer | 64% of curve trading fees | 100% of the pool's LP fees (all graduated liquidity is theirs, locked forever) |
+| Platform | 16% of curve trading fees + 0.045 SOL of each 0.05 SOL launch fee | none |
+| Meteora | 20% of curve trading fees + 10% of the launch fee | its protocol share of pool fees |
 | Liquidity | locked in the curve | 100% permanently locked in DAMM v2 |
 
 The devnet config uses a 0.1 SOL threshold (so testers graduate with faucet SOL), a free launch and

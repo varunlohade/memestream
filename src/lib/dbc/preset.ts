@@ -51,6 +51,13 @@ export const COIN_PRESETS: Record<Network, CoinPreset> = {
   "mainnet-beta": { graduationThresholdSol: "3", launchFeeSol: 0.05, lockedLpPercent: { partner: 0, creator: 100 } },
 };
 
+/**
+ * The mainnet config's feeClaimer AND leftoverReceiver: the owner's own wallet (the owner,
+ * 2026-10-15). A plain wallet, not a multisig, by the owner's choice; MAINNET-CHECKLIST.md notes
+ * the risk. Fixed forever once the config exists.
+ */
+export const MAINNET_PARTNER_WALLET = "BxfZSzPDJVRyPrBQVDEJzgonQgHeVXJU34FAf2MQ6Enf";
+
 const TOTAL_SUPPLY = 1_000_000_000;
 
 /** Fee times below are in seconds because activation is by timestamp. */

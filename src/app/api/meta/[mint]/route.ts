@@ -45,7 +45,7 @@ export const GET = withRpcGuard({ name: "meta", burst: 30, perSecond: 3 }, async
     {
       name: cached.meta.name,
       symbol: cached.meta.symbol,
-      description: "A memestream coin for a live stream. 80% of fees go to the streamer.",
+      description: "A memestream coin for a live stream. 64% of each trade fee goes to the streamer.",
       external_url: `${getChain().publicUrl}/coin/${mint}`,
       ...(link ? { properties: { stream: link.url } } : {}),
     },

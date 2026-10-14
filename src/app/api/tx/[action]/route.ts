@@ -3,6 +3,7 @@ import { buildMarketRedeemForWallet, buildMarketTradeForWallet } from "@/server/
 import { registeredMarket } from "@/server/predictions";
 import { buildClaimForWallet, buildClaimPoolFeesForWallet, buildGraduateForWallet, buildLaunchForWallet, buildTradeForWallet } from "@/server/transactions";
 import type { PreparedTx, TxAction } from "@/lib/api-types";
+import { PRIORITY_FEE_RPC_CALLS } from "@/server/prepare-tx";
 import { duplicateResponse, intentKey, intents } from "@/server/tx-intents";
 import { busy, withRpcGuard } from "@/server/rpc-guard";
 import { failOrBusy, jsonBody, ok } from "../../respond";
@@ -11,8 +12,10 @@ import { failOrBusy, jsonBody, ok } from "../../respond";
  * RPC calls each build makes (pool, config, blockhash, and more per action), charged after the
  * request parses so a bad request costs nothing. A trade is charged for the graduated path
  * (+ the Meteora pool and clock); claim-lp also reads the wallet's position NFTs and positions.
+ * Every build adds the priority fee's calls (recent fees and a simulation).
  */
-const BUILD_RPC_CALLS: Record<TxAction, number> = { launch: 6, trade: 8, claim: 6, graduate: 6, "claim-lp": 10, market: 6, "market-redeem": 8 };
+const BASE_RPC_CALLS: Record<TxAction, number> = { launch: 6, trade: 8, claim: 6, graduate: 6, "claim-lp": 10, market: 6, "market-redeem": 8 };
+const buildRpcCalls = (action: TxAction) => BASE_RPC_CALLS[action] + PRIORITY_FEE_RPC_CALLS;
 
 /** Builds the transaction for one parsed request. */
 async function build(parsed: ParsedTx): Promise<PreparedTx> {
@@ -46,7 +49,7 @@ export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, 
     const key = intentKey(parsed);
     const held = await intents().pending(key, Date.now());
     if (held) return duplicateResponse(held.signature);
-    if (!(await guard.spend(BUILD_RPC_CALLS[parsed.action]))) return busy();
+    if (!(await guard.spend(buildRpcCalls(parsed.action)))) return busy();
     const prepared = await build(parsed);
     // Added only if none exists, so of two racing identical builds only one is handed out.
     const intent = await intents().remember(key, prepared.blockhash, Date.now());

@@ -4,11 +4,12 @@
 // Mainnet config params are fixed forever once created, so they're proven here first.
 import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
-import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
+import { DynamicBondingCurveClient, MigrationFeeOption } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import type { Surfnet } from "@solana/surfpool";
 import { CpAmm, positionByPoolFilter } from "@meteora-ag/cp-amm-sdk";
-import { Connection, Keypair, type PublicKey } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, PublicKey } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
+import { existingConfigProblems, prepareMainnetConfig } from "../../scripts/mainnet/config-tx";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 import { buildCreateConfigTx } from "../../src/lib/dbc/config";
 import { buildGraduateTx } from "../../src/lib/dbc/graduate";
@@ -17,8 +18,8 @@ import { loadPoolSnapshot } from "../../src/lib/dbc/pool";
 import { prepareTrade } from "../../src/lib/dbc/trade";
 import { graduatedPoolAddress } from "../../src/lib/damm/pool";
 import { lpPositionsOf } from "../../src/lib/damm/positions";
-import { COIN_PRESETS } from "../../src/lib/dbc/preset";
-import { solToLamports } from "../../src/lib/dbc/units";
+import { COIN_PRESETS, MAINNET_PARTNER_WALLET } from "../../src/lib/dbc/preset";
+import { QUOTE, solToLamports } from "../../src/lib/dbc/units";
 
 const preset = COIN_PRESETS["mainnet-beta"];
 const [partner, streamer, freeStreamer, whale] = [Keypair.generate(), Keypair.generate(), Keypair.generate(), Keypair.generate()];
@@ -54,6 +55,59 @@ test("the mainnet preset creates a config with a 3 SOL threshold and a 0.05 SOL 
 });
 
 let mainnetConfig: PublicKey | undefined;
+
+test("scripts/mainnet-config.mts's transaction: priority fee, a passing simulation, and the owner's wallet as fee claimer and leftover receiver", async () => {
+  const configKey = Keypair.generate();
+  const prepared = await prepareMainnetConfig(client.connection, partner.publicKey, configKey);
+  assert.ok(prepared.simulation.ok, `simulation: ${prepared.simulation.error}`);
+  assert.ok(prepared.priority.simulated, "the unit limit comes from the simulation");
+  assert.ok((prepared.simulation.payerCostLamports ?? 0) > 0, "the payer's cost is measured");
+  assert.ok(prepared.built.tx.instructions[0].programId.equals(ComputeBudgetProgram.programId), "priority fee first");
+  await sendAndConfirm(client.connection, prepared.built, [partner]);
+
+  const onChain = await client.state.getPoolConfig(configKey.publicKey);
+  assert.ok(onChain, "config exists at the saved key's address");
+  assert.equal(onChain.feeClaimer.toBase58(), MAINNET_PARTNER_WALLET);
+  assert.equal(onChain.leftoverReceiver.toBase58(), MAINNET_PARTNER_WALLET);
+  assert.equal(onChain.migrationQuoteThreshold.toString(), solToLamports(preset.graduationThresholdSol).toString());
+  assert.equal(onChain.poolCreationFee.toString(), solToLamports(String(preset.launchFeeSol)).toString());
+  assert.equal(onChain.creatorTradingFeePercentage, 80);
+  assert.equal(onChain.migrationFeeOption, MigrationFeeOption.FixedBps100);
+  assert.equal(onChain.creatorPermanentLockedLiquidityPercentage, 100);
+  assert.equal(onChain.partnerPermanentLockedLiquidityPercentage, 0);
+  assert.ok(onChain.quoteMint.equals(QUOTE.mint), "priced in SOL");
+  scriptConfig = configKey.publicKey;
+});
+
+let scriptConfig: PublicKey | undefined;
+
+test("an existing account is trusted as our mainnet config only if every immutable value matches", async () => {
+  assert.ok(scriptConfig && mainnetConfig, "configs from the earlier tests");
+  const problemsAt = async (address: PublicKey) => {
+    const info = await client.connection.getAccountInfo(address);
+    assert.ok(info, `an account exists at ${address.toBase58()}`);
+    return existingConfigProblems(client.connection, address, info);
+  };
+  assert.deepEqual(await problemsAt(scriptConfig), [], "the script's own config passes");
+
+  // Same preset, but the partner key (not the owner's wallet) as claimer and receiver.
+  const wrongWallets = await problemsAt(mainnetConfig);
+  assert.deepEqual(wrongWallets.map((p) => p.split(":")[0]), ["fee claimer", "leftover receiver"]);
+
+  // The devnet preset: threshold, launch fee and LP split differ too.
+  const devnet = await buildCreateConfigTx(client, COIN_PRESETS.devnet, { payer: partner.publicKey, feeClaimer: new PublicKey(MAINNET_PARTNER_WALLET), leftoverReceiver: new PublicKey(MAINNET_PARTNER_WALLET) });
+  await sendAndConfirm(client.connection, devnet, [partner]);
+  const devnetProblems = (await problemsAt(devnet.config)).map((p) => p.split(":")[0]);
+  for (const field of ["migrationQuoteThreshold", "poolCreationFee", "partnerPermanentLockedLiquidityPercentage"]) assert.ok(devnetProblems.includes(field), `${field} is caught`);
+
+  // A wallet (system-owned) and a coin's pool (DBC-owned, but not a config).
+  assert.match((await problemsAt(partner.publicKey))[0], /not the DBC program/);
+  const launch = await buildCreateStreamCoinTx(client, { name: "Pool", symbol: "POOL", uri: "https://x.io/p" }, { config: scriptConfig, creator: freeStreamer.publicKey });
+  await sendAndConfirm(client.connection, launch, [freeStreamer]);
+  const pool = (await client.state.getPoolByBaseMint(launch.mint))?.publicKey;
+  assert.ok(pool);
+  assert.deepEqual(await problemsAt(pool), ["it doesn't decode as a DBC config"]);
+});
 
 test("on mainnet settings, graduation gives 100% of the locked liquidity to the streamer: one position NFT, theirs", async () => {
   assert.ok(mainnetConfig, "config from the previous test");

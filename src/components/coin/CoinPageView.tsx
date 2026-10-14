@@ -206,8 +206,8 @@ function CurveProgress({ coin }: { coin: CoinView }) {
         <MeteoraNote coin={coin} />
       ) : (
         <p className="mute curve-note">
-          {coin.status === "graduating" ? "The curve is full." : `${formatSol(left)} SOL left until this coin graduates to a Meteora pool.`} 80% of
-          fees go to the streamer.
+          {coin.status === "graduating" ? "The curve is full." : `${formatSol(left)} SOL left until this coin graduates to a Meteora pool.`} Each trade fee:
+          64% to the streamer, 20% to Meteora, and memestream&apos;s 16% pays for the AI referee.
         </p>
       )}
     </section>

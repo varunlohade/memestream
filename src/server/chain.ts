@@ -4,6 +4,8 @@ import { createHash } from "node:crypto";
 import { DynamicBondingCurveClient, deriveDbcPoolAddress } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import { Connection, PublicKey, type Transaction } from "@solana/web3.js";
 import { QUOTE } from "@/lib/dbc/units";
+import { assertSafeDeployment, isMainnet } from "@/lib/network";
+import { type PriorityFeeSettings, priorityFeeSettings } from "@/lib/priority-fee";
 
 export type Chain = {
   client: DynamicBondingCurveClient;
@@ -26,6 +28,7 @@ let cached: (Chain & { envKey: string }) | undefined;
 export function getChain(): Chain {
   const envKey = `${process.env.MEMESTREAM_RPC_URL}|${process.env.MEMESTREAM_CONFIG}|${process.env.MEMESTREAM_PUBLIC_URL}`;
   if (cached?.envKey === envKey) return cached;
+  assertSafeDeployment();
   const connection = new Connection(requireEnv("MEMESTREAM_RPC_URL"), "confirmed");
   cached = {
     connection,
@@ -37,13 +40,16 @@ export function getChain(): Chain {
   return cached;
 }
 
-/** What the UI shows and which Wallet Standard chain it asks wallets for. */
+/** What the UI shows and which Wallet Standard chain it asks wallets for. Mainnet is always labelled "Mainnet". */
 export function networkInfo() {
   return {
-    label: process.env.MEMESTREAM_NETWORK_LABEL ?? "Devnet",
+    label: isMainnet() ? "Mainnet" : (process.env.MEMESTREAM_NETWORK_LABEL ?? "Devnet"),
     walletChain: (process.env.MEMESTREAM_WALLET_CHAIN ?? "solana:devnet") as `${string}:${string}`,
   };
 }
+
+/** Priority fee for every transaction the server builds; MEMESTREAM_PRIORITY_FEE_MAX caps it (micro-lamports per CU). */
+export const priorityFee = (): PriorityFeeSettings => priorityFeeSettings(process.env.MEMESTREAM_PRIORITY_FEE_MAX);
 
 /** A coin's pool address, computed from its mint and our config: no account scan needed. */
 export function poolForMint(mint: string): PublicKey | null {

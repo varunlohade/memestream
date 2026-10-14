@@ -5,13 +5,14 @@ import assert from "node:assert/strict";
 import { after, before, test } from "node:test";
 import { DynamicBondingCurveClient } from "@meteora-ag/dynamic-bonding-curve-sdk";
 import type { Surfnet } from "@solana/surfpool";
-import { Connection, Keypair, type PublicKey, Transaction } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, Keypair, type PublicKey, Transaction } from "@solana/web3.js";
 import { startOfflineSurfnet } from "../../scripts/local-chain/offline-surfnet";
 import { createConfigOwnedBy } from "../../scripts/local-chain/partner-config";
 import { sendAndConfirm } from "../../scripts/local-chain/send-and-confirm";
 import { buildCreateStreamCoinTx } from "../../src/lib/dbc/launch";
 import { COIN_PRESETS } from "../../src/lib/dbc/preset";
 import { pollUntil } from "../../src/lib/poll";
+import { DEFAULT_PRIORITY_FEE } from "../../src/lib/priority-fee";
 import { signatureStatus } from "../../src/lib/tx-status";
 import { neverSentSignature } from "../support/signatures";
 
@@ -121,4 +122,44 @@ test("a lower client minimum can't loosen the server's own slippage floor", asyn
   const loose = await server.buildTradeForWallet({ ...order, minReceived: "0.000001" });
   assert.equal(loose.preview.minimumReceived, strict.preview.minimumReceived);
   await assert.rejects(server.buildTradeForWallet({ ...order, minReceived: "abc" }), /Not a valid minimum amount/);
+});
+
+/** The Compute Budget instructions of a server-built transaction: [unit limit, unit price]. */
+function budgetOf(prepared: { transaction: string }) {
+  const tx = Transaction.from(Buffer.from(prepared.transaction, "base64"));
+  const budget = tx.instructions.filter((ix) => ix.programId.equals(ComputeBudgetProgram.programId));
+  assert.equal(budget.length, 2, "exactly one unit limit and one unit price");
+  assert.ok(budget[0] === tx.instructions[0] && budget[1] === tx.instructions[1], "they come first");
+  return { units: tx.instructions[0].data.readUInt32LE(1), microLamports: Number(tx.instructions[1].data.readBigUInt64LE(1)) };
+}
+
+test("every server-built transaction carries a priority fee, and launch, buy, sell and graduate still land with it", async () => {
+  // The local chain reports no recent fees, so the price is the floor; the limit comes from simulation.
+  const buy = await server.buildTradeForWallet({ wallet: viewer.publicKey.toBase58(), mint: mint.toBase58(), side: "buy", amount: "0.01", slippageBps: 100 });
+  const { units, microLamports } = budgetOf(buy);
+  assert.equal(microLamports, DEFAULT_PRIORITY_FEE.minMicroLamports);
+  assert.ok(units > 10_000 && units < DEFAULT_PRIORITY_FEE.fallbackUnits, `limit from simulation, not the fallback (${units})`);
+  assert.equal(await signAndSend(buy, viewer), "confirmed");
+
+  // The cap from env holds even when it's below the floor.
+  process.env.MEMESTREAM_PRIORITY_FEE_MAX = "5000";
+  try {
+    const capped = await server.buildTradeForWallet({ wallet: viewer.publicKey.toBase58(), mint: mint.toBase58(), side: "sell", amount: "1000", slippageBps: 100 });
+    assert.equal(budgetOf(capped).microLamports, 5_000);
+    assert.equal(await signAndSend(capped, viewer), "confirmed", "a sell lands");
+  } finally {
+    delete process.env.MEMESTREAM_PRIORITY_FEE_MAX;
+  }
+
+  // A launch through the server (the fresh mint keypair signs after the budget went in).
+  const launch = await server.buildLaunchForWallet({ wallet: streamer.publicKey.toBase58(), name: "Prio", symbol: "PRIO", streamUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
+  budgetOf(launch);
+  assert.equal(await signAndSend(launch, streamer), "confirmed", "a launch lands");
+
+  // Fill the 0.1 SOL devnet curve, then graduate through the server (two position NFT keypairs).
+  const fill = await server.buildTradeForWallet({ wallet: viewer.publicKey.toBase58(), mint: launch.mint, side: "buy", amount: "1", slippageBps: 100 });
+  assert.equal(await signAndSend(fill, viewer), "confirmed");
+  const graduate = await server.buildGraduateForWallet({ wallet: partner.publicKey.toBase58(), mint: launch.mint });
+  budgetOf(graduate);
+  assert.equal(await signAndSend(graduate, partner), "confirmed", "graduation lands");
 });

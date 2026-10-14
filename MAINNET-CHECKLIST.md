@@ -7,33 +7,50 @@ none of its parameters can change later, so all of them must be right first.
 - From mainnet onward, a money change (tx builders, presets, fees, tx-flow) deploys only AFTER a fresh
   auditor reports it clean. On devnet, deploy-then-audit is acceptable.
 
+The owner's step-by-step for launch day is in RUNBOOK-mainnet.md.
+
 ## Decisions (the owner)
+- [x] **Scope (the owner, 2026-10-15):** mainnet = coins (DBC) + free-points predictions. Real-SOL
+      prediction markets are OFF on mainnet. `marketsEnabled()` is false whenever
+      `MEMESTREAM_WALLET_CHAIN=solana:mainnet`, even with `MEMESTREAM_MARKETS=1`
+      (`src/server/predictions/flag.ts`, test `src/server/mainnet-guards.test.ts`).
 - [x] **Launch fee: 0.05 SOL** (the owner, 2026-10-08). `COIN_PRESETS["mainnet-beta"].launchFeeSol`,
       pinned in `config.test.ts`; `mainnet-config.surfpool.ts` proves a launch costs exactly 0.05 SOL
-      more on the real program. It collects in each pool: the partner claims it with
-      `claimPartnerPoolCreationFee` (a claim script is still to write). Go live shows
-      "Launch costs 0.05 SOL" (read from the on-chain config). Devnet stays free.
+      more on the real program. It collects in each pool; memestream gets 90% (0.045 SOL), Meteora 10%.
+      Claim it with `scripts/claim-partner-fees.mts` or the admin page `/admin/fees` (2026-10-15,
+      `partner-fees.surfpool.ts`). Go live shows "Launch costs 0.05 SOL" (read from the on-chain
+      config). Devnet stays free.
 - [x] **Graduated liquidity: 100% to the streamer, 0% to the partner** (the owner, 2026-10-09).
       `COIN_PRESETS["mainnet-beta"].lockedLpPercent`, pinned in `config.test.ts`;
       `mainnet-config.surfpool.ts` graduates a coin on the mainnet preset and proves exactly one
       position NFT exists, held by the streamer. The partner earns the 0.05 SOL launch fee and its
       20% share of curve fees. Devnet stays 50/50 (its config is fixed).
-- [ ] **feeClaimer = a Squads multisig**, not a hot key (security audit). On mainnet the partner
-      gets no LP position, so there are no partner LP fees to claim (on devnet, claim through the
-      app, or for a multisig through Squads: audit #3, INFO-3).
+- [x] **feeClaimer: the owner's own wallet, NOT a multisig** (the owner's choice, 2026-10-15; the
+      security audit asked for a Squads multisig). RISK, accepted by the owner: one browser wallet
+      controls memestream's fee share and launch fees forever (the config can't change). If that
+      wallet's key leaks, the thief can claim all unclaimed partner fees, now and later. Keep its
+      seed phrase offline, claim often so little sits unclaimed, and never import it into a hot
+      server. On mainnet the partner gets no LP position, so there are no partner LP fees to claim.
 - [x] **Graduation threshold: 3 SOL** (the owner, 2026-10-11; was 10 SOL). Set in
       `COIN_PRESETS["mainnet-beta"]`; `config.test.ts` pins it. Devnet uses 0.1 SOL, which the real
       programs accept, including graduation to DAMM v2 (lifecycle.surfpool.ts).
-- [ ] **Partner wallet.** `feeClaimer` (receives memestream's 20% fee share) and
-      `leftoverReceiver` (receives unsold tokens after graduation) must be the owner's real wallet,
-      not a local key. `scripts/dev-chain.ts` uses `.keys/local-partner.json`: never use it on mainnet.
-- [ ] **Fee settings.** Confirm: 50% launch fee falling to a 1% base over 60 s, plus a small
-      volatility fee (`dynamicFeeEnabled: true`); 80% of fees to the streamer; graduated pool fee 1%
-      (`MigrationFeeOption.FixedBps100`); 100% of graduated liquidity locked forever, all of it the
-      streamer's (see above).
-- [ ] **Public URL.** `MEMESTREAM_PUBLIC_URL` is baked into every coin's on-chain metadata URI and
-      can never change for coins already launched. Set it to the final domain (e.g. https://memestream.lol).
-      Devnet runs on the *.vercel.app URL for now; buy the domain before mainnet.
+- [x] **Partner wallet** (the owner, 2026-10-15). `feeClaimer` (memestream's fee share and launch
+      fees) and `leftoverReceiver` (unsold tokens after graduation) are both the owner's wallet
+      `BxfZSzPDJVRyPrBQVDEJzgonQgHeVXJU34FAf2MQ6Enf` (`MAINNET_PARTNER_WALLET` in `preset.ts`, pinned
+      in `config.test.ts`; `mainnet-config.surfpool.ts` reads both back from a created config).
+      `scripts/dev-chain.ts` uses `.keys/local-partner.json`: never use it on mainnet.
+- [x] **Fee settings kept as is** (the owner, 2026-10-15): 50% launch fee falling to a 1% base over
+      60 s, plus a small volatility fee (`dynamicFeeEnabled: true`); 80% of fees to the streamer;
+      graduated pool fee 1% (`MigrationFeeOption.FixedBps100`); 100% of graduated liquidity locked
+      forever, all of it the streamer's; launch fee 0.05 SOL; graduation 3 SOL. All pinned in
+      `config.test.ts`. Note: Meteora takes 20% of every trading fee first (PROTOCOL_FEE_PERCENT);
+      the 80/20 split is of the rest, so per trading fee: streamer 64%, memestream 16%, Meteora 20%.
+- [x] **Public URL** (the owner, 2026-10-15). Mainnet: `MEMESTREAM_PUBLIC_URL=https://www.memestream.lol`
+      (baked into every mainnet coin's metadata URI forever). Devnet moves to
+      https://devnet.memestream.lol (a second Vercel project). memestream-iota.vercel.app (the judges' link)
+      redirects to `MEMESTREAM_LEGACY_REDIRECT`, default https://devnet.memestream.lol, never to
+      mainnet (`src/lib/legacy-redirect.ts`, `next.config.ts`; never remove it). On mainnet the build refuses a public
+      URL that isn't an https origin (`src/lib/network.ts`).
 
 ## Before creating the config
 - [x] Full path on real **devnet** once: create, buy, sell, graduate, claim. Done 2026-10-08 through
@@ -42,10 +59,32 @@ none of its parameters can change later, so all of them must be right first.
       3KU5oytsRphp6GSt65Ge2c34KVYeEoiSZaJ5KMtTqA4uZY7jNpdKw8S8LZ6UEJEwsYKUKdJJbAyf5AeKJmsMiQwk.
 - [ ] Paid RPC (Helius/QuickNode/Triton) in `MEMESTREAM_RPC_URL`. The coin list uses
       getProgramAccounts, which public RPCs rate-limit.
-- [ ] `MEMESTREAM_WALLET_CHAIN=solana:mainnet` and `MEMESTREAM_NETWORK_LABEL=Mainnet`.
-- [ ] Priority fees on transactions (busy mainnet drops unprioritized ones).
+- [ ] `MEMESTREAM_WALLET_CHAIN=solana:mainnet` (the owner sets it; RUNBOOK-mainnet.md). This one value
+      is the mainnet switch: it forces the label "Mainnet", markets off, and Solscan links without
+      `?cluster=` (2026-10-15). The real guard is at runtime: before building any
+      transaction the server compares the RPC's genesis hash with the wallet chain and refuses on a
+      mismatch (`src/server/prepare-tx.ts`). The build-time check is only a cheap extra: it stops the
+      build when the RPC hostname contains "mainnet" and the wallet chain isn't mainnet; an RPC
+      whose hostname doesn't say "mainnet" passes it and is caught by the genesis check.
+- [x] Priority fees on transactions (2026-10-15). Every server-built transaction (launch, buy, sell,
+      graduate, streamer and LP fee claims, market bets and redeems, the oracle's own sends, partner
+      claims, the config script) gets a compute unit limit from a simulation (+20% + 10k CU; if the
+      simulation fails, the larger of 400k and the builder's own limit, e.g. migration's 600k) and a price at the 75th percentile of `getRecentPrioritizationFees` on
+      its writable accounts, between 10,000 and `MEMESTREAM_PRIORITY_FEE_MAX` (default 1,000,000,
+      clamped to a hard 5,000,000) micro-lamports per CU: at the default cap, at most ~0.0004 SOL per 400k-CU transaction. `src/lib/priority-fee.ts`,
+      `src/server/prepare-tx.ts`; tests `priority-fee.test.ts`, `server-trade.surfpool.ts` (launch,
+      buy, sell and graduate land with it). The double-pay hold is unchanged (it keys on the request,
+      not the bytes).
 - [ ] Dry run: simulate the createConfig transaction and review it with the owner.
-- [ ] Production build has **no** `MEMESTREAM_DEV_WALLET_KEY` set (the test wallet must not exist).
+      Done by the agent 2026-10-15 on public mainnet (`scripts/mainnet-config.mts`, payer = the
+      owner's wallet, throwaway config key): simulation OK, 37,642 CU, payer cost ~0.006 SOL. The
+      owner still runs it himself and reviews the printout before `--send`.
+- [x] Production build has **no** `MEMESTREAM_DEV_WALLET_KEY` (2026-10-15): with the mainnet wallet
+      chain, `next build`, `next start` (`next.config.ts`) and the first chain access
+      (`src/server/chain.ts`) throw if it is set (`src/lib/network.test.ts`).
+- [x] Hidden-coin lists are per deployment (2026-10-15): `MEMESTREAM_HIDDEN_CREATORS` and
+      `MEMESTREAM_HIDDEN_MINTS` are env only; no address is hard-coded. Mainnet starts with both
+      empty; never copy devnet's values (RUNBOOK-mainnet.md).
 
 - [x] Shared rate limits (2026-10-08): per-client limits per route and the site-wide RPC budget live in
       Upstash Redis (`src/server/shared-limit.ts`, `rpc-budget.ts`), shared by every Vercel instance.
@@ -74,11 +113,26 @@ none of its parameters can change later, so all of them must be right first.
       transitive through @solana/web3.js v1, @solana/spl-token and the Meteora DBC SDK (bigint-buffer,
       toml, stream-json, uuid, jayson); no fix available upstream. Our server feeds them only our own
       RPC's responses and our own transaction bytes. Re-check before mainnet and bump when the SDK does.
+      Re-checked 2026-10-15: 46 (13 low, 19 moderate, 14 high, 0 critical). The rise comes mostly from
+      `@metadaoproject/futarchy` (markets; added after audit #2), which pulls in bundlr/arbundles,
+      axios, @sqds/multisig, elliptic and an old `ws`. The rest are the same web3.js v1 / spl-token /
+      Meteora SDK chains (bigint-buffer, toml, stream-json, uuid, bn.js). Only `ws` (under
+      @ethersproject/providers, via arbundles) has a non-breaking fix (`npm audit fix`); not applied
+      here. Markets are off on mainnet, so the futarchy paths never run there, but the package is
+      still in the server bundle. Decide before mainnet: apply `npm audit fix`, and consider loading
+      the markets code only when markets are on.
 
 ## Prediction markets: before mainnet
 
 MEMESTREAM_MARKETS stays off on mainnet until every box is ticked (security audits 2026-10-12).
+Since 2026-10-15 the code enforces it: markets are off whenever the wallet chain is mainnet.
 
+- [ ] **BLOCKER: the betting cutoff is not enforced on chain** (third review, 2026-10-15). After
+      lockAt, the market's DAMM v2 pool still accepts swaps until the oracle withdraws its
+      liquidity. Only our HTTP route refuses late bets: a prebuilt transaction or a direct swap on
+      the pool skips that check, so someone who already knows the result can still buy. Markets need
+      an execution-layer cutoff (e.g. a pool that stops trading at lockAt, or liquidity pulled at
+      lockAt by an on-chain or always-on mechanism) before any mainnet market.
 - [ ] **Admin paging:** a challenged, unresolved or AI-disputed market waits for an admin
       (MEMESTREAM_ADMIN_WALLETS). Page an admin at once and answer well under 24 hours; the 24-hour
       auto-void is the last resort only.
@@ -99,3 +153,4 @@ MEMESTREAM_MARKETS stays off on mainnet until every box is ticked (security audi
 ## After
 - [ ] Record the config address in the deploy env (`MEMESTREAM_CONFIG`) and in this file.
 - [ ] Launch one test coin with a small first buy, then graduate-path smoke test with small amounts.
+- [ ] Claim partner fees once from `/admin/fees` (the owner's wallet signs) and check the SOL arrives.

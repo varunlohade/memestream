@@ -1,4 +1,10 @@
 import type { NextConfig } from "next";
+import { LEGACY_HOST, legacyRedirectTarget } from "./src/lib/legacy-redirect";
+import { assertSafeDeployment } from "./src/lib/network";
+
+// Fails `next build` and `next start` loudly on unsafe settings (e.g. the test wallet key on mainnet).
+// The server checks again on first chain access (src/server/chain.ts), for hosts that skip this file.
+assertSafeDeployment(process.env);
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
@@ -16,13 +22,16 @@ const nextConfig: NextConfig = {
       { source: "/overlay/:path*", headers: safe },
     ];
   },
-  // The old Vercel address sends everyone to the real domain (wallet sign-in checks the site's address).
+  // The judges' old Vercel address goes to the DEVNET site, never mainnet (src/lib/legacy-redirect.ts;
+  // MEMESTREAM_LEGACY_REDIRECT, default https://devnet.memestream.lol). Never remove this redirect.
   async redirects() {
+    const target = legacyRedirectTarget(process.env);
+    if (!target) return [];
     return [
       {
         source: "/:path*",
-        has: [{ type: "host", value: "memestream-iota.vercel.app" }],
-        destination: "https://www.memestream.lol/:path*",
+        has: [{ type: "host", value: LEGACY_HOST }],
+        destination: `${target}/:path*`,
         permanent: false,
       },
     ];

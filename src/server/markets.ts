@@ -30,7 +30,8 @@ import { type MarketOrder, type MarketQuote, prepareMarketTrade, quoteMarketTrad
 import { fetchQuestion, type QuestionState } from "@/lib/markets/vault";
 import { pollUntil } from "@/lib/poll";
 import { parseTicker } from "@/lib/short-link";
-import { getChain, rememberBuilt, signatureStatus } from "./chain";
+import { getChain, signatureStatus } from "./chain";
+import { finishTx, toPreparedTx } from "./prepare-tx";
 import { InputError } from "@/lib/dbc/errors";
 import { asUserFacing, BusyError, UserError } from "./errors";
 import { takeRpcBudget } from "./rpc-budget";
@@ -71,16 +72,6 @@ function marketSecret(): string {
  * deployer add them, so they're off unless MEMESTREAM_MARKET_METADATA=1. The app labels YES/NO itself.
  */
 const metadataOn = () => process.env.MEMESTREAM_MARKET_METADATA === "1";
-
-/** Same as transactions.ts: fresh blockhash, partial-sign with builder keypairs, remember, serialize. */
-async function toPreparedTx(built: BuiltTx): Promise<PreparedTx> {
-  const { blockhash } = await getChain().connection.getLatestBlockhash("confirmed");
-  built.tx.recentBlockhash = blockhash;
-  if (built.localSigners.length) built.tx.partialSign(...built.localSigners);
-  rememberBuilt(built.tx);
-  const bytes = built.tx.serialize({ requireAllSignatures: false, verifySignatures: false });
-  return { transaction: bytes.toString("base64"), blockhash };
-}
 
 async function userFacing<T>(work: () => Promise<T>): Promise<T> {
   try {
@@ -282,8 +273,7 @@ const CONFIRM = { timeoutMs: 60_000, intervalMs: 500 };
 /** Signs as the oracle (plus any builder keypairs), sends, and waits; throws unless it confirmed. */
 async function sendAsOracle(built: BuiltTx, oracle: Keypair): Promise<string> {
   const { connection } = getChain();
-  const { blockhash } = await connection.getLatestBlockhash("confirmed");
-  built.tx.recentBlockhash = blockhash;
+  const blockhash = await finishTx(built);
   built.tx.sign(oracle, ...built.localSigners);
   const signature = await connection.sendRawTransaction(built.tx.serialize());
   const outcome = await pollUntil(async () => {
