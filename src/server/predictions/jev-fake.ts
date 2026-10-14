@@ -45,3 +45,7 @@ export function happenedAnswer(choice: "YES" | "NO" | "UNCLEAR", confidence = 0.
 
 /** A well-formed OpenRouter chat answer carrying `text`. */
 export const visionAnswer = (text: string) => ({ id: "gen-test", choices: [{ message: { role: "assistant", content: text } }] });
+
+/** The vision model's facts answer: each fact with where it was seen (game_ui unless given). */
+export const factsAnswer = (...facts: (string | [string, string])[]) =>
+  visionAnswer(JSON.stringify({ facts: facts.map((f) => (typeof f === "string" ? { fact: f, source: "game_ui" } : { fact: f[0], source: f[1] })) }));

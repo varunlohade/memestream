@@ -17,7 +17,7 @@ import { UserError } from "@/server/errors";
 import { aiCheckFromEnv } from "./ai-check";
 import { reviewFromEnv } from "./review";
 import { marketsEnabled } from "./flag";
-import { type MarketDeps, MarketUnavailable, predictionsService, type PredictionsService } from "./service";
+import { AI_DAILY_CALLS, AI_DAILY_CALLS_PER_COIN, type MarketDeps, MarketUnavailable, predictionsService, type PredictionsService } from "./service";
 import { memoryStore, redisStore } from "./store";
 import { testSettings } from "./test-settings";
 
@@ -74,8 +74,16 @@ export async function registeredMarket(mint: string, predictionId: string, betto
   const record = await ready.service.market(mint, predictionId);
   if (!record) throw new UserError("No market for this prediction");
   if (bettor !== undefined && (await ready.service.staffOf(mint, bettor))) throw new UserError("Streamers and mods can't bet on their own coin's predictions");
+  // A wallet that builds a trade takes part on purpose: it may never decide this market (see stakeIn).
+  if (bettor !== undefined) await ready.service.recordParticipant(mint, predictionId, bettor);
   return record;
 }
+
+/** A whole number above 0 from the environment, else `fallback`. */
+const positiveInt = (value: string | undefined, fallback: number) => {
+  const n = Number(value);
+  return Number.isInteger(n) && n > 0 ? n : fallback;
+};
 
 /** "Holds this coin" answers are reused this long per wallet and coin. */
 const HOLDS_CACHE_MS = 60_000;
@@ -141,6 +149,10 @@ export function predictions(): { service: PredictionsService } | { error: string
     markets: marketDeps(),
     admins: adminWallets(),
     challengeMs,
+    aiBudget: {
+      daily: positiveInt(process.env.MEMESTREAM_AI_DAILY_CALLS, AI_DAILY_CALLS),
+      perCoin: positiveInt(process.env.MEMESTREAM_AI_DAILY_CALLS_PER_COIN, AI_DAILY_CALLS_PER_COIN),
+    },
     defer: (task) => after(task),
     coin: async (mint) => {
       const coin = (await getCoinDetail(mint, null))?.coin;

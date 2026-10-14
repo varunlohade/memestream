@@ -1,4 +1,5 @@
 /** What the predictions API returns for a coin (shared by the server and the browser; types only). */
+import type { RefereeWhy } from "./engine";
 import type { Outcome, Side } from "./rules";
 
 /**
@@ -8,7 +9,7 @@ import type { Outcome, Side } from "./rules";
 export type MarketStepView = "opening" | "open" | "closed" | "resolved" | "failed" | null;
 
 /**
- * Where a resolved prediction's market stands (markets only): "proposed" (the streamer's result,
+ * Where a resolved prediction's market stands (markets only): "proposed" (the AI's, streamer's or admin's result,
  * final at `finalAt` unless challenged), "disputed" (challenged, or waiting for an admin because
  * nobody resolved it or the AI check disagreed), or "final" (`final` is what the market pays).
  */
@@ -18,8 +19,10 @@ export type MarketVerdictView = {
   proposed: Side | "refund";
   finalAt: number | null;
   final: Side | "refund" | null;
-  /** Why it waits for an admin, for admins only. */
-  why: "challenge" | "unresolved" | "ai" | null;
+  /** Why it waits for an admin, for admins only ("fallback": the streamer decided because the AI couldn't tell). */
+  why: "challenge" | "unresolved" | "fallback" | "ai" | null;
+  /** Why the AI couldn't tell, when the streamer decided; for admins only. */
+  aiWhy: RefereeWhy | null;
   /** The challenge, for admins only (null for everyone else). */
   challenge: { by: string; at: number; reason: string; link: string | null; bond: number } | null;
 } | null;
@@ -64,8 +67,17 @@ export type PredictionsView = {
     market: MarketStepView;
     /** What the market resolves from: the streamer's official link, else null (the stream decides). */
     source: string | null;
-    /** What the streamer or a mod says happened, once betting closed (the admin resolves). */
+    /** What the streamer or a mod says happened, once betting closed. */
     witness: WitnessView;
+    /**
+     * Once betting closed: "checking" while the AI referee decides; "unclear" when it couldn't tell
+     * (or the coin has no AI): then the streamer or a mod decides. null while betting is open.
+     */
+    ai: "checking" | "unclear" | null;
+    /** Why the AI couldn't tell, for admins only (null for everyone else, and while it checks). */
+    aiWhy: RefereeWhy | null;
+    /** What on stream decides YES or NO, as the AI wrote it once the question went live (a hint); null until then. */
+    rule: string | null;
   }[];
   /** The streamer's or a mod's typed question while it is under review (sent to staff only). */
   pending: { id: string; text: string; stuck: boolean } | null;
@@ -82,12 +94,14 @@ export type PredictionsView = {
     text: string;
     outcome: Outcome;
     resolvedAt: number;
-    /** "admin": the memestream oracle. `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto"). */
-    resolvedBy: { role: "admin" | "streamer" | "mod" | "auto"; wallet: string | null };
+    /** "ai": the AI referee; "admin": the memestream oracle. `wallet` is sent to the streamer and mods only (null for everyone else, and for "auto" and "ai"). */
+    resolvedBy: { role: "ai" | "admin" | "streamer" | "mod" | "auto"; wallet: string | null };
     witness: WitnessView;
     disputed: boolean;
-    /** The AI check's second opinion: "checking" while it runs; null if no check ran. */
+    /** The AI check's second opinion on a result someone else gave: "checking" while it runs; null if no check ran. */
     ai: "checking" | "agree" | "disagree" | "unclear" | null;
+    /** What the AI referee saw, when it decided the result. */
+    aiReason: string | null;
     /** Flags are taken until then (ms); null once the result counts. */
     flagUntil: number | null;
     my: { bet: number; payout: number; flagged: boolean; canFlag: boolean } | null;
@@ -100,6 +114,11 @@ export type PredictionsView = {
   }[];
   /** The coin's mods (sent to the streamer and mods only). */
   mods: string[];
+  /**
+   * Settled markets older than the recent results (kept up to MAX_MARKET_HISTORY), so holders can
+   * still find them and redeem.
+   */
+  pastMarkets: { id: string; text: string; outcome: Outcome; resolvedAt: number; source: string | null }[];
   leaderboard: { stream: LeaderRow[]; allTime: LeaderRow[]; me: { stream: Standing | null; allTime: Standing | null } };
 };
 

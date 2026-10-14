@@ -50,6 +50,12 @@ export interface PredictionStore {
   topWon(limit: number): Promise<Leader[]>;
   /** The members of a set that commits keep (`Commit.sets`), in no particular order. */
   members(key: string): Promise<string[]>;
+  /**
+   * Takes one from each counter in `keys`, in one atomic step, unless any is already at its limit
+   * (`limits[i]`); false then, and nothing is taken. Each counter expires `ttlMs` after its last take.
+   * No version check: concurrent takes never conflict.
+   */
+  take(keys: string[], limits: number[], ttlMs: number): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -68,6 +74,7 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
   const won = new Map<string, number>();
   const nonces = new Map<string, number>(); // key -> expires at
   const sets = new Map<string, Set<string>>();
+  const counters = new Map<string, { n: number; until: number }>();
 
   return {
     kind: "memory",
@@ -114,6 +121,12 @@ export function memoryStore(now: () => number = Date.now): PredictionStore {
     },
     async members(key) {
       return [...(sets.get(key) ?? [])];
+    },
+    async take(keys, limits, ttlMs) {
+      const counts = keys.map((k) => (counters.get(k)?.until ?? 0) > now() ? counters.get(k)!.n : 0);
+      if (counts.some((n, i) => n >= limits[i])) return false;
+      keys.forEach((k, i) => counters.set(k, { n: counts[i] + 1, until: now() + ttlMs }));
+      return true;
     },
   };
 }
@@ -195,6 +208,18 @@ return out
 /** KEYS: a set. */
 export const MEMBERS_LUA = `return redis.call('SMEMBERS', KEYS[1])`;
 
+/** KEYS: counters (hashes with field n). ARGV: ttlMs, then each counter's limit. Returns 1 if taken, 0 if any is at its limit. */
+export const TAKE_LUA = `
+for i, key in ipairs(KEYS) do
+  local n = tonumber(redis.call('HGET', key, 'n') or '0') or 0
+  if n >= tonumber(ARGV[i + 1]) then return 0 end
+end
+for _, key in ipairs(KEYS) do
+  redis.call('HINCRBY', key, 'n', 1)
+  redis.call('PEXPIRE', key, ARGV[1])
+end
+return 1`;
+
 /** KEYS: won. ARGV: limit. */
 export const TOP_LUA = `return redis.call('ZREVRANGE', KEYS[1], 0, tonumber(ARGV[1]) - 1, 'WITHSCORES')`;
 
@@ -249,6 +274,9 @@ export function redisStore(redis: Redis, prefix = DEFAULT_PREFIX): PredictionSto
     },
     async members(key) {
       return ((await run<unknown[]>(MEMBERS_LUA, [prefix + key], [])) ?? []).map(String);
+    },
+    async take(keys, limits, ttlMs) {
+      return Number(await run<unknown>(TAKE_LUA, keys.map((k) => prefix + k), [ttlMs, ...limits])) === 1;
     },
   };
 }

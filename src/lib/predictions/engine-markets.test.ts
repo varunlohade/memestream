@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { type Actor, apply, applyAiVerdict, applyMarketDone, applyMarketTryFailed, applyReview, type Env, type Game, marketsDue, newGame, type Result, startMarkets } from "./engine";
-import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_DECISION_MS, MARKET_FAILED_RETRY_MS, MARKET_RETRY_MS, MAX_HISTORY, OVERTURN_REWARD } from "./rules";
+import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_DECISION_MS, MARKET_FAILED_RETRY_MS, MARKET_RETRY_MS, MAX_HISTORY, MAX_MARKET_HISTORY, OVERTURN_REWARD } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -85,15 +85,11 @@ test("full life: create, close at lock, resolve YES only after the challenge win
   assert.equal(marketsDue(game, end + 10 * MIN, on(end)), false);
 });
 
-test("audit H1: a close that keeps failing never holds up the resolution; the close is still retried after", () => {
+test("audit 3-1: a confirmed close comes before the resolve: never both at once; the resolve follows the close", () => {
   const { game, id } = resolvedWith("yes", { close: false });
-  assert.deepEqual(claim(game, WINDOW_END).jobs, [
-    { id, kind: "close" },
-    { id, kind: "resolve", outcome: "yes" },
-  ]);
-  const resolved = applyMarketDone(claim(game, WINDOW_END).game, { id, kind: "resolve", outcome: "yes" }, null, WINDOW_END, on(WINDOW_END)).game;
-  assert.equal(resolved.resolved[0].market?.step, "resolved");
-  assert.deepEqual(claim(resolved, WINDOW_END + MARKET_RETRY_MS).jobs, [{ id, kind: "close" }], "the close keeps going: it gets the seed back");
+  assert.deepEqual(claim(game, WINDOW_END).jobs, [{ id, kind: "close" }], "no resolve while the oracle's liquidity is still in the pool");
+  const closed = applyMarketDone(claim(game, WINDOW_END).game, { id, kind: "close" }, null, WINDOW_END + 1_000, on(WINDOW_END)).game;
+  assert.deepEqual(claim(closed, WINDOW_END + 1_000).jobs, [{ id, kind: "resolve", outcome: "yes" }]);
 });
 
 test("idempotent: a step that succeeds twice, or for the wrong step, changes nothing", () => {
@@ -153,6 +149,18 @@ test("a result whose market isn't done yet stays in the history past MAX_HISTORY
   assert.equal(after.resolved.at(-1)?.id, old.id);
 });
 
+test("audit 3-8: settled markets stay past MAX_HISTORY (newest MAX_MARKET_HISTORY), so holders can find them to redeem", () => {
+  const { game } = resolvedWith("yes");
+  const old = game.resolved[0];
+  const settled = { ...old, open: null, market: { ...old.market!, step: "resolved" as const, closed: true } };
+  const filler = Array.from({ length: MAX_HISTORY + 5 }, (_, i) => ({ ...old, id: String(500 + i), market: undefined, open: null }));
+  const after = apply({ ...game, resolved: [...filler, settled] }, { kind: "tick" }, null, LOCK + FLAG_WINDOW_MS, on(T0)).game;
+  assert.equal(after.resolved.at(-1)?.id, old.id, "25 newer results later, still there");
+  const many = Array.from({ length: MAX_MARKET_HISTORY + 3 }, (_, i) => ({ ...settled, id: String(900 + i) }));
+  const capped = apply({ ...game, resolved: [...filler, ...many] }, { kind: "tick" }, null, LOCK + FLAG_WINDOW_MS, on(T0)).game;
+  assert.equal(capped.resolved.filter((p) => p.market?.step === "resolved").length, MAX_MARKET_HISTORY, "bounded");
+});
+
 // ---- Proposals, the challenge window, and admins ----
 
 test("the streamer's YES, NO or cancel is only a proposal: final at the window's end; free-points flags change nothing", () => {
@@ -191,6 +199,7 @@ test("audit H2: nobody resolved it (auto-cancel): an admin decides; only after 2
   game = apply(game, { kind: "tick" }, null, LOCK + 60 * MIN, on(LOCK + 60 * MIN)).game;
   assert.equal(game.resolved[0].resolvedBy, "auto");
   const since = game.resolved[0].resolvedAt;
+  game = applyMarketDone(game, { id, kind: "close" }, null, since, on(since)).game;
   assert.equal(resolveJob(game, since + MARKET_CHALLENGE_MS), undefined, "no refund just from the streamer staying silent");
   const ticked = apply(game, { kind: "tick" }, null, since + MARKET_DECISION_MS, on(since));
   assert.deepEqual(ticked.game.resolved[0].market?.decision, { outcome: "refund", by: "auto", at: since + MARKET_DECISION_MS });
@@ -291,12 +300,12 @@ test("audit 4: a claim holds a market's steps for MARKET_RETRY_MS (longer than a
   assert.deepEqual(claim(claimed, WINDOW_END + MARKET_RETRY_MS - 1).jobs, [], "nobody re-runs a step in flight");
   const released = applyMarketTryFailed(claimed, id, WINDOW_END + 10_000, on(WINDOW_END)).game;
   assert.deepEqual(claim(released, WINDOW_END + 10_000 + MARKET_FAILED_RETRY_MS - 1).jobs, []);
-  assert.equal(claim(released, WINDOW_END + 10_000 + MARKET_FAILED_RETRY_MS).jobs.length, 2, "close and resolve, again");
+  assert.deepEqual(claim(released, WINDOW_END + 10_000 + MARKET_FAILED_RETRY_MS).jobs, [{ id, kind: "close" }], "the close, again (the resolve waits for it)");
 });
 
-test("audit 4: the close is tried before the resolve in a run; a resolved market whose close failed still needs its close", () => {
+test("audit 4: the close comes before the resolve; a market resolved before that rule whose close failed still needs its close", () => {
   const { game, id } = resolvedWith("yes", { close: false });
-  assert.deepEqual(claim(game, WINDOW_END).jobs.map((j) => j.kind), ["close", "resolve"]);
+  assert.deepEqual(claim(game, WINDOW_END).jobs.map((j) => j.kind), ["close"]);
   const resolved = applyMarketDone(claim(game, WINDOW_END).game, { id, kind: "resolve", outcome: "yes" }, null, WINDOW_END, on(WINDOW_END)).game;
   assert.equal(marketsDue(resolved, WINDOW_END + MARKET_RETRY_MS, on(WINDOW_END)), true, "close pending: still due");
 });

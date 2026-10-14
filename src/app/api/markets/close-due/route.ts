@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { cronAuthorized } from "@/server/cron-auth";
 import { marketsEnabled, predictions } from "@/server/predictions";
 import { busy, type RpcGuard, withRpcGuard } from "@/server/rpc-guard";
 import { jsonError, ok } from "../../respond";
@@ -9,26 +9,9 @@ export const maxDuration = 300;
 const COINS_PER_CALL = 4;
 /** RPC calls drawn per coin: the tick's reads, a close (pool, position, blockhash, status polls) and a resolve. */
 const RPC_CALLS_PER_COIN = 20;
-const MIN_SECRET_CHARS = 32;
-
-const sameSecret = (given: string, secret: string) => {
-  const [a, b] = [Buffer.from(given), Buffer.from(secret)];
-  return a.length === b.length && timingSafeEqual(a, b);
-};
-
-/**
- * MEMESTREAM_CRON_SECRET (32+ characters; unset or short: the route is off), checked in constant time,
- * from the x-cron-secret header or Vercel Cron's "Authorization: Bearer <secret>".
- */
-function authorized(request: Request): boolean {
-  const secret = process.env.MEMESTREAM_CRON_SECRET ?? "";
-  if (secret.length < MIN_SECRET_CHARS) return false;
-  const bearer = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? "";
-  return sameSecret(request.headers.get("x-cron-secret") ?? "", secret) || sameSecret(bearer, secret);
-}
 
 async function sweep(request: Request, guard: RpcGuard): Promise<Response> {
-  if (!authorized(request)) return jsonError("Not found", 404);
+  if (!cronAuthorized(request)) return jsonError("Not found", 404);
   if (!marketsEnabled()) return ok({ swept: 0, listed: 0 });
   const ready = predictions();
   if (!("service" in ready)) return jsonError(ready.error, 503);

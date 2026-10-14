@@ -4,6 +4,7 @@
  * fixed hosts, never from a URL the user typed, and each fetch is time- and size-capped.
  */
 import "server-only";
+import { createHash } from "node:crypto";
 import { parseStreamLink } from "@/lib/stream-link";
 
 const TWITCH_LOGIN = /^[a-z0-9_]{3,25}$/;
@@ -28,7 +29,14 @@ export function frameUrls(streamUrl: string | null | undefined): string[] {
   return [];
 }
 
-export type Frame = { url: string; mime: string; base64: string };
+/**
+ * `hash`: a short hash of the picture's bytes, so a picture the preview still shows isn't described
+ * again. `shot`: when the CDN says the picture was made (its Last-Modified), if it says; a preview
+ * can be minutes old when grabbed.
+ */
+export type Frame = { url: string; mime: string; base64: string; hash: string; shot?: number };
+/** Hex characters of the picture's SHA-256 kept as its hash. */
+const HASH_CHARS = 16;
 export type FrameDeps = { fetch?: typeof fetch; timeoutMs?: number };
 
 /** The first preview that loads as an image (no redirects: an offline Twitch channel redirects to a placeholder), or null. */
@@ -62,7 +70,11 @@ async function fetchOne(url: string, deps: FrameDeps): Promise<Frame | null> {
       }
       chunks.push(value);
     }
-    return size > 0 ? { url, mime, base64: Buffer.concat(chunks).toString("base64") } : null;
+    if (size === 0) return null;
+    const bytes = Buffer.concat(chunks);
+    const shot = Date.parse(response.headers.get("last-modified") ?? "");
+    const hash = createHash("sha256").update(bytes).digest("hex").slice(0, HASH_CHARS);
+    return { url, mime, base64: bytes.toString("base64"), hash, ...(Number.isFinite(shot) ? { shot } : {}) };
   } finally {
     clearTimeout(timer);
   }

@@ -2,7 +2,7 @@
  * DEVNET ONLY: one full prediction-market round against a running memestream server (next start
  * with MEMESTREAM_PREDICTIONS=1 and MEMESTREAM_MARKETS=1), through its real HTTP routes:
  * the streamer launches a question -> the server opens its market -> a viewer buys YES (devnet SOL)
- * and sells half back -> the lock closes trading -> the streamer proposes YES -> the challenge window
+ * and sells half back -> the lock closes trading -> the admin proposes YES -> the challenge window
  * ends -> the server resolves the market -> the viewer redeems. Then the oracle redeems its seed.
  * Run the server with MEMESTREAM_MARKET_CHALLENGE_MIN=3 (test runs only) so the window is short.
  *
@@ -214,10 +214,10 @@ async function run() {
   check("lock: the server closed trading", true, "market closed");
   shot("closed", mint, viewer.publicKey.toBase58(), viewerSession);
 
-  // The memestream oracle (an admin) resolves; the streamer can only say what happened.
-  await ok("POST", coinPath, { token: session.token, body: { kind: "witness", id, outcome: "yes", note: "gg typed in chat" } });
+  // An admin (the memestream oracle) may always resolve, even while the AI referee checks the stream.
+  // (Without the AI, the streamer would decide here instead: a witness in the fallback state.)
   await ok("POST", coinPath, { token: adminSession.token, body: { kind: "resolve", id, outcome: "yes" } });
-  log("resolve: the streamer proposed YES; the challenge window runs");
+  log("resolve: the admin proposed YES; the challenge window runs");
   const proposed = await waitFor("the proposal", (v) => v.resolved.find((x) => x.id === id && x.verdict?.status === "proposed"), 60_000);
   check("challenge window: the result is proposed, final at the window's end", proposed.verdict?.finalAt !== null, `final at ${new Date(proposed.verdict!.finalAt!).toISOString()}`);
   shot("proposed", mint, viewer.publicKey.toBase58(), viewerSession);

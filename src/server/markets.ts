@@ -24,6 +24,7 @@ import { buildCreateMarketTxs, buildMarketMetadataTx } from "@/lib/markets/creat
 import { isPredictionId, MIN_MARKET_SECRET_CHARS, type Outcome, type Side } from "@/lib/markets/math";
 import { loadMarketPool, MARKET_FEE_BPS, type MarketKeys, marketKeys, marketKeysFromId, marketOdds, type MarketPool, OUTCOME_DECIMALS, verifyMarketPool } from "@/lib/markets/pool";
 import { poolOwnership, positionNftFor } from "@/lib/markets/provenance";
+import { holdsAnyOf } from "@/lib/markets/holdings";
 import type { MarketPosition, MarketPreview, MarketRecord, MarketView } from "@/lib/markets/record";
 import { buildCloseTradingTxs, buildRedeemTx, buildResolveTx } from "@/lib/markets/settle";
 import { type MarketOrder, type MarketQuote, prepareMarketTrade, quoteMarketTrade } from "@/lib/markets/trade";
@@ -175,12 +176,22 @@ async function positionOf(keys: MarketKeys, wallet: PublicKey): Promise<MarketPo
   return { yes: toTokens(tokenAmount(yes?.data)), no: toTokens(tokenAmount(no?.data)), sol: lamportsToSol(new BN(sol?.lamports ?? 0)) };
 }
 
-/** Whether `wallet` holds any YES or NO of a registered market: one read, from the site's RPC budget. */
-export async function walletHoldsShares(record: MarketRecord, wallet: string): Promise<boolean> {
-  if (!(await takeRpcBudget(1))) throw new BusyError();
-  const { yes, no } = await positionOf(keysOf(record), publicKey(wallet, "wallet"));
-  return Number(yes) > 0 || Number(no) > 0;
+/**
+ * Whether `wallet` holds YES or NO of a registered market, in any token account it owns (not only
+ * the associated ones): two reads, from the site's RPC budget. "any": at least one unit (a
+ * challenger's position); "stake": at least STAKE_MIN_SHARES of one side, above the dust anyone can
+ * send unasked. The balance half of the stake check (the service also records who traded). It sees
+ * one address only: it can't prove someone has no stake through other wallets.
+ */
+export async function walletHoldsShares(record: MarketRecord, wallet: string, atLeast: "any" | "stake"): Promise<boolean> {
+  if (!(await takeRpcBudget(SIDES.length))) throw new BusyError();
+  const keys = keysOf(record);
+  const minAtoms = atLeast === "stake" ? BigInt(parseUnits(STAKE_MIN_SHARES, OUTCOME_DECIMALS).toString()) : BigInt(1);
+  return holdsAnyOf(getChain().connection, publicKey(wallet, "wallet"), SIDES.map((side) => keys.mints[side]), minAtoms);
 }
+
+/** Shares of one side that count as a stake (each worth up to 1 SOL); less is dust. */
+const STAKE_MIN_SHARES = "0.01";
 
 /** Odds and state of a registered market: open for bets, closed, or resolved (and how it paid). */
 export async function getMarket(record: MarketRecord, wallet: string | null, now: number): Promise<MarketView> {

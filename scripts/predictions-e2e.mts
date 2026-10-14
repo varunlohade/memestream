@@ -9,7 +9,9 @@
  *
  * Wallets: the streamer is .keys/devnet-creator.json; 4 viewers are .keys/e2e-viewer-N.json
  * (made on first run, reused, topped up to 0.05 SOL from .keys/partner.json); a non-holder is a
- * throwaway keypair. Each run launches a fresh coin, so every run starts at zero. At the end it
+ * throwaway keypair; the admin (the memestream oracle, in the server's MEMESTREAM_ADMIN_WALLETS) is
+ * .keys/e2e-admin.json. The server runs without the AI referee, so the streamer decides each result
+ * once betting closes ("Decide: YES/NO", a witness); only the admin can cancel. Each run launches a fresh coin, so every run starts at zero. At the end it
  * deletes only the Redis keys under the test prefix. Never prints secret keys.
  * If a run is stopped before its cleanup, rerun with E2E_CLEANUP_ONLY=1 and that run's prefix.
  */
@@ -287,6 +289,10 @@ async function run() {
   pass("prefix: the server stores under the test prefix", `${nonceKeys.length} nonce keys`);
 
   const [streamer, v1, v2, v3, v4, outsiderP] = players;
+  // The admin signs in last, so the per-IP grant checks below see only the six wallets above.
+  const adminKey = readOrCreateKeypair(".keys/e2e-admin.json");
+  const adminSession = await must("sign-in: the admin signs the session message", () => ok<{ wallet: string; token: string; granted: number }>("POST", "/api/predictions/session", { body: signIn(adminKey), gapMs: SIGN_IN_GAP_MS }), (r) => r.wallet.slice(0, 6));
+  const admin: Player = { name: "admin", keypair: adminKey, wallet: adminSession.wallet, token: adminSession.token, granted: adminSession.granted };
 
   // The first sign-in grants points at once: the first 5 wallets from one IP today; the 6th gets none.
   check("grant: the streamer and 4 viewers each get the sign-in grant", [streamer, v1, v2, v3, v4].every((p) => p.granted === GRANT_POINTS), [streamer, v1, v2, v3, v4].map((p) => p.granted).join(", "));
@@ -341,8 +347,9 @@ async function run() {
   await refused("bet: a bet on an unknown prediction is refused", v1, { kind: "bet", id: "9999", side: "yes", amount: 10 }, "closed");
   await refused("bet: the streamer can't bet", streamer, { kind: "bet", id: id1, side: "yes", amount: 10 }, "can't bet");
   await refused("bet: more than half the balance is refused", v2, { kind: "bet", id: id1, side: "yes", amount: 100 }, "half");
-  await refused("resolve: a viewer who bet can't resolve", v3, { kind: "resolve", id: id1, outcome: "no" }, "Only the streamer or a mod");
-  await refused("resolve: not while betting is open", streamer, { kind: "resolve", id: id1, outcome: "yes" }, "still open");
+  await refused("resolve: a viewer who bet can't resolve", v3, { kind: "resolve", id: id1, outcome: "no" }, "Only the memestream oracle");
+  await refused("resolve: the streamer can't use the admin's resolve", streamer, { kind: "resolve", id: id1, outcome: "yes" }, "Only the memestream oracle");
+  await refused("decide: not while betting is open", streamer, { kind: "witness", id: id1, outcome: "yes" }, "still open");
   const pool1 = round1.reduce((t, b) => t + b.amount, 0);
   const live1 = (await view(v1)).live.find((l) => l.id === id1)!;
   check("bets: pools add up", live1.yes === 80 && live1.no === 60 && live1.bettors === 4, `yes ${live1.yes}, no ${live1.no}, ${live1.bettors} bettors`);
@@ -350,7 +357,7 @@ async function run() {
   await waitUntilLocked(v1, [id1]);
   await refused("bet: refused once locked", v1, { kind: "bet", id: id1, side: "yes", amount: 10 }, "closed");
   const before1 = await balances([v1, v2, v3, v4]);
-  await must("resolve: the streamer resolves YES", () => actOk(streamer, { kind: "resolve", id: id1, outcome: "yes" }));
+  await must("decide: no AI on this server, so the streamer decides YES", () => actOk(streamer, { kind: "witness", id: id1, outcome: "yes" }));
   const after1 = await balances([v1, v2, v3, v4]);
   const deltas1 = after1.map((b, i) => b - before1[i]);
   const expected1 = payouts(round1, "yes");
@@ -387,10 +394,10 @@ async function run() {
   ];
   await Promise.all(round2.map((b) => must(`bet: ${b.p.name} ${b.amount} on ${b.side.toUpperCase()}`, () => actOk(b.p, { kind: "bet", id: id2, side: b.side, amount: b.amount }))));
   await refused("mod: a wallet with a live bet can't be made a mod", streamer, { kind: "mod", wallet: v4.wallet, add: true }, "has a bet");
-  await refused("resolve: a viewer who bet can't resolve", v4, { kind: "resolve", id: id2, outcome: "cancel" }, "Only the streamer or a mod");
+  await refused("resolve: a viewer who bet can't resolve", v4, { kind: "resolve", id: id2, outcome: "cancel" }, "Only the memestream oracle");
   await waitUntilLocked(v1, [id2]);
   const before2 = await balances([v1, v2, v3, v4]);
-  await must("resolve: the streamer cancels", () => actOk(streamer, { kind: "resolve", id: id2, outcome: "cancel" }));
+  await must("resolve: the admin cancels", () => actOk(admin, { kind: "resolve", id: id2, outcome: "cancel" }));
   const after2 = await balances([v1, v2, v3, v4]);
   const refunds = after2.map((b, i) => b - before2[i]);
   check("cancel: every bettor gets their stake back", round2.every((b, i) => refunds[i] === b.amount && after2[i] === preBet2[i]), `refunds ${refunds.join(", ")}`);
@@ -435,7 +442,7 @@ async function run() {
   await waitUntilLocked(v1, [idA, idB]);
 
   const beforeA = await balances([v1, v2, v3, v4]);
-  const resolvedA = await must("two live: the streamer resolves A YES", () => actOk(streamer, { kind: "resolve", id: idA, outcome: "yes" }));
+  const resolvedA = await must("two live: the streamer decides A YES", () => actOk(streamer, { kind: "witness", id: idA, outcome: "yes" }));
   check("two live: B stays live after A resolves", resolvedA.live.some((l) => l.id === idB) && !resolvedA.live.some((l) => l.id === idA), `live ${resolvedA.live.map((l) => l.id).join(", ")}`);
   const afterA = await balances([v1, v2, v3, v4]);
   const paidA = payouts(roundA, "yes");
@@ -444,7 +451,7 @@ async function run() {
   check("two live: A pays its own parimutuel shares, nothing from B", deltasA.every((d, i) => d === wantA[i]), `got ${deltasA.join(", ")}, want ${wantA.join(", ")}`);
 
   const beforeB = await balances([v1, v2, v3, v4]);
-  await must("two live: the streamer cancels B", () => actOk(streamer, { kind: "resolve", id: idB, outcome: "cancel" }));
+  await must("two live: the admin cancels B", () => actOk(admin, { kind: "resolve", id: idB, outcome: "cancel" }));
   const afterB = await balances([v1, v2, v3, v4]);
   const deltasB = afterB.map((b, i) => b - beforeB[i]);
   const wantB = [v1, v2, v3, v4].map((p) => roundB.filter((b) => b.wallet === p.wallet).reduce((t, b) => t + b.amount, 0));

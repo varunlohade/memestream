@@ -648,7 +648,7 @@ test("review: a suggestion still under review after 20 minutes expires and its p
   assert.deepEqual([w.game.suggestions.length, w.game.pending, w.bal.get("asker")], [0, null, 100]);
 });
 
-test("witness: once betting closes, the streamer or a mod says what happened; it never settles anything", () => {
+test("witness: on a coin without the AI referee, the streamer's or a mod's answer after the lock decides it (engine-referee.test.ts has the rest)", () => {
   const w = world({ a: 1_000 });
   w.run({ kind: "mod", wallet: MOD, add: true }, STREAMER, T0);
   w.run({ kind: "launch", text: "Will I eat a banana?", aiWindowMin: 1 }, STREAMER, T0);
@@ -656,12 +656,10 @@ test("witness: once betting closes, the streamer or a mod says what happened; it
   w.run({ kind: "bet", id, side: "yes", amount: 100 }, "a", T0);
   refused(() => w.run({ kind: "witness", id, outcome: "yes" }, STREAMER, T0 + MIN - 1), /still open/);
   refused(() => w.run({ kind: "witness", id, outcome: "yes" }, "a", T0 + MIN), /streamer or a mod/);
-  w.run({ kind: "witness", id, outcome: "no", note: "  missed   it  " }, MOD, T0 + MIN);
-  w.run({ kind: "witness", id, outcome: "yes", note: "ate it on camera" }, STREAMER, T0 + MIN);
-  assert.equal(w.game.live.length, 1, "still waiting for the oracle");
-  assert.equal(w.bal.get("a"), 900, "no payout from a witness");
-  assert.deepEqual(w.game.live[0].witness, { outcome: "yes", by: STREAMER, at: T0 + MIN, note: "ate it on camera" }, "the latest answer counts");
-  w.run({ kind: "resolve", id, outcome: "yes" }, ORACLE, T0 + 2 * MIN);
-  assert.deepEqual(w.game.resolved[0].witness?.outcome, "yes", "kept on the result for disputes");
+  w.run({ kind: "witness", id, outcome: "yes", note: "  ate   it on camera  " }, MOD, T0 + MIN);
+  assert.equal(w.game.live.length, 0);
+  assert.deepEqual([w.game.resolved[0].outcome, w.game.resolved[0].resolvedBy], ["yes", MOD]);
+  assert.equal(w.bal.get("a"), 1_000, "the lone YES bettor gets the stake back");
+  assert.deepEqual(w.game.resolved[0].witness, { outcome: "yes", by: MOD, at: T0 + MIN, note: "ate it on camera" }, "kept on the result for disputes");
   refused(() => w.run({ kind: "witness", id, outcome: "no" }, STREAMER, T0 + 2 * MIN), /already final|Nothing to answer/);
 });

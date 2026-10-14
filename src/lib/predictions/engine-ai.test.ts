@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyReview, type Env, type Game, newGame, type Result, startAi } from "./engine";
-import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_NOTE_MAX } from "./rules";
+import { type Actor, aiDue, apply, applyAiVerdict, applyFrame, applyFrames, applyReview, applyRule, releaseAiRun, type CaptureTarget, type Env, type Game, newGame, type Result, startAi } from "./engine";
+import { AI_CHECK_MAX_TRIES, AI_CHECK_MAX_WAIT_MS, AI_CHECK_RETRY_MS, AI_RUN_LEASE_MS, SUGGEST_COST, SUGGEST_TTL_MS, ASKER_REWARD, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAME_NOTE_MAX, FRAMES_AFTER_LOCK_MS, MAX_FRAME_NOTES } from "./rules";
 
 const MIN = 60_000;
 const T0 = 1_000_000_000;
@@ -25,70 +25,103 @@ function ledger() {
   return { points, won, take };
 }
 
-/** A viewer's question live (launched at T0, locks at T0 + 1 min), six eligible bettors on both sides. */
-function liveGame(env: Env, l = ledger()) {
+/** A viewer's question live (launched at T0, locks at T0 + `windowMin`), six eligible bettors on both sides. */
+function liveGame(env: Env, l = ledger(), windowMin = 1) {
   let game = newGame(STREAMER);
   game = l.take(apply(game, { kind: "suggest", text: "Will the streamer jump?" }, actor(ASKER), T0, env));
-  game = l.take(applyReview(game, game.suggestions[0], { approved: true, windowMin: 1 }, T0, env));
+  game = l.take(applyReview(game, game.suggestions[0], { approved: true, windowMin }, T0, env));
   game = l.take(apply(game, { kind: "launch", id: game.suggestions[0].id }, actor(STREAMER), T0, env));
+  game = l.take(applyRule(game, game.live[0].id, "YES if the streamer is seen in the air", T0, env));
   for (const [i, b] of BETTORS.entries()) game = l.take(apply(game, { kind: "bet", id: game.live[0].id, side: i % 2 ? "yes" : "no", amount: 100 }, actor(b), T0, env));
   return game;
 }
 
 const resolveYesResult = (game: Game, env: Env, now = T0 + MIN) => apply(game, { kind: "resolve", id: game.live[0].id, outcome: "yes" }, actor(ORACLE), now, env);
 const resolveYes = (game: Game, env: Env, now = T0 + MIN) => resolveYesResult(game, env, now).game;
+/** Claims a grab at `now` and saves picture `hash` for it. */
+function grab(game: Game, now: number, hash: string, text = `picture ${hash}`): { game: Game; target: CaptureTarget } {
+  const claim = startAi(game, now, ON);
+  assert.equal(claim.captures.length, 1, `a grab is due at ${now - T0}`);
+  return { game: applyFrame(claim.game, claim.captures[0], { hash, text }, now, ON).game, target: claim.captures[0] };
+}
 
-test("frames: launch is grabbed at once, lock once betting closes, each claimed once; none without the AI check", () => {
-  let game = liveGame(ON);
+test("check rule: written once the question is live (not at approval), at most twice; cleaned, links cut, cut to 200; never replaced", () => {
+  let game = apply(newGame(STREAMER), { kind: "suggest", text: "Will chat win?" }, actor(ASKER), T0, ON).game;
+  game = applyReview(game, game.suggestions[0], { approved: true, windowMin: 1 }, T0, ON).game;
+  assert.deepEqual(startAi(game, T0, ON).rules, [], "an approved suggestion gets no rule yet");
+  game = apply(game, { kind: "launch", id: game.suggestions[0].id }, actor(STREAMER), T0, ON).game;
+  const id = game.live[0].id;
+  const first = startAi(game, T0, ON);
+  assert.deepEqual(first.rules, [{ id, text: "Will chat win?" }]);
+  assert.deepEqual(startAi(first.game, T0 + 1_000, ON).rules, [], "claimed: not twice at once");
+  const second = startAi(first.game, T0 + AI_RUN_LEASE_MS, ON);
+  assert.equal(second.rules.length, 1, "a failed write is tried once more");
+  assert.deepEqual(startAi(second.game, T0 + 2 * AI_RUN_LEASE_MS, ON).rules, [], "then the question alone");
+  const written = applyRule(second.game, id, `  YES if\n chat wins, see https://evil.example/x or scam.io ${"x".repeat(300)}`, T0, ON).game;
+  assert.match(written.live[0].rule!, /^YES if chat wins, see or x+$/);
+  assert.equal(written.live[0].rule!.length, 200);
+  assert.equal(applyRule(written, id, "NO always", T0, ON).changed, false, "a rule is never replaced");
+  assert.equal(applyRule(second.game, id, "   ", T0, ON).game.live[0].rule, undefined);
+  assert.deepEqual(startAi(liveGame(OFF), T0, OFF).rules, [], "no AI, no rule");
+});
+
+test("frames: a grab at launch, then at most every FRAME_GAP_MS while live and up to 6 minutes after the lock; none without the AI", () => {
+  let game = liveGame(ON, ledger(), 5);
   assert.equal(aiDue(game, T0, ON), true);
   const first = startAi(game, T0, ON);
-  assert.deepEqual(first.captures.map((c) => c.kind), ["launch"]);
+  assert.deepEqual(first.captures.map((c) => [c.kind, c.at, c.rule, c.hashes]), [["launch", T0, "YES if the streamer is seen in the air", []]]);
   game = first.game;
-  assert.equal(aiDue(game, T0, ON), false, "claimed: no second grab");
-  assert.deepEqual(startAi(game, T0 + 30_000, ON).captures, []);
-  const lock = startAi(game, T0 + MIN, ON);
-  assert.deepEqual(lock.captures.map((c) => c.kind), ["lock"]);
-  game = applyFrame(lock.game, lock.captures[0], "x".repeat(FRAME_NOTE_MAX + 50), T0 + MIN).game;
-  game = applyFrame(game, first.captures[0], "A person at a desk", T0 + MIN).game;
-  assert.deepEqual(game.live[0].frames!.map((f) => [f.kind, f.text?.length]), [["launch", 18], ["lock", FRAME_NOTE_MAX]]);
-  assert.equal(applyFrame(game, first.captures[0], "again", T0 + MIN).changed, false, "a filled note is not overwritten");
+  assert.equal(aiDue(game, T0 + FRAME_GAP_MS - 1, ON), false, "claimed: no second grab before the gap");
+  game = applyFrame(game, first.captures[0], { hash: "a", text: "A person at a desk" }, T0 + 1_000).game;
+  const second = startAi(game, T0 + FRAME_GAP_MS, ON);
+  assert.deepEqual(second.captures.map((c) => [c.kind, c.hashes]), [["live", ["a"]]]);
+  const lock = T0 + 5 * MIN;
+  assert.deepEqual(startAi(game, lock, ON).captures.map((c) => c.kind), ["after"]);
+  assert.deepEqual(startAi(game, lock + FRAMES_AFTER_LOCK_MS - 1, ON).captures.map((c) => c.kind), ["after"]);
+  assert.deepEqual(startAi(game, lock + FRAMES_AFTER_LOCK_MS, ON).captures, [], "no grabs 6 minutes after the lock");
 
   const off = liveGame(OFF);
-  assert.equal(aiDue(off, T0 + MIN, OFF), false);
-  assert.deepEqual(startAi(off, T0 + MIN, OFF).captures, []);
+  assert.equal(aiDue(off, T0, OFF), false);
+  assert.deepEqual(startAi(off, T0, OFF).captures, []);
 });
 
-test("frames and checks are per prediction when several are live", () => {
+test("frames: the same picture (hash) is kept once; descriptions are cut; a failed grab adds nothing", () => {
+  let game = liveGame(ON, ledger(), 10);
+  ({ game } = grab(game, T0, "a", "x".repeat(FRAME_NOTE_MAX + 50)));
+  const again = grab(game, T0 + FRAME_GAP_MS, "a", "the same picture");
+  assert.deepEqual(again.game.live[0].frames!.map((f) => [f.hash, f.text?.length]), [["a", FRAME_NOTE_MAX]]);
+  game = again.game;
+  const claim = startAi(game, T0 + 2 * FRAME_GAP_MS, ON);
+  const failed = applyFrame(claim.game, claim.captures[0], null, T0 + 2 * FRAME_GAP_MS);
+  assert.equal(failed.game.live[0].frames!.length, 1);
+  assert.equal(failed.game.live[0].grabAt, T0 + 2 * FRAME_GAP_MS, "the claim stands: the next grab waits for the gap");
+});
+
+test(`frames: at most ${MAX_FRAME_NOTES} notes; the first and the newest stay, in time order`, () => {
+  let game = liveGame(ON, ledger(), 30);
+  for (let i = 0; i < MAX_FRAME_NOTES + 5; i++) ({ game } = grab(game, T0 + i * FRAME_GAP_MS, `h${i}`));
+  const hashes = game.live[0].frames!.map((f) => f.hash);
+  assert.equal(hashes.length, MAX_FRAME_NOTES);
+  assert.deepEqual(hashes, ["h0", ...Array.from({ length: MAX_FRAME_NOTES - 1 }, (_, i) => `h${i + 6}`)]);
+});
+
+test("frames: a grab that lands after the prediction was resolved goes to its check; checks carry the frames and the rule", () => {
   let game = liveGame(ON);
-  game = apply(game, { kind: "launch", text: "Will chat win this round?" }, actor(STREAMER), T0, ON).game;
-  game = applyReview(game, game.pending!, { approved: true, windowMin: 2 }, T0, ON).game;
-  const [p1, p2] = game.live.map((p) => p.id);
-  const launch = startAi(game, T0, ON);
-  assert.deepEqual(launch.captures.map((c) => [c.id, c.kind]), [[p1, "launch"], [p2, "launch"]]);
-  game = applyFrame(launch.game, launch.captures[1], "Chat is cheering", T0).game;
-  const lock1 = startAi(game, T0 + MIN, ON);
-  assert.deepEqual(lock1.captures.map((c) => [c.id, c.kind]), [[p1, "lock"]], "each locks on its own clock");
-  game = lock1.game;
-  game = apply(game, { kind: "resolve", id: p1, outcome: "yes" }, actor(ORACLE), T0 + MIN, ON).game;
-  assert.deepEqual(startAi(game, T0 + 2 * MIN, ON).captures.map((c) => [c.id, c.kind]), [[p2, "lock"]]);
-  game = apply(game, { kind: "resolve", id: p2, outcome: "no" }, actor(ORACLE), T0 + 2 * MIN, ON).game;
-  const checks = startAi(game, T0 + 2 * MIN, ON).checks;
-  assert.deepEqual(
-    checks.map((c) => [c.id, c.outcome, c.frames.map((f) => [f.kind, f.text])]).sort(),
-    [
-      [p1, "yes", [["launch", null], ["lock", null]]],
-      [p2, "no", [["launch", "Chat is cheering"]]],
-    ],
-  );
+  ({ game } = grab(game, T0, "a", "A person at a desk"));
+  const late = startAi(game, T0 + MIN, ON);
+  assert.equal(late.captures.length, 1);
+  game = resolveYes(late.game, ON, T0 + MIN);
+  game = applyFrame(game, late.captures[0], { hash: "b", text: "The streamer jumps" }, T0 + MIN).game;
+  assert.deepEqual(game.resolved[0].check?.frames.map((f) => [f.kind, f.hash]), [["launch", "a"], ["after", "b"]]);
+  const checks = startAi(game, T0 + MIN, ON).checks;
+  assert.deepEqual(checks.map((c) => [c.outcome, c.rule, c.frames.length, c.tries]), [["yes", "YES if the streamer is seen in the air", 2, 1]]);
 });
 
-test("resolve YES/NO starts a check carrying the frames; cancel and coins without the check get none", () => {
-  let game = startAi(liveGame(ON), T0, ON).game;
-  game = applyFrame(game, { id: game.live[0].id, text: game.live[0].text, kind: "launch" }, "A person at a desk", T0).game;
-  game = resolveYes(game, ON);
-  assert.deepEqual(game.resolved[0].check, { tries: 0, at: T0 + MIN, frames: [{ kind: "launch", at: T0, text: "A person at a desk" }] });
+test("an admin's YES/NO starts a check; cancel and coins without the AI get none", () => {
+  const game = resolveYes(liveGame(ON), ON);
+  assert.deepEqual(game.resolved[0].check, { tries: 0, at: T0 + MIN, frames: [], rule: "YES if the streamer is seen in the air" });
   const claim = startAi(game, T0 + MIN, ON);
-  assert.deepEqual(claim.checks.map((c) => [c.outcome, c.tries, c.frames.length]), [["yes", 1, 1]]);
+  assert.deepEqual(claim.checks.map((c) => [c.outcome, c.tries]), [["yes", 1]]);
   assert.equal(aiDue(claim.game, T0 + MIN + 1, ON), false, "a claimed run isn't started twice");
 
   const live = liveGame(ON);
@@ -154,19 +187,62 @@ test("no evidence (null verdict) ends the check with no tag", () => {
   assert.deepEqual([game.resolved[0].check, game.resolved[0].ai, game.resolved[0].disputed], [undefined, undefined, false]);
 });
 
-test("failed runs retry after a pause, at most twice; then the result shows couldn't tell", () => {
+test("failed check runs give their lease back and retry after a pause, at most twice; then the result shows couldn't tell", () => {
   let game = resolveYes(liveGame(ON), ON);
+  const id = game.resolved[0].id;
   let t = T0 + MIN;
   for (let run = 1; run <= AI_CHECK_MAX_TRIES; run++) {
     const claim = startAi(game, t, ON);
     assert.deepEqual(claim.checks.map((c) => c.tries), [run]);
     game = claim.game;
-    assert.equal(startAi(game, t + AI_CHECK_RETRY_MS - 1, ON).checks.length, 0, "not before the pause");
-    t += AI_CHECK_RETRY_MS;
+    assert.equal(startAi(game, t + AI_RUN_LEASE_MS - 1, ON).checks.length, 0, "a running check holds its lease");
+    game = releaseAiRun(game, id, run, t + 1_000).game; // it failed
+    assert.equal(startAi(game, t + 1_000 + AI_CHECK_RETRY_MS - 1, ON).checks.length, 0, "not before the pause");
+    t += 1_000 + AI_CHECK_RETRY_MS;
   }
   assert.equal(startAi(game, t, ON).checks.length, 0, "no fourth run");
   game = apply(game, { kind: "tick" }, null, t).game;
   assert.deepEqual([game.resolved[0].check, game.resolved[0].ai?.verdict, game.resolved[0].disputed], [undefined, "unclear", false]);
+});
+
+test("audit 7: the last check run is never written off while it holds its lease; its late verdict still counts; a stale one doesn't", () => {
+  let game = resolveYes(liveGame(ON), ON);
+  const id = game.resolved[0].id;
+  let t = T0 + MIN;
+  for (let run = 1; run < AI_CHECK_MAX_TRIES; run++) {
+    game = releaseAiRun(startAi(game, t, ON).game, id, run, t).game;
+    t += AI_CHECK_RETRY_MS;
+  }
+  game = startAi(game, t, ON).game; // the last run, slow
+  game = apply(game, { kind: "tick" }, null, t + AI_RUN_LEASE_MS - 1).game;
+  assert.ok(game.resolved[0].check, "still running: not written off");
+  assert.equal(applyAiVerdict(game, id, "disagree", t + 100_000, ON, 1).changed, false, "an older run's verdict is ignored");
+  assert.equal(releaseAiRun(game, id, 1, t + 100_000).changed, false, "an older run can't give the lease back");
+  game = applyAiVerdict(game, id, "agree", t + 100_000, ON, AI_CHECK_MAX_TRIES).game;
+  assert.equal(game.resolved[0].ai?.verdict, "agree");
+});
+
+test("audit 2: one shared picture for several predictions is one transition: what the clock settles meanwhile is kept", () => {
+  let game = liveGame(ON, ledger(), 30);
+  game = apply(game, { kind: "launch", text: "Is it raining outside?" }, actor(STREAMER), T0, ON).game;
+  game = applyReview(game, game.pending!, { approved: true, windowMin: 30 }, T0, ON).game;
+  game = apply(game, { kind: "suggest", text: "Will a cat appear?" }, actor("late"), T0, ON).game; // stays under review
+  const claim = startAi(game, T0 + SUGGEST_TTL_MS - 1_000, ON);
+  assert.equal(claim.captures.length, 2, "both grab together");
+  const saved = applyFrames(claim.game, claim.captures, { hash: "x", text: "A cat on a sofa" }, T0 + SUGGEST_TTL_MS, ON);
+  assert.equal(saved.moves.get("late")?.delta, SUGGEST_COST, "the expired suggestion's points come back in the same commit");
+  assert.ok(saved.game.live.every((p) => p.frames!.some((f) => f.hash === "x")), "both predictions got the note");
+});
+
+test("audit 5: an AI disagree stays a dispute when a later flag is below the threshold; the result never counts", () => {
+  const l = ledger();
+  let game = l.take(resolveYesResult(liveGame(ON, l), ON));
+  const id = game.resolved[0].id;
+  game = l.take(applyAiVerdict(game, id, "disagree", T0 + MIN + 1_000));
+  game = l.take(apply(game, { kind: "flag", id }, actor("b1"), T0 + MIN + 2_000, ON));
+  assert.deepEqual([game.resolved[0].flags, game.resolved[0].bettors, game.resolved[0].disputed], [1, 6, true], "1 flag of 6 doesn't clear it");
+  game = l.take(apply(game, { kind: "tick" }, null, T0 + MIN + FLAG_WINDOW_MS));
+  assert.deepEqual([game.resolved[0].askerReward, l.won.size], [0, 0]);
 });
 
 test("a check that never runs (keys removed, AI off) ends as couldn't tell at its hard deadline, and the result counts", () => {
