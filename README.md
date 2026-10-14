@@ -19,11 +19,12 @@ and Polymarket-style YES/NO markets in devnet SOL.
 4. When the curve fills, anyone presses Graduate. The coin moves to a Meteora DAMM v2 pool and
    trading goes on there. The streamer's locked LP position earns pool fees.
 5. During the stream, holders suggest yes/no questions ("Will he land the jump?"). An AI reviewer
-   checks each question. The crowd upvotes the best ones, and they go live.
+   checks each question and picks its betting window. The streamer or a mod launches the best ones.
 6. Viewers bet free points on each question. When markets are on, each question also gets a real
    on-chain YES/NO market in devnet SOL.
-7. The streamer resolves. An AI check of the stream gives a second opinion. For markets, a 2-hour
-   challenge window follows before the result settles on chain.
+7. The memestream oracle resolves each question. An AI referee watches the stream and decides first.
+   If it can't tell, the streamer decides. For markets, a 2-hour challenge window follows, and an
+   admin settles disputes. See [The oracle](#the-oracle).
 
 The video stays on Twitch or YouTube. memestream only embeds it and adds the coin, the overlay and
 the predictions around it.
@@ -51,9 +52,8 @@ the predictions around it.
 - 1,000 points on a wallet's first sign-in, for at most 5 wallets per IP a day.
 - Holders suggest questions. jev (TypeSafe's model) reviews every question on the server, in about a
   second, before anyone else sees it.
-- Upvotes launch a question by themselves (crowd auto-launch). Up to 10 questions run at once per coin.
-- The streamer resolves. An AI check (stream frames, then a vision description, then jev) gives a
-  second opinion.
+- The streamer or a mod launches questions. Up to 10 run at once per coin.
+- The oracle resolves each one: the AI referee first, the streamer as the fallback.
 - Bettors can flag a result. Enough flags mark it disputed.
 
 **Prediction markets (devnet SOL, Polymarket-style)**
@@ -61,10 +61,49 @@ the predictions around it.
 - Buys and sells route with split-and-swap maths from Gnosis's FPMM design, so any bet size fills.
   There is no bet cap.
 - A 0.3% pool fee.
-- The streamer's result is only a proposal for 2 hours. Any holder can challenge it with a 100-point
+- Every result is only a proposal for 2 hours. Any holder can challenge it with a 100-point
   bond. An admin then upholds, overturns or voids. With no decision in 24 hours, the market voids
   (refunds) as a last resort.
 - Streamers and mods can't bet on, challenge or judge their own coin's markets.
+
+## The oracle
+
+Every prediction needs someone to say what happened. memestream's oracle is an AI referee that
+watches the stream, with people as the fallback and the court of appeal.
+
+**Before betting opens**
+- jev (TypeSafe's model) reviews each question on the server and picks its betting window.
+- When the question goes live, an AI writes a short check rule: what a viewer would see on stream
+  that means YES or NO. Everyone sees it under the question ("AI checks: …").
+
+**While betting is open, and a few minutes after**
+- The server grabs pictures of the stream from Twitch and YouTube, skipping repeats.
+- A vision model (Gemini 2.5 Flash) turns each picture into facts, each tagged with where it came
+  from: the game screen, the camera, an overlay or chat. Overlay and chat text is dropped, so a
+  viewer's donation alert can't fake a result.
+- Only pictures taken after betting closed count as evidence.
+
+**When betting closes**
+1. **The AI decides first.** jev reads the evidence and answers YES, NO or "can't tell". It needs at
+   least 70% confidence. A real-SOL market also needs two separate fresh pictures that agree.
+2. **If the AI can't tell,** the streamer or a mod decides with "Decide: YES / NO". This happens when
+   the AI is unsure, gets no fresh picture, fails, or runs out of time. Anyone who holds a bet or
+   market shares on that question can't decide it.
+3. **For real-SOL markets, every result is a proposal.** Any holder can challenge it for 2 hours. A
+   streamer's fallback call always goes to an admin before it settles. The admin upholds, overturns
+   or voids. With no decision in 24 hours, the market refunds.
+4. Free-points results pay out at once. Bettors can still flag them, and enough flags mark the
+   result disputed.
+
+**Running it**
+- A small worker on Railway calls the oracle every minute (`/api/predictions/tick`, guarded by a
+  secret), so questions resolve even when nobody has the page open.
+- A daily budget caps AI calls, per coin and in total. It costs well under 1 cent per question.
+- memestream's 16% share of coin trading fees pays for the AI referee.
+- All AI keys stay on the server. The browser never sees them.
+
+**Next:** the referee gets a fresh frame every minute and a 30-second clip with sound when betting
+closes, so it can judge fast moments that a still picture misses.
 
 ## How we use each Meteora feature
 
