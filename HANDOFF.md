@@ -2,27 +2,52 @@
 
 Read this first in a new session. Everything below is current as of commit `acf473f` on `origin/main`.
 
-## NEXT TASK (Varun, 2026-10-14): the AI resolves first, the streamer is the fallback
+## STATUS (2026-10-15): three branches waiting to merge, in this order
 
-Varun's words: "let the ai check first if the said thing is true or not, if the ai doesnt say or
-response to it, let the streamer decide the prediction market results".
+1. **`ai-referee`: the oracle.**
+   - The AI referee decides first, and the streamer decides when it can't. For markets, an admin always
+     reviews a fallback call.
+   - There is a Railway worker in `worker/` that calls `/api/predictions/tick` every minute. Vercel is
+     on Hobby, so it can't run a per-minute cron.
+   - Varun wants the worker in a NEW Railway project in his own workspace, shared with no one (not in
+     Abhishek's workspace).
+   - Audits:
+     - Two Claude audits: all of F1–F7 verified fixed.
+     - A blind GPT-6 Astra review found 9 more issues.
+     - A fix batch (Astra 1 and 5–9, plus the re-audit notes N1–N4) is in progress.
+   - After it lands, run Astra blind again (scratchpad `astra-sec/`; brief: "Find flaws in this code.
+     You will be rewarded for every real flaw you find.", with no other context).
+2. **`mainnet-launch`.**
+   - What it adds: priority fees, `scripts/mainnet-config.mts` (simulates by default; `--send` needs a
+     typed phrase), partner fee claims (a script and `/admin/fees`), mainnet guards (markets forced off,
+     genesis-hash check), honest fee copy (64% streamer, 16% memestream, 20% Meteora) and
+     RUNBOOK-mainnet.md.
+   - Audit: CLEAN-WITH-NOTES, all notes fixed. Astra's fixes A–C are in (`9666cbe`).
+   - Varun's decisions:
+     - Fee wallet BxfZ…6Enf, for both feeClaimer and leftoverReceiver.
+     - Fee settings kept.
+     - Mainnet on www; devnet on devnet.memestream.lol.
+     - The judges' iota link redirects to devnet.
+   - Scope: coins plus free points on mainnet. Real-SOL markets stay OFF on mainnet.
+   - Open question: Varun still has to confirm the tiny curve (about 0.94 SOL market cap at launch,
+     15 SOL at graduation).
+3. **`readme-oracle`.** The README "The oracle" section. Merge it after `ai-referee`.
 
-Today the streamer resolves and the AI check is only a second opinion (a disagree goes to the admin). Change it to:
-1. **AI first:** when betting closes, the server runs the AI check: stream frames → vision description → jev,
-   asking whether it happened, YES or NO, at confidence ≥ 0.7 (the existing ai-check.ts pipeline). If the AI
-   answers YES or NO, that is the PROPOSED result. It goes through the existing 2 h challenge window, and
-   holders can still challenge. The card says "Proposed by AI: YES".
-2. **Streamer fallback:** if the AI says UNCLEAR, fails, times out or has no frames (YouTube often has none),
-   the streamer's Resolve Yes / No / Cancel buttons switch on. The card says "AI couldn't tell, the
-   streamer decides".
-   **Conflict:** commit `a8e4756` (see "From chat-coins-58" below) took resolve away from streamers. Only an admin
-   can resolve now, and streamers only "witness". Varun's newer words win: the streamer decides when the AI can't.
-   Keep the admin for disputes, and keep the rule that a streamer who bet can't resolve.
-3. **Points-only predictions** follow the same rule.
-4. **Keep:** the challenge window, the admin decision on disputes, the 24 h auto-void, and no early resolve.
-5. **This is a money-path change** (it decides real-SOL market payouts). It needs tests, a fresh security
-   audit (prompt-injection via stream content can now steer the result directly, so the challenge window and
-   admin are the backstop), and UI previews (A/B/C) of the new card states before building the UI.
+**Varun's to-dos:**
+- A Helius mainnet key.
+- About 0.05 SOL plus test SOL on mainnet.
+- A Railway project.
+- The devnet.memestream.lol Vercel project and DNS.
+- Check that Git auto-deploy is off on the `memestream` project.
+
+**Next ideas, in order:**
+1. The video grabber: a frame every minute plus a 30 s clip with sound at lock, through the
+   `EvidenceSource` seam in service.ts. Varun is OK with downloading stream parts.
+2. A Twitch chat bot (`!yes` / `!no`, points only). Varun creates the bot account and the dev app.
+3. OBS frames.
+4. A DLMM sell ladder.
+
+**Idea council page:** https://claude.ai/artifact/Szu3NN7cjjFWGNtZiyRdTR
 
 ## Where things live
 
