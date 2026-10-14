@@ -7,9 +7,9 @@ import { failOrBusy, jsonBody, ok } from "../../respond";
 /**
  * RPC calls each build makes (pool, config, blockhash, and more per action), charged after the
  * request parses so a bad request costs nothing. A trade is charged for the graduated path
- * (+ the Meteora pool and clock); claim-lp also reads the wallet's position NFTs and positions.
+ * (+ the Meteora pool and clock, + the coin's metadata for a big buy); claim-lp also reads the wallet's position NFTs and positions.
  */
-const BUILD_RPC_CALLS: Record<TxAction, number> = { launch: 6, trade: 8, claim: 6, graduate: 6, "claim-lp": 10 };
+const BUILD_RPC_CALLS: Record<TxAction, number> = { launch: 6, trade: 9, claim: 6, graduate: 6, "claim-lp": 10 };
 
 export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, async (request: Request, { params }: RouteContext<"/api/tx/[action]">, guard) => {
   try {

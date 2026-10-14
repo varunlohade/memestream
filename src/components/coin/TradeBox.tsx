@@ -6,8 +6,9 @@ import { noSubscription } from "@/components/no-subscription";
 import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { COIN_DECIMALS, DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
-import { compact, fractionOf, minusReserve, SIDE_LABEL } from "@/lib/format";
+import { atMost, compact, fractionOf, isOver, minusReserve, SIDE_LABEL } from "@/lib/format";
 import { LAUNCH_FEE, launchFeeAt } from "@/lib/launch-fee";
+import { UNVERIFIED_BUY_MESSAGE, UNVERIFIED_MAX_BUY_SOL } from "@/lib/unverified";
 
 type Side = "buy" | "sell";
 
@@ -16,14 +17,19 @@ const SOL_RESERVE = "0.01";
 
 type Chip = { label: string; amount: string | null };
 
-/** Buy: fixed SOL amounts plus Max. Sell: shares of what the wallet holds. Null amount = unavailable. */
-function chipsFor(side: Side, holdings: Holdings | null): Chip[] {
+/**
+ * Buy: fixed SOL amounts plus Max. Sell: shares of what the wallet holds. Null amount = unavailable.
+ * `buyLimit` (unverified coins) turns off bigger chips and caps Max.
+ */
+function chipsFor(side: Side, holdings: Holdings | null, buyLimit: string | null): Chip[] {
   if (side === "buy") {
+    const within = (amount: string) => (buyLimit && isOver(amount, buyLimit, SOL_DECIMALS) ? null : amount);
+    const max = holdings ? minusReserve(holdings.sol, SOL_RESERVE, SOL_DECIMALS) : null;
     return [
-      { label: "0.1", amount: "0.1" },
-      { label: "0.5", amount: "0.5" },
-      { label: "1", amount: "1" },
-      { label: "Max", amount: holdings ? minusReserve(holdings.sol, SOL_RESERVE, SOL_DECIMALS) : null },
+      { label: "0.1", amount: within("0.1") },
+      { label: "0.5", amount: within("0.5") },
+      { label: "1", amount: within("1") },
+      { label: "Max", amount: max && buyLimit ? atMost(max, buyLimit, SOL_DECIMALS) : max },
     ];
   }
   const share = (percent: number) => (holdings ? fractionOf(holdings.coins, percent, COIN_DECIMALS) : null);
@@ -61,7 +67,8 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   /** null = nothing typed in this page view yet: show the saved amount (or the default). */
   const [typed, setTyped] = useState<string | null>(null);
   const saved = useSyncExternalStore(noSubscription, () => readAmount(coin.mint, side), () => null);
-  const amount = typed ?? saved ?? DEFAULT_AMOUNT[side];
+  const buyLimit = coin.verified ? null : UNVERIFIED_MAX_BUY_SOL;
+  const amount = typed ?? saved ?? (side === "buy" && buyLimit ? buyLimit : DEFAULT_AMOUNT[side]);
   const setAmount = (value: string) => {
     setTyped(value);
     saveAmount(coin.mint, side, value);
@@ -72,6 +79,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const unit = side === "buy" ? "SOL" : coin.symbol;
   const actionLabel = `${SIDE_LABEL[side]} ${coin.symbol}`;
   const blocked = side === "buy" && address === coin.creator;
+  const overLimit = side === "buy" && buyLimit !== null && isOver(amount, buyLimit, SOL_DECIMALS);
   const busy = status?.kind === "busy";
 
   const submit = async () => {
@@ -91,11 +99,13 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
     ? "Connect a wallet"
     : blocked
       ? "Can't buy your own coin"
-      : busy
-        ? status.text
-        : locked
-          ? "Paused: checking your last trade"
-          : actionLabel;
+      : overLimit
+        ? `Max ${buyLimit} SOL per buy`
+        : busy
+          ? status.text
+          : locked
+            ? "Paused: checking your last trade"
+            : actionLabel;
 
   return (
     <section className="p" aria-label="Trade">
@@ -128,7 +138,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
         <small aria-hidden>{unit}</small>
       </div>
       <div className={`chips num${side === "buy" ? " four" : ""}`}>
-        {chipsFor(side, holdings).map((chip) => (
+        {chipsFor(side, holdings, buyLimit).map((chip) => (
           <button
             type="button"
             key={chip.label}
@@ -166,6 +176,11 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
           This fills the curve. Only {compact(Number(preview.spent))} {unit} is spent; the rest stays in your wallet.
         </p>
       )}
+      {overLimit && (
+        <p className="notice err" style={{ marginBottom: 12 }}>
+          {UNVERIFIED_BUY_MESSAGE}. Nobody has checked who launched it.
+        </p>
+      )}
       {quoteError && (
         <p id="trade-error" className="notice err" role="alert" style={{ marginBottom: 12 }}>
           {quoteError}
@@ -175,7 +190,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
         type="button"
         className={`mbtn ${side}`}
         style={{ width: "100%" }}
-        disabled={!address || blocked || !preview || busy || Boolean(locked)}
+        disabled={!address || blocked || overLimit || !preview || busy || Boolean(locked)}
         onClick={submit}
       >
         {label}

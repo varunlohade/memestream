@@ -77,6 +77,8 @@ async function main() {
       `MEMESTREAM_PUBLIC_URL=${APP_ORIGIN}`,
       "MEMESTREAM_NETWORK_LABEL=Local",
       `MEMESTREAM_DEV_WALLET_KEY=${process.cwd()}/${KEYS_DIR}/local-dev-wallet.json`,
+      // Anyone may launch locally (coins stay unverified); see src/server/invites.ts.
+      "MEMESTREAM_OPEN_LAUNCH=1",
       "",
     ].join("\n"),
   );

@@ -22,7 +22,7 @@ function CoinTile({ coin }: { coin: CoinView }) {
         <StreamThumb streamUrl={coin.streamUrl} seedKey={coin.mint} sizes="(max-width: 640px) 100vw, 33vw" />
         <div className="tags">
           <LiveBadge status={coin.status} />
-          <UnverifiedTag />
+          {!coin.verified && <UnverifiedTag />}
         </div>
       </div>
       <div className="meta">

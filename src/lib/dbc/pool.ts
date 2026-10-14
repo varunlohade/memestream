@@ -98,7 +98,7 @@ export function priceInSol(snapshot: CurveState): number {
 }
 
 /** Plain, JSON-safe view of a coin pool for the UI (metadata fields are added by the server). */
-export type PoolView = Omit<CoinView, "name" | "symbol" | "streamUrl">;
+export type PoolView = Omit<CoinView, "name" | "symbol" | "streamUrl" | "verified">;
 
 export function toPoolView({ address, pool, config }: CurveState & Pick<PoolSnapshot, "address">): PoolView {
   const { poolState } = pool;

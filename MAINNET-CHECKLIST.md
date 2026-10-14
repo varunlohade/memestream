@@ -46,6 +46,12 @@ none of its parameters can change later, so all of them must be right first.
 - [ ] Priority fees on transactions (busy mainnet drops unprioritized ones).
 - [ ] Dry run: simulate the createConfig transaction and review it with Boss man.
 - [ ] Production build has **no** `MEMESTREAM_DEV_WALLET_KEY` set (the test wallet must not exist).
+- [ ] **Invite-only launches** (`src/server/invites.ts`). Set `MEMESTREAM_INVITES` (invited streamers
+      as `wallet:UCchannelId` pairs, comma separated; confirm each wallet with the channel owner
+      first), `MEMESTREAM_VERIFY_SECRET` (32+ random characters; changing it later unverifies every
+      coin) and `YOUTUBE_API_KEY` (a plain YouTube Data API key, no sign-in). Without all three,
+      nobody can launch. **No** `MEMESTREAM_OPEN_LAUNCH` (the server
+      ignores it on mainnet anyway).
 
 - [x] Shared rate limits (2026-10-08): per-client limits per route and the site-wide RPC budget live in
       Upstash Redis (`src/server/shared-limit.ts`, `rpc-budget.ts`), shared by every Vercel instance.

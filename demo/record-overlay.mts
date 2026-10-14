@@ -1,0 +1,21 @@
+/** Re-records the overlay clip: the stage page is served over http://127.0.0.1:3199 (YouTube embeds refuse file://). */
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import puppeteer from "puppeteer-core";
+import { CHROME_PATH } from "../scripts/browser";
+const OUT = "demo/raw/08-overlay";
+rmSync(OUT, { recursive: true, force: true });
+mkdirSync(OUT, { recursive: true });
+const b = await puppeteer.launch({ executablePath: CHROME_PATH, headless: true, args: ["--hide-scrollbars", "--mute-audio", "--window-size=1920,1167", "--autoplay-policy=no-user-gesture-required"] });
+const p = await b.newPage();
+await p.setViewport({ width: 1920, height: 1080 });
+await p.goto("http://127.0.0.1:3199/overlay-stage.html", { waitUntil: "domcontentloaded" });
+await new Promise((r) => setTimeout(r, 12000));
+const s = await p.createCDPSession();
+const t0 = Date.now(); const frames: number[] = [];
+s.on("Page.screencastFrame", (e: any) => { writeFileSync(`${OUT}/${String(frames.length).padStart(5, "0")}.jpg`, Buffer.from(e.data, "base64")); frames.push(Date.now() - t0); void s.send("Page.screencastFrameAck", { sessionId: e.sessionId }); });
+await s.send("Page.startScreencast", { format: "jpeg", quality: 92, maxWidth: 1920, maxHeight: 1080 });
+await new Promise((r) => setTimeout(r, 10000));
+await s.send("Page.stopScreencast");
+writeFileSync(`${OUT}/frames.json`, JSON.stringify({ name: "08-overlay", frames, markers: { end: Date.now() - t0 }, t0, end: Date.now() - t0 }));
+console.log("frames", frames.length);
+await b.close();

@@ -29,6 +29,8 @@ export type CoinView = {
   symbol: string;
   /** Normalised Twitch/YouTube/Kick link, if the streamer gave one. */
   streamUrl: string | null;
+  /** An invited channel launched it and proved the channel is theirs (server/invites.ts). */
+  verified: boolean;
   /** The Meteora DAMM v2 pool a graduated coin trades in (null before graduation). */
   meteoraPool: string | null;
 };
@@ -80,3 +82,19 @@ export type TapeItem =
   | { kind: "trade"; mint: string; symbol: string; side: "buy" | "sell"; sol: string; wallet: string; time: number | null }
   | { kind: "graduated"; mint: string; symbol: string }
   | { kind: "race"; mint: string; symbol: string; progress: number };
+
+/** POST /api/launch-check: what the Go live page shows while an invited streamer gets ready. */
+export type LaunchCheck =
+  /** "open": anyone may launch (testing). "closed": invites aren't set up, nobody can launch. */
+  | { mode: "open" | "closed" }
+  | {
+      mode: "invite";
+      /** This wallet is on the invite list. */
+      invited: boolean;
+      /** The stream's channel name, once YouTube found the video. */
+      channel: string | null;
+      /** The stream is on the channel this wallet was invited with. */
+      ownChannel: boolean;
+      /** Live now or scheduled. */
+      live: boolean;
+    };

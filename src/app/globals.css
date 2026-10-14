@@ -57,6 +57,7 @@ canvas { image-rendering: pixelated; }
 .mbtn.buy { background: var(--buy); }
 .mbtn.sell { background: #b8372e; }
 .mbtn.off { background: #3a3a3a; color: #aaa; text-shadow: none; }
+.linkish { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-decoration: underline; cursor: pointer; }
 .mbtn:disabled { background: #3A3A3A; color: #c8c8c8; text-shadow: none; cursor: not-allowed; }
 .mbtn:focus-visible, .slot:focus-visible, input:focus-visible { outline: 4px solid var(--xp); outline-offset: 2px; }
 

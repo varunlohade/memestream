@@ -7,6 +7,8 @@ export type StreamPlatform = "twitch" | "youtube" | "kick";
 export type StreamLink = {
   platform: StreamPlatform;
   url: string;
+  /** YouTube's 11-character video ID; null on other platforms. */
+  videoId: string | null;
   embedUrl: (parentHost: string) => string;
   /** A still picture of the stream (YouTube and Twitch), for tiles and the coin icon. */
   thumbnailUrl: string | null;
@@ -46,6 +48,7 @@ export function parseStreamLink(raw: string): StreamLink | null {
     return {
       platform: "twitch",
       url: `https://twitch.tv/${channel}`,
+      videoId: null,
       embedUrl: (parent) =>
         `https://player.twitch.tv/?channel=${channel}&parent=${encodeURIComponent(parent)}&muted=true`,
       thumbnailUrl: `https://static-cdn.jtvnw.net/previews-ttv/live_user_${channel.toLowerCase()}-640x360.jpg`,
@@ -57,6 +60,7 @@ export function parseStreamLink(raw: string): StreamLink | null {
     return {
       platform: "youtube",
       url: `https://www.youtube.com/watch?v=${id}`,
+      videoId: id,
       embedUrl: () => `https://www.youtube.com/embed/${id}?autoplay=1&mute=1`,
       thumbnailUrl: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`,
     };
@@ -67,6 +71,7 @@ export function parseStreamLink(raw: string): StreamLink | null {
     return {
       platform: "kick",
       url: `https://kick.com/${channel}`,
+      videoId: null,
       embedUrl: () => `https://player.kick.com/${channel}?muted=true`,
       thumbnailUrl: null,
     };
@@ -75,12 +80,17 @@ export function parseStreamLink(raw: string): StreamLink | null {
 }
 
 /**
- * Metadata URI for a coin: `${publicUrl}/api/meta/<mint>?link=...`.
+ * Metadata URI for a coin: `${publicUrl}/api/meta/<mint>?link=...&seal=...`.
+ * `seal` is the server's proof that an invited channel launched this coin (server/invites.ts).
  * Must stay under the 200-byte on-chain limit; it can never change after launch.
  */
-export function metadataUri(publicUrl: string, mint: string, link: StreamLink | null): string {
+export function metadataUri(publicUrl: string, mint: string, link: StreamLink | null, seal?: string): string {
   const base = `${publicUrl.replace(/\/$/, "")}/api/meta/${mint}`;
-  return link ? `${base}?link=${encodeURIComponent(link.url)}` : base;
+  const params = new URLSearchParams();
+  if (link) params.set("link", link.url);
+  if (seal) params.set("seal", seal);
+  const query = params.toString();
+  return query ? `${base}?${query}` : base;
 }
 
 /** Reads the stream link back out of a coin's metadata URI; null if none or not ours. */
@@ -88,6 +98,15 @@ export function streamLinkFromUri(uri: string): StreamLink | null {
   try {
     const link = new URL(uri).searchParams.get("link");
     return link ? parseStreamLink(link) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The seal in a coin's metadata URI, unchecked; null if none. */
+export function sealFromUri(uri: string): string | null {
+  try {
+    return new URL(uri).searchParams.get("seal");
   } catch {
     return null;
   }

@@ -61,6 +61,18 @@ export function minusReserve(amount: string, reserve: string, decimals: number):
   return left > BigInt(0) ? fromUnits(left, decimals) : "0";
 }
 
+/** True if decimal string `amount` is more than `limit`; false if it doesn't parse. */
+export function isOver(amount: string, limit: string, decimals: number): boolean {
+  try {
+    return toUnits(amount, decimals) > toUnits(limit, decimals);
+  } catch {
+    return false;
+  }
+}
+
+/** The smaller of two decimal strings. */
+export const atMost = (amount: string, limit: string, decimals: number) => (isOver(amount, limit, decimals) ? limit : amount);
+
 /** Button and list text for a trade side. */
 export const SIDE_LABEL = { buy: "Buy", sell: "Sell" } as const;
 

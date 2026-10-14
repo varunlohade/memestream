@@ -26,6 +26,12 @@ test("the first coin with a ticker owns its link: a later copycat can't take it"
   assert.equal(coinForTicker([copycat, original], "LOFI")?.mint, "orig");
 });
 
+test("a verified coin owns its ticker link, even over an earlier unverified one", () => {
+  const squatter = coin("squat", "MIRA", "trading", 1);
+  const streamer = { ...coin("real", "MIRA", "trading", 5), verified: true };
+  assert.equal(coinForTicker([squatter, streamer], "MIRA")?.mint, "real");
+});
+
 test("only tickers our launch could write count: look-alikes never claim a link", () => {
   assert.ok(isCanonicalTicker("XQC") && isCanonicalTicker("A1"));
   for (const bad of ["ХQС", "xqc", "XQC!", "", "ELEVENCHARS", "Ⅹqc"]) assert.equal(isCanonicalTicker(bad), false, bad);

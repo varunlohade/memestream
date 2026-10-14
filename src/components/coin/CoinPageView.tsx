@@ -178,7 +178,7 @@ export function CoinPageView({ mint, initial, predictions = false }: { mint: str
             <div>
               <div className="ticker-row">
                 <h1>${coin.symbol}</h1>
-                <UnverifiedTag tappable />
+                {!coin.verified && <UnverifiedTag tappable />}
               </div>
               <p>
                 {coin.name} by {shortAddress(coin.creator)}

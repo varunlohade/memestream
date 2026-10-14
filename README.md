@@ -45,8 +45,12 @@ the streamer) is proven on Meteora's real programs in `test/integration/mainnet-
 
 - **Go live in two minutes:** paste a stream link, pick a ticker, launch. Coin pages play the stream.
 - **OBS overlay:** price, change and the graduation bar on stream, plus a short link `/<TICKER>`.
-- **Fair by default:** a streamer's wallet can't buy their own coin here; the first coin keeps its
-  ticker; look-alike tickers are hidden; every coin shows "Unverified" until channels are verified.
+- **Invite-only launches:** each invite pairs a streamer's wallet with their YouTube channel. Only that
+  wallet can launch, and only for a live stream on that channel. Its coin carries a seal only our
+  server can make, so it shows as verified.
+- **Fair by default:** a streamer's wallet can't buy their own coin here; a verified coin keeps its
+  ticker; look-alike tickers are hidden; coins launched any other way show "Unverified", and each buy
+  of one is capped at 0.1 SOL here (selling is never limited).
 - **Can't pay twice:** reloads, second tabs and fast double clicks still make exactly one trade.
 - **Never fills worse than the price you saw:** a moved price makes the trade fail, not fill worse.
 - **Live ticker tape** of trades and graduations.

@@ -1,0 +1,47 @@
+[
+ {
+  "id": "01",
+  "text": "A streamer goes live: one transaction launches a coin on Meteora's Dynamic Bonding Curve.",
+  "sub": "Solana devnet \u00b7 signed with the app's local test wallet",
+  "pos": "left"
+ },
+ {
+  "id": "02",
+  "text": "First minute: the launch fee falls from 50% to 1%, so snipers don't win."
+ },
+ {
+  "id": "03",
+  "text": "Viewers buy and sell on the curve. 80% of every fee goes to the streamer."
+ },
+ {
+  "id": "04",
+  "text": "Every trade lands in Recent trades and on the live ticker tape.",
+  "pos": "ml"
+ },
+ {
+  "id": "05",
+  "text": "The streamer claims their earnings any time."
+ },
+ {
+  "id": "06",
+  "text": "The curve fills (0.1 SOL on devnet). Anyone graduates the coin into a Meteora DAMM v2 pool."
+ },
+ {
+  "id": "07a",
+  "text": "Trading goes on, now in the coin's Meteora pool."
+ },
+ {
+  "id": "07b",
+  "text": "The streamer's locked LP keeps earning pool fees. Claim in one click."
+ },
+ {
+  "id": "08",
+  "text": "The OBS overlay puts the price and graduation bar on stream.",
+  "pos": "top"
+ },
+ {
+  "id": "09",
+  "text": "All on Meteora, all on-chain: the graduation tx and the memestream DBC config.",
+  "pos": "top"
+ }
+]

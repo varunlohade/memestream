@@ -1,0 +1,46 @@
+1
+00:00:00,000 --> 00:00:16,567
+A streamer goes live: one transaction launches a coin on Meteora's Dynamic Bonding Curve.
+Solana devnet · signed with the app's local test wallet
+
+2
+00:00:16,567 --> 00:00:24,567
+First minute: the launch fee falls from 50% to 1%, so snipers don't win.
+
+3
+00:00:24,567 --> 00:00:38,767
+Viewers buy and sell on the curve. 80% of every fee goes to the streamer.
+
+4
+00:00:38,767 --> 00:00:48,933
+Every trade lands in Recent trades and on the live ticker tape.
+
+5
+00:00:48,933 --> 00:00:57,933
+The streamer claims their earnings any time.
+
+6
+00:00:57,933 --> 00:01:15,433
+The curve fills (0.1 SOL on devnet). Anyone graduates the coin into a Meteora DAMM v2 pool.
+
+7
+00:01:15,433 --> 00:01:24,433
+Trading goes on, now in the coin's Meteora pool.
+
+8
+00:01:24,433 --> 00:01:33,367
+The streamer's locked LP keeps earning pool fees. Claim in one click.
+
+9
+00:01:33,367 --> 00:01:42,867
+The OBS overlay puts the price and graduation bar on stream.
+
+10
+00:01:42,867 --> 00:01:53,067
+All on Meteora, all on-chain: the graduation tx and the memestream DBC config.
+
+11
+00:01:53,067 --> 00:01:59,067
+memestream: a coin for every live stream. Built on Meteora DBC.
+memestream-iota.vercel.app
+

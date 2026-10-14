@@ -2,6 +2,7 @@
  * DEVNET ONLY: one full coin life on real devnet, through the LIVE site's API (not Surfpool):
  * launch (creator), buy + sell (viewer), fill to the threshold, graduate to DAMM v2, claim.
  * Two throwaway keypairs in .keys/ (git-ignored) are funded from .keys/partner.json.
+ * The site must run open launches (MEMESTREAM_OPEN_LAUNCH=1): a script can't edit a stream title.
  * Run:  npx tsx scripts/devnet-pass.mts [https://memestream-iota.vercel.app]
  */
 import { type Keypair, LAMPORTS_PER_SOL, SystemProgram, Transaction } from "@solana/web3.js";
@@ -87,7 +88,9 @@ await run("buy 0.02 SOL", "trade", viewer, { mint, side: "buy", amount: "0.02" }
 const held = await waitFor(mint, "viewer holds coins", (d) => Number(d.holdings?.coins ?? 0) > 0, viewer);
 const half = (Number(held.holdings?.coins) / 2).toFixed(6);
 await run(`sell ${half} coins`, "trade", viewer, { mint, side: "sell", amount: half });
-await run("buy 0.2 SOL (fills the curve)", "trade", viewer, { mint, side: "buy", amount: "0.2" });
+// The coin is unverified (the devnet site runs open launches), so each buy is capped at 0.1 SOL;
+// 0.1 is more than the curve still needs on devnet's 0.1 SOL threshold.
+await run("buy 0.1 SOL (fills the curve)", "trade", viewer, { mint, side: "buy", amount: "0.1" });
 await waitFor(mint, "curve full", (d) => d.coin.status === "graduating");
 await run("graduate to DAMM v2", "graduate", viewer, { mint });
 await waitFor(mint, "graduated", (d) => d.coin.status === "graduated");

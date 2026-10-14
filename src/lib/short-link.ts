@@ -19,13 +19,16 @@ export function parseTicker(raw: string): string | null {
 
 /**
  * The coin a ticker link means. Tickers aren't unique on-chain (anyone can launch on our config),
- * so the FIRST coin launched with a ticker owns its link forever: a later copycat can't take over
- * a streamer's overlay link. Null for a malformed ticker or no match.
+ * so the first verified coin with a ticker owns its link, else the first coin: a later copycat
+ * can't take over a streamer's overlay link. Null for a malformed ticker or no match.
  */
 export function coinForTicker(coins: CoinView[], raw: string): CoinView | null {
   const ticker = parseTicker(raw);
   if (!ticker) return null;
   // Exact match only: no case folding of on-chain symbols (Unicode upper-casing can create look-alikes).
   const matches = coins.filter((c) => c.symbol === ticker && isCanonicalTicker(c.symbol));
-  return matches.sort((a, b) => a.launchedAt - b.launchedAt || a.mint.localeCompare(b.mint))[0] ?? null;
+  // A verified coin beats any unverified one: a squatter launching straight on-chain can't take an
+  // invited streamer's link.
+  const byRank = (c: CoinView) => (c.verified ? 0 : 1);
+  return matches.sort((a, b) => byRank(a) - byRank(b) || a.launchedAt - b.launchedAt || a.mint.localeCompare(b.mint))[0] ?? null;
 }

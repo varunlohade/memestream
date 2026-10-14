@@ -16,11 +16,13 @@ import { streamLinkFromUri } from "@/lib/stream-link";
 import { type PoolVaults, tradeFromTransaction } from "@/lib/trade-history";
 import { getChain, poolForMint } from "./chain";
 import { BusyError } from "./errors";
+import { inviteSettings, isSealed } from "./invites";
 import { takeRpcBudget } from "./rpc-budget";
 import { loadMetadata, MAX_ACCOUNTS_PER_CALL } from "./metadata";
 
 async function withMetadata(connection: Connection, views: PoolView[]): Promise<CoinView[]> {
   const metadata = await loadMetadata(connection, views.map((v) => new PublicKey(v.mint)));
+  const { secret } = inviteSettings();
   return views.map((view, i) => {
     const meta = metadata[i];
     return {
@@ -28,6 +30,7 @@ async function withMetadata(connection: Connection, views: PoolView[]): Promise<
       name: meta?.name ?? "Unnamed stream",
       symbol: meta?.symbol ?? "COIN",
       streamUrl: meta ? (streamLinkFromUri(meta.uri)?.url ?? null) : null,
+      verified: meta ? isSealed(secret, view.mint, meta.uri) : false,
     };
   });
 }

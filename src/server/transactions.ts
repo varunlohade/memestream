@@ -19,9 +19,12 @@ import type { BuiltTx } from "@/lib/dbc/tx";
 import { baseUnitsToCoins, coinsToBaseUnits, lamportsToSol, solToLamports } from "@/lib/dbc/units";
 import { coinForTicker, parseTicker } from "@/lib/short-link";
 import { metadataUri, parseStreamLink } from "@/lib/stream-link";
+import { UNVERIFIED_BUY_MESSAGE, UNVERIFIED_MAX_BUY_SOL } from "@/lib/unverified";
 import { getChain, poolForMint, rememberBuilt } from "./chain";
 import { listCoins } from "./coins";
 import { asUserFacing, UserError } from "./errors";
+import { assertCanLaunch, inviteSettings, isSealed } from "./invites";
+import { loadMetadata } from "./metadata";
 import { assertNotSelfBuy } from "./rules";
 
 async function toPreparedTx(built: BuiltTx): Promise<PreparedTx> {
@@ -66,29 +69,45 @@ export type LaunchRequest = { wallet: string; name: string; symbol: string; stre
 
 export async function buildLaunchForWallet(req: LaunchRequest): Promise<PreparedTx & { mint: string }> {
   const { client, config, publicUrl } = getChain();
-  // New coins stream on YouTube or Twitch (both embed reliably). Kick's ad policy bans meme-coins.
+  // Invited YouTube channels only for now (see invites.ts); open mode, for testing, also takes Twitch.
+  // Kick's ad policy bans meme-coins.
+  const settings = inviteSettings();
   const link = parseStreamLink(req.streamUrl ?? "");
-  if (link?.platform !== "youtube" && link?.platform !== "twitch") {
-    throw new UserError("Paste your YouTube or Twitch live link");
+  const platforms = settings.mode === "open" ? ["youtube", "twitch"] : ["youtube"];
+  if (!link || !platforms.includes(link.platform)) {
+    throw new UserError(settings.mode === "open" ? "Paste your YouTube or Twitch live link" : "Paste your YouTube live link");
   }
-  // The ticker is the overlay's short link (/<ticker>): letters and digits only, and the first coin
-  // keeps it. This check is best effort (launches straight to the program skip it); coinForTicker
-  // still sends the link to the first coin.
+  // The ticker is the overlay's short link (/<ticker>): letters and digits only, and the first
+  // verified coin keeps it. This check is best effort (launches straight to the program skip it);
+  // coinForTicker still sends the link to the right coin.
   const symbol = parseTicker(req.symbol);
   if (!symbol) throw new UserError("Ticker: 1 to 10 letters or digits");
-  if (coinForTicker(await listCoins(), symbol)) throw new UserError(`$${symbol} is taken. Pick another ticker`);
+  const wallet = walletKey(req.wallet);
+  const coins = await listCoins();
+  // Unverified coins can't block a verified streamer's ticker (coinForTicker prefers verified ones).
+  const taken = coinForTicker(coins, symbol);
+  if (taken && (taken.verified || settings.mode === "open")) throw new UserError(`$${symbol} is taken. Pick another ticker`);
+  // One verified coin per stream. Best effort, like the ticker check.
+  if (coins.some((coin) => coin.verified && coin.streamUrl === link.url)) throw new UserError("This stream already has a coin");
+  const seal = await assertCanLaunch(settings, wallet.toBase58(), link);
   return userFacing(async () => {
     const built = await buildCreateStreamCoinTx(
       client,
       {
         name: req.name,
         symbol,
-        uri: (mint) => metadataUri(publicUrl, mint.toBase58(), link),
+        uri: (mint) => metadataUri(publicUrl, mint.toBase58(), link, seal?.(mint.toBase58())),
       },
-      { config, creator: walletKey(req.wallet) },
+      { config, creator: wallet },
     );
     return { ...(await toPreparedTx(built)), mint: built.mint.toBase58() };
   });
+}
+
+/** One metadata read: does this coin carry our seal? */
+async function isVerifiedCoin(mint: string): Promise<boolean> {
+  const [meta] = await loadMetadata(getChain().connection, [new PublicKey(mint)]);
+  return Boolean(meta && isSealed(inviteSettings().secret, mint, meta.uri));
 }
 
 export type QuoteRequest = { mint: string; side: "buy" | "sell"; amount: string; slippageBps: number };
@@ -153,6 +172,9 @@ export async function buildTradeForWallet(req: TradeRequest): Promise<PreparedTx
     const trader = walletKey(req.wallet);
     const snapshot = await snapshotForMint(req.mint);
     assertNotSelfBuy(input.side, snapshot.pool.poolState.creator, trader);
+    if (input.side === "buy" && input.lamports.gt(solToLamports(UNVERIFIED_MAX_BUY_SOL)) && !(await isVerifiedCoin(req.mint))) {
+      throw new UserError(UNVERIFIED_BUY_MESSAGE);
+    }
     const floor = minimumSeen(input.side, req.minReceived);
     const built =
       snapshot.status === "graduated"

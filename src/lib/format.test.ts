@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ago, compact, formatSol, fractionOf, minusReserve, percentChange, shortAddress, signedPercent } from "./format";
+import { ago, atMost, compact, formatSol, fractionOf, isOver, minusReserve, percentChange, shortAddress, signedPercent } from "./format";
 
 test("compact numbers", () => {
   assert.equal(compact(42100), "42.1K");
@@ -57,4 +57,14 @@ test("a reserve is kept back, floored at zero", () => {
 
 test("short addresses are the first six characters", () => {
   assert.equal(shortAddress("Ebt5dA6zkvrin1jr4nvGdU5BbEC6BwV5pPVggs3Tcg9B"), "Ebt5dA");
+});
+
+test("buy limits compare exact decimal strings", () => {
+  assert.ok(isOver("0.5", "0.1", 9));
+  assert.ok(isOver("0.100000001", "0.1", 9));
+  assert.ok(!isOver("0.1", "0.1", 9));
+  assert.ok(!isOver("0.09", "0.1", 9));
+  assert.ok(!isOver("", "0.1", 9));
+  assert.equal(atMost("2.5", "0.1", 9), "0.1");
+  assert.equal(atMost("0.04", "0.1", 9), "0.04");
 });
