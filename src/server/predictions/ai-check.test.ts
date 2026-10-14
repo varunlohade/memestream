@@ -106,20 +106,23 @@ test("clients: busy answers retry twice; errors, timeouts and missing keys fail"
   await assert.rejects(describeClient({ apiKey: "k", fetch: hang, timeoutMs: 20 })("Q?", FRAME), /timed out/);
 });
 
-test("aiCheck.grab: the stream's preview with a hash of its bytes (same picture, same hash); no frame means null and no call", async () => {
+test("aiCheck.capture: grabs the preview, describes a new picture once (same bytes, same hash: no model call); no frame means null and no call", async () => {
   const hits: string[] = [];
   const vision = { apiKey: "k", fetch: async (url: string | URL | Request) => (hits.push(String(url)), json(visionAnswer("A girl at a desk."))) };
   const frames = (body: string) => ({ fetch: async (url: string | URL | Request) => (hits.push(String(url)), new Response(body, { status: body ? 200 : 404, headers: { "content-type": "image/jpeg" } })) });
-  const first = await aiCheck(vision, { apiKey: "k" }, frames("img")).grab("https://twitch.tv/lofigirl");
+  const source = (body: string) => aiCheck(vision, { apiKey: "k" }, frames(body));
+  const first = await source("img").capture("https://twitch.tv/lofigirl", "Q?", null, []);
   assert.match(first!.hash, /^[0-9a-f]{16}$/);
-  assert.equal((await aiCheck(vision, { apiKey: "k" }, frames("img")).grab("https://twitch.tv/lofigirl"))!.hash, first!.hash);
-  assert.notEqual((await aiCheck(vision, { apiKey: "k" }, frames("img2")).grab("https://twitch.tv/lofigirl"))!.hash, first!.hash);
-  assert.equal(await aiCheck(vision, { apiKey: "k" }, frames("img")).describe("Q?", first!, null), "A girl at a desk.");
-  assert.deepEqual(hits, [FRAME.url, FRAME.url, FRAME.url, OPENROUTER_URL]);
+  assert.equal(first!.text, "A girl at a desk.");
+  assert.deepEqual(hits, [FRAME.url, OPENROUTER_URL]);
   hits.length = 0;
-  assert.equal(await aiCheck(vision, { apiKey: "k" }, frames("")).grab("https://twitch.tv/lofigirl"), null);
+  assert.equal(await source("img").capture("https://twitch.tv/lofigirl", "Q?", null, [first!.hash]), null, "seen before");
+  assert.deepEqual(hits, [FRAME.url], "no model call for a picture seen before");
+  assert.notEqual((await source("img2").capture("https://twitch.tv/lofigirl", "Q?", null, [first!.hash]))!.hash, first!.hash);
+  hits.length = 0;
+  assert.equal(await source("").capture("https://twitch.tv/lofigirl", "Q?", null, []), null);
   assert.deepEqual(hits, [FRAME.url]);
   hits.length = 0;
-  assert.equal(await aiCheck(vision, { apiKey: "k" }, frames("img")).grab("https://kick.com/somebody"), null);
+  assert.equal(await source("img").capture("https://kick.com/somebody", "Q?", null, []), null);
   assert.deepEqual(hits, []);
 });

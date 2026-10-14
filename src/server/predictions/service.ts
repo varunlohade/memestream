@@ -15,7 +15,7 @@ import { MESSAGE_TTL_MS } from "@/lib/predictions/message";
 import { AI_CHECK_MAX_TRIES, CHECK_RULE_MAX, DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_GRANTS_PER_IP, MAX_PREDICTIONS_PER_STREAM, MIN_HEARTBEAT_GAP_MS, STREAM_GAP_MS, SUGGEST_TTL_MS } from "@/lib/predictions/rules";
 import type { LeaderRow, MarketStepView, PredictionsView, Standing, WitnessView } from "@/lib/predictions/view";
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
-import { type Frame, frameUrls } from "./frames";
+import { frameUrls } from "./frames";
 import { GAME_KEY_COUNT, gameKeys, LIVE_COINS_KEY, liveIndex, liveSlotKeys, loadGame } from "./game-doc";
 import { issueToken, verifySessionMessage, walletFromToken } from "./identity";
 import type { Commit, PredictionStore } from "./store";
@@ -42,17 +42,24 @@ export type MarketDeps = {
   redeemOracle: (record: MarketRecord) => Promise<unknown>;
 };
 
-/** The AI referee's steps; each model step throws if its model fails (timeout, error, malformed answer). */
-export type AiCheckDeps = {
-  /** The stream's preview picture now, with its hash; null if the stream has no frame. */
-  grab: (streamUrl: string) => Promise<Frame | null>;
-  /** What the picture shows about the question and its check rule. */
-  describe: (question: string, frame: Frame, rule: string | null) => Promise<string>;
-  /** What happened, from the question, its rule and the frame notes only (never anyone's outcome); `lockAt`: when betting closed. */
+/**
+ * Where the AI referee's evidence comes from, and how it decides: the seam a source plugs into
+ * (today the platforms' preview pictures, see ai-check.ts; a video clip source can replace it). The
+ * engine only ever sees short text notes, never the media. Model steps throw if the model fails
+ * (timeout, error, malformed answer).
+ */
+export type EvidenceSource = {
+  /**
+   * Evidence on the stream now, as a short description with a hash of what it saw; null if the stream
+   * has none now, or it is the same as one in `seen` (then no model is asked).
+   */
+  capture: (streamUrl: string, question: string, rule: string | null, seen: string[]) => Promise<{ hash: string; text: string } | null>;
+  /** What happened, from the question, its rule and the notes only (never anyone's outcome); `lockAt`: when betting closed. */
   decide: (question: string, notes: FrameNote[], rule: string | null, lockAt: number | null) => Promise<{ happened: "yes" | "no" | "unclear"; confidence: number; model: string }>;
   /** The check rule for an approved question: what on stream decides YES or NO. */
   rule: (question: string) => Promise<string>;
 };
+export type AiCheckDeps = EvidenceSource;
 
 export type ServiceDeps = {
   store: PredictionStore;
@@ -547,32 +554,34 @@ export function predictionsService(deps: ServiceDeps) {
   const aiEnv = (env: Env): Env => ({ ...env, aiCheck: true });
 
   /**
-   * A frame grab: a picture not seen before is described and saved; a picture the preview still
-   * shows (same hash) costs no model call. A failed grab or description saves nothing.
+   * A capture: evidence not seen before is described and saved; the same evidence again (same hash)
+   * costs no model call. A failed capture saves nothing.
    */
   async function captureOne(ai: AiCheckDeps, mint: string, creator: string, streamUrl: string, target: CaptureTarget) {
-    let saved: { hash: string; text: string };
+    let saved: { hash: string; text: string } | null;
     try {
-      const frame = await ai.grab(streamUrl);
-      if (!frame || target.hashes.includes(frame.hash)) return;
-      saved = { hash: frame.hash, text: await ai.describe(target.text, frame, target.rule) };
+      saved = await ai.capture(streamUrl, target.text, target.rule, target.hashes);
+      if (!saved) return;
     } catch (error) {
       console.warn(`predictions: frame description failed (${error instanceof Error ? error.message : "unknown error"})`);
       return;
     }
-    await commitGame(mint, creator, (game, env) => applyFrame(game, target, saved, now(), aiEnv(env)));
+    const note = saved;
+    await commitGame(mint, creator, (game, env) => applyFrame(game, target, note, now(), aiEnv(env)));
   }
 
   /**
    * One referee run on a locked prediction: jev reads the question, its rule and the frame notes. A
-   * sure YES or NO resolves it; unsure, or no frames at all, means the streamer decides. A failed run
-   * is tried again later; the last failed run also hands it to the streamer. A failure is never a side.
+   * sure YES or NO resolves it; unsure, or no new picture since betting closed (the preview never
+   * refreshed, or no frames at all), means the streamer decides. A failed run is tried again later;
+   * the last failed run also hands it to the streamer. A failure is never a side.
    */
   async function refereeOne(ai: AiCheckDeps, mint: string, creator: string, target: RefereeTarget) {
     const notes = target.frames.filter((f) => f.text);
     let answer: RefereeAnswer = "unclear";
     try {
-      if (notes.length > 0) {
+      // A note from after the lock is always a new picture: one seen before is never added again.
+      if (notes.some((f) => f.at >= target.lockAt)) {
         const { happened, confidence, model } = await ai.decide(target.text, notes, target.rule, target.lockAt);
         // What it saw: the newest frame from after betting closed, else the newest one.
         const seen = [...notes].reverse().find((f) => f.at >= target.lockAt) ?? notes[notes.length - 1];
@@ -594,8 +603,8 @@ export function predictionsService(deps: ServiceDeps) {
     let verdict: AiVerdict | null;
     try {
       const notes = target.frames.filter((f) => f.text);
-      const frame = await ai.grab(streamUrl);
-      if (frame && !notes.some((f) => f.hash === frame.hash)) notes.push({ kind: "resolve", at: now(), text: await ai.describe(target.text, frame, target.rule), hash: frame.hash });
+      const atResolve = await ai.capture(streamUrl, target.text, target.rule, notes.flatMap((f) => (f.hash ? [f.hash] : [])));
+      if (atResolve) notes.push({ kind: "resolve", at: now(), ...atResolve });
       if (notes.length === 0) verdict = null;
       else {
         const { happened } = await ai.decide(target.text, notes, target.rule, null);

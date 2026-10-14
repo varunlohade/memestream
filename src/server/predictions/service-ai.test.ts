@@ -214,6 +214,14 @@ for (const [name, make] of STORES) {
     assert.deepEqual([models.calls.vision, models.calls.jev], [0, 0]);
   });
 
+  test(`${name}: the preview never refreshed after the lock: no YES or NO from old pictures, the streamer decides at 6 minutes`, async () => {
+    const { models, viewAt, playToLive } = setup(make);
+    await playToLive();
+    await viewAt(LOCK + FRAMES_AFTER_LOCK_MS);
+    const view = await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1);
+    assert.deepEqual([view.live.length, view.live[0].ai, models.calls.jev, models.calls.vision], [1, "unclear", 0, 1]);
+  });
+
   test(`${name}: a failed rule leaves the question without one; the referee still works from the question`, async () => {
     const { models, viewAt, playToLive } = setup(make);
     models.ruleFails = true;
