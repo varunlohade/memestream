@@ -454,6 +454,7 @@ export function Predictions({
           <ResolvedRow key={r.id} result={r} staff={staff !== null} busy={busy} onFlag={() => act({ kind: "flag", id: r.id })} />
         ),
       )}
+      {view.pastMarkets.length > 0 && <PastMarkets mint={mint} markets={view.pastMarkets} now={now} source={streamUrl} />}
 
       {error && (
         <p className="notice err" role="alert">
@@ -493,7 +494,7 @@ function LiveCard(props: {
   const locked = now !== null && now >= live.lockAt;
   const resolve = (
     <>
-      {locked && <RefereeLine ai={live.ai} why={live.aiWhy} />}
+      {locked && <RefereeLine ai={live.ai} why={live.aiWhy} official={live.source !== null} />}
       {locked && <WitnessLine witness={live.witness} />}
       {staff && <WitnessButtons locked={locked} decide={live.ai === "unclear"} busy={busy} onWitness={props.onWitness} />}
       {admin && !staff && locked && <ResolveButtons locked={locked} busy={busy} onResolve={props.onResolve} />}
@@ -550,7 +551,7 @@ function LiveCard(props: {
           <span className="r">{live.myBet ? `Your bet: ${fmt(live.myBet.amount)} on ${sideLabel(live.myBet.side)}` : ""}</span>
         </div>
       )}
-      {!staff && !admin && locked && <RefereeLine ai={live.ai} why={live.aiWhy} />}
+      {!staff && !admin && locked && <RefereeLine ai={live.ai} why={live.aiWhy} official={live.source !== null} />}
     </div>
   );
 }
@@ -656,8 +657,9 @@ function WitnessLine({ witness }: { witness: LiveView["witness"] }) {
   );
 }
 
-/** Where the result stands once betting closed: the AI referee checking, or the streamer deciding. */
-function RefereeLine({ ai, why }: { ai: LiveView["ai"]; why: LiveView["aiWhy"] }) {
+/** Where the result stands once betting closed: the AI referee checking, or the streamer deciding (always, with an official source). */
+function RefereeLine({ ai, why, official }: { ai: LiveView["ai"]; why: LiveView["aiWhy"]; official: boolean }) {
+  if (official && ai === "unclear") return <p className="mute pm-small">Resolved by: official source, not the AI. The streamer decides; an admin settles markets.</p>;
   if (ai === "checking") return <p className="mute pm-small">AI is checking the stream…</p>;
   if (ai === "unclear") return <p className="mute pm-small">AI couldn&apos;t tell{why ? ` (${AI_WHY[why]})` : ""}. The streamer decides.</p>;
   return null;
@@ -721,7 +723,9 @@ function betOutcome(my: ResolvedResult["my"], outcome: Outcome) {
 function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result: ResolvedResult; staff: boolean; busy: boolean; onFlag: () => void; bare?: boolean }) {
   const result = betOutcome(r.my, r.outcome);
   const { role, wallet } = r.resolvedBy;
-  const by = role === "auto" ? "auto-cancelled" : role === "ai" ? "AI referee" : role === "admin" ? "memestream oracle" : wallet ? `${role} ${shortAddress(wallet)}` : role;
+  const who = role === "auto" ? "auto-cancelled" : role === "ai" ? "AI referee" : role === "admin" ? "memestream oracle" : wallet ? `${role} ${shortAddress(wallet)}` : role;
+  // A result from an official source names it: "official source (memestream oracle)".
+  const by = r.source && role !== "auto" && role !== "ai" ? `official source (${who})` : who;
   const at = new Date(r.resolvedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   return (
     <div className="pm-rr num">
@@ -754,6 +758,26 @@ function ResolvedRow({ result: r, staff, busy, onFlag, bare = false }: { result:
         </span>
       )}
     </div>
+  );
+}
+
+/** Older settled markets, folded: tap one to open its card and redeem (each card reads the chain only when opened). */
+function PastMarkets({ mint, markets, now, source }: { mint: string; markets: PredictionsView["pastMarkets"]; now: number | null; source: string | null }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  return (
+    <details className="pm-small">
+      <summary className="mute">Older markets ({markets.length}): redeem here</summary>
+      {markets.map((m) =>
+        m.id === openId ? (
+          <MarketCard key={m.id} mint={mint} predictionId={m.id} text={m.text} now={now} canBet={false} poll={false} source={m.source ?? source} />
+        ) : (
+          <button key={m.id} type="button" className="pm-row" onClick={() => setOpenId(m.id)}>
+            <span className="pm-q">{m.text}</span>
+            <OutcomeTag outcome={m.outcome} />
+          </button>
+        ),
+      )}
+    </details>
   );
 }
 

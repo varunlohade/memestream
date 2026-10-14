@@ -41,6 +41,7 @@ import {
   MAX_BET,
   MAX_BETTORS,
   MAX_HISTORY,
+  MAX_MARKET_HISTORY,
   MAX_LIVE,
   MAX_MODS,
   MAX_NOTICES,
@@ -112,9 +113,10 @@ export type AiCheck = { tries: number; at: number; frames: FrameNote[]; rule?: s
 /**
  * Why the referee couldn't tell: no picture from after the lock, only one (a market needs two), the
  * pictures disagreed, jev was unsure, the models kept failing, no answer by the deadline, the daily
- * AI budget ran out, or the coin has no AI (no frames, no keys).
+ * AI budget ran out, the coin has no AI (no frames, no keys), or the question has an official source
+ * (the referee never settles those from the stream).
  */
-export type RefereeWhy = "no-picture" | "one-picture" | "disagree" | "unclear" | "error" | "deadline" | "budget" | "no-keys";
+export type RefereeWhy = "no-picture" | "one-picture" | "disagree" | "unclear" | "error" | "deadline" | "budget" | "no-keys" | "source";
 /**
  * The AI referee on a live prediction once betting closed: runs started so far (the latest is the
  * one whose answer counts), when the last one started, and when it gave up (`unclear`, with `why`):
@@ -482,15 +484,26 @@ function refereeDue(live: Prediction, now: number): boolean {
  */
 export function refereeState(live: Prediction, now: number, env: Env): "checking" | "unclear" | null {
   if (now < live.lockAt) return null;
-  return !env.aiCheck || ended(live.referee) ? "unclear" : "checking";
+  return !refereeOn(live, env) || ended(live.referee) ? "unclear" : "checking";
 }
 
 /** Why the referee couldn't tell, once it couldn't (or the coin has no AI); null otherwise. */
-export const refereeWhy = (live: Prediction, env: Env): RefereeWhy | null => (ended(live.referee) ? (live.referee!.why ?? "unclear") : env.aiCheck ? null : "no-keys");
+export function refereeWhy(live: Prediction, env: Env): RefereeWhy | null {
+  if (live.source) return "source";
+  if (ended(live.referee)) return live.referee!.why ?? "unclear";
+  return env.aiCheck ? null : "no-keys";
+}
+
+/**
+ * The referee works on a prediction only when the coin has the AI and the question has no official
+ * source: a result that comes from an outside source ("Resolves from <link>") is never settled from
+ * the stream. The streamer or a mod decides it (on a market, only as a proposal an admin settles).
+ */
+const refereeOn = (live: Prediction, env: Env) => Boolean(env.aiCheck) && !live.source;
 
 /** Whether a frame grab, a rule, a referee run or an AI check is due now. */
 export const aiDue = (game: Game, now: number, env: Env) =>
-  (Boolean(env.aiCheck) && game.live.some((live) => ruleDue(live, now) || grabDue(live, now) || refereeDue(live, now))) ||
+  game.live.some((live) => refereeOn(live, env) && (ruleDue(live, now) || grabDue(live, now) || refereeDue(live, now))) ||
   game.resolved.some((p) => p.check && checkDue(p.check, now));
 
 /** A grab joins one that is due for another prediction of the coin unless it grabbed this recently: one picture serves them all. */
@@ -507,9 +520,9 @@ export function startAi(state: Game, now: number, env: Env): Result & { rules: R
   const referees: RefereeTarget[] = [];
   const checks: CheckTarget[] = [];
   const result = run(state, now, env, ({ game }) => {
-    const grabbing = game.live.some((live) => grabDue(live, now) && !refereeDue(live, now));
+    const grabbing = game.live.some((live) => refereeOn(live, env) && grabDue(live, now) && !refereeDue(live, now));
     const joins = (live: Prediction) => grabbing && !ended(live.referee) && now < frameWindowEnd(live) && (live.grabAt === undefined || now >= live.grabAt + GRAB_JOIN_MS);
-    for (const live of env.aiCheck ? game.live : []) {
+    for (const live of game.live.filter((p) => refereeOn(p, env))) {
       if (ruleDue(live, now)) {
         Object.assign(live, { ruleTries: (live.ruleTries ?? 0) + 1, ruleAt: now });
         rules.push({ id: live.id, text: live.text });
@@ -675,8 +688,9 @@ export function marketFinal(p: Summary, now: number, env: Env): MarketOutcome | 
 
 /**
  * The steps due on one prediction's market: create while it's live and taking bets; close trading
- * once betting closes (until it's done); resolve once its outcome is final. Close and resolve are
- * independent: a close that fails doesn't stop the resolution.
+ * once betting closes (until it's done); resolve once its outcome is final AND trading is closed. A
+ * confirmed close is a prerequisite: resolving while the oracle's liquidity is still in the pool
+ * would let losers swap into winners at a stale price. So the two are never due together.
  */
 function marketJobsFor(p: Prediction | Summary, live: boolean, now: number, env: Env): MarketJob[] {
   const m = p.market;
@@ -685,7 +699,7 @@ function marketJobsFor(p: Prediction | Summary, live: boolean, now: number, env:
   if (m.step === "failed") return [];
   const jobs: MarketJob[] = [];
   if (!m.closed && (!live || now >= (p as Prediction).lockAt)) jobs.push({ id: p.id, kind: "close" });
-  const outcome = m.step === "open" && !live ? marketFinal(p as Summary, now, env) : null;
+  const outcome = m.step === "open" && !live && m.closed ? marketFinal(p as Summary, now, env) : null;
   if (outcome) jobs.push({ id: p.id, kind: "resolve", outcome });
   return jobs;
 }
@@ -922,8 +936,14 @@ function voidUndecided(ctx: Ctx) {
 function closeFlagWindows(ctx: Ctx) {
   const { game, now } = ctx;
   for (const p of game.resolved) if (p.open && !p.check && now >= p.resolvedAt + FLAG_WINDOW_MS) finalize(ctx, p);
-  // A result whose market still needs closing or resolving stays until it's done.
-  game.resolved = game.resolved.filter((p, i) => p.open || i < MAX_HISTORY || marketPending(p.market));
+  // A result whose market still needs closing or resolving stays until it's done; the newest
+  // MAX_MARKET_HISTORY settled markets stay too, so holders can still find them to redeem.
+  let markets = 0;
+  game.resolved = game.resolved.filter((p, i) => {
+    const settled = p.market?.step === "resolved";
+    if (settled) markets += 1;
+    return p.open || i < MAX_HISTORY || marketPending(p.market) || (settled && markets <= MAX_MARKET_HISTORY);
+  });
 }
 
 /** The crowd picks, into every free live slot: only while the streamer is here and has crowd picks on. */
@@ -988,7 +1008,7 @@ function settle(ctx: Ctx, p: Prediction, outcome: Outcome, by: string, call?: Re
   game.live = game.live.filter((x) => x !== p);
   const summary: Summary = { id, text, asker, outcome, yes, no, bettors, resolvedAt: now, resolvedBy: by, askerReward: 0, flags: 0, disputed: false, open: { results, eligible } };
   // A YES/NO someone else gave gets an AI check when the coin's stream has frames; a cancel or the referee's own result needs none.
-  if (outcome !== "cancel" && ctx.env.aiCheck && by !== AI) summary.check = { tries: 0, at: now, frames: p.frames ?? [], ...(p.rule ? { rule: p.rule } : {}) };
+  if (outcome !== "cancel" && refereeOn(p, ctx.env) && by !== AI) summary.check = { tries: 0, at: now, frames: p.frames ?? [], ...(p.rule ? { rule: p.rule } : {}) };
   if (call) summary.referee = call;
   if (fallback) summary.fallback = fallback;
   if (p.market) Object.assign(summary, { market: p.market, window: [p.launchedAt, p.lockAt] });

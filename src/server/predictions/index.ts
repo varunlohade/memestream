@@ -74,6 +74,8 @@ export async function registeredMarket(mint: string, predictionId: string, betto
   const record = await ready.service.market(mint, predictionId);
   if (!record) throw new UserError("No market for this prediction");
   if (bettor !== undefined && (await ready.service.staffOf(mint, bettor))) throw new UserError("Streamers and mods can't bet on their own coin's predictions");
+  // A wallet that builds a trade takes part on purpose: it may never decide this market (see stakeIn).
+  if (bettor !== undefined) await ready.service.recordParticipant(mint, predictionId, bettor);
   return record;
 }
 

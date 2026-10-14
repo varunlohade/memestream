@@ -147,6 +147,21 @@ test("unclear before the window's end isn't final; after it, the streamer or a m
   assert.equal(needsAdmin(r), null, "points only: no admin needed");
 });
 
+test("audit 3-4: a question with an official source is never settled from the stream: no rule, frames or referee; staff decide, a market waits for an admin", () => {
+  let game = apply(newGame(STREAMER), { kind: "launch", text: "Will Team A win the final?", source: "https://liquipedia.net/match" }, actor(STREAMER), T0, MARKETS).game;
+  game = applyReview(game, game.pending!, { approved: true, windowMin: 1 }, T0, MARKETS).game;
+  const id = game.live[0].id;
+  game = applyMarketDone(game, { id, kind: "create" }, QUESTION, T0, MARKETS).game;
+  for (const t of [T0, LOCK, LOCK + FRAMES_AFTER_LOCK_MS, LOCK + MARKET_FRAMES_AFTER_LOCK_MS]) {
+    const claim = startAi(game, t, MARKETS);
+    assert.deepEqual([claim.rules.length, claim.captures.length, claim.referees.length], [0, 0, 0], `nothing for the AI at ${t - T0}`);
+  }
+  assert.deepEqual([refereeState(game.live[0], LOCK, MARKETS), refereeWhy(game.live[0], MARKETS)], ["unclear", "source"], "the streamer decides at once");
+  game = apply(game, { kind: "witness", id, outcome: "yes" }, actor(STREAMER), LOCK, MARKETS).game;
+  const p = game.resolved[0];
+  assert.deepEqual([p.resolvedBy, p.fallback, p.check, needsAdmin(p)?.why], [STREAMER, "source", undefined, "fallback"], "no AI check; an admin settles the market");
+});
+
 test("fallback: coins without the AI (Kick, no keys) go to the streamer at the lock, why 'no-keys'", () => {
   let game = liveGame(OFF);
   const id = game.live[0].id;
@@ -217,7 +232,9 @@ test("markets: the referee's YES is only a proposal: 2 h to challenge, then fina
   assert.equal(needsAdmin(p), null);
   assert.equal(marketFinal(p, end - 1, MARKETS), null, "still in its challenge window");
   assert.equal(marketFinal(p, end, MARKETS), "yes");
-  assert.deepEqual(startMarkets(game, end, MARKETS).jobs.filter((j) => j.kind === "resolve"), [{ id, kind: "resolve", outcome: "yes" }]);
+  assert.deepEqual(startMarkets(game, end, MARKETS).jobs, [{ id, kind: "close" }], "trading closes first");
+  const closed = applyMarketDone(game, { id, kind: "close" }, null, end, MARKETS).game;
+  assert.deepEqual(startMarkets(closed, end, MARKETS).jobs, [{ id, kind: "resolve", outcome: "yes" }]);
   const challenged = apply(game, { kind: "challenge", id, reason: "He never left the ground" }, actor("b1", true), LOCK + 6 * MIN, MARKETS).game;
   assert.equal(marketFinal(challenged.resolved[0], end, MARKETS), null, "waits for an admin");
 });

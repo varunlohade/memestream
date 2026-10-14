@@ -114,6 +114,11 @@ export type PredictionsView = {
   }[];
   /** The coin's mods (sent to the streamer and mods only). */
   mods: string[];
+  /**
+   * Settled markets older than the recent results (kept up to MAX_MARKET_HISTORY), so holders can
+   * still find them and redeem.
+   */
+  pastMarkets: { id: string; text: string; outcome: Outcome; resolvedAt: number; source: string | null }[];
   leaderboard: { stream: LeaderRow[]; allTime: LeaderRow[]; me: { stream: Standing | null; allTime: Standing | null } };
 };
 

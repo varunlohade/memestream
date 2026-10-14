@@ -34,3 +34,14 @@ test("audit 1: shares count in any token account the wallet owns, not only its a
   assert.equal(await holdsAnyOf(first.connection, owner, [yes, no]), true);
   assert.deepEqual(first.asked, [yes.toBase58()], "stops at the first hit");
 });
+
+test("audit 3-3: a stake threshold ignores dust, summed over every account of one side", async () => {
+  const owner = Keypair.generate().publicKey;
+  const [yes, no] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  const min = BigInt(10_000_000); // 0.01 of a share
+  const dusted = rpc(new Map([[yes.toBase58(), [account(BigInt(1))]], [no.toBase58(), [account(BigInt(5))]]]));
+  assert.equal(await holdsAnyOf(dusted.connection, owner, [yes, no], min), false, "dust is no stake");
+  assert.equal(await holdsAnyOf(dusted.connection, owner, [yes, no]), true, "but it is some shares");
+  const split = rpc(new Map([[no.toBase58(), [account(BigInt(6_000_000)), account(BigInt(4_000_000))]]]));
+  assert.equal(await holdsAnyOf(split.connection, owner, [yes, no], min), true, "a stake split over two accounts counts");
+});

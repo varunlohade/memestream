@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS, FRAME_GAP_MS, FRAMES_AFTER_LOCK_MS } from "@/lib/predictions/rules";
+import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS, REVIEW_RETRY_MS, FRAME_GAP_MS, FRAMES_AFTER_LOCK_MS } from "@/lib/predictions/rules";
 import { newProfile } from "@/lib/predictions/watch";
 import { aiCheck, OPENROUTER_URL } from "./ai-check";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
@@ -76,6 +76,8 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
   const store = make(clock);
   const { models, ai } = fakeModels();
   const deferred: (() => Promise<void>)[] = [];
+  /** The next this many question reviews fail. */
+  let reviewFailures = 0;
   const coin: CoinFacts = { creator: STREAMER, status: "trading", streamUrl };
   const service = predictionsService({
     store,
@@ -87,6 +89,7 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     // The review takes its call from the budget, as the real client does before every attempt.
     review: async (_question, spend) => {
       if (!(await spend())) throw new ReviewBudgetSpent("The daily AI budget is used up");
+      if (reviewFailures > 0 && reviewFailures--) throw new Error("jev is down");
       return { approved: true, windowMin: 1 };
     },
     ai: withAi ? ai : null,
@@ -122,7 +125,8 @@ function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null
     for (const [i, v] of BETTORS.entries()) await service.act(COIN, v, { kind: "bet", id: liveId, side: i % 2 ? "yes" : "no", amount: 100 });
     return liveId;
   };
-  return { clock, coin, service, models, settle, balance, viewAt, playToLive, store, id: () => liveId };
+  const failReviews = (n: number) => void (reviewFailures = n);
+  return { clock, coin, service, models, settle, balance, viewAt, playToLive, store, failReviews, id: () => liveId };
 }
 
 for (const [name, make] of STORES) {
@@ -311,6 +315,18 @@ for (const [name, make] of STORES) {
     assert.deepEqual(await store.members("predictions:work"), [COIN], "the unknown coin is dropped, the live one kept");
     await store.commit(unlist);
     assert.deepEqual(await service.sweepLive(10), { swept: 0, listed: 0 }, "once only: the marker stops a second backfill");
+  });
+
+  test(`${name}: audit 3-7: a question whose first review failed is retried by the sweep, with nobody watching`, async () => {
+    const { service, settle, failReviews, clock, store } = setup(make);
+    failReviews(1);
+    await service.act(COIN, STREAMER, { kind: "launch", text: "Is there a person on screen?" });
+    await settle(); // the first review fails; nobody opens the coin after this
+    assert.deepEqual(await store.members("predictions:work"), [COIN], "a question under review is work");
+    clock.t += REVIEW_RETRY_MS;
+    await service.sweepLive(10);
+    const [doc] = await store.read([`coin:${COIN}`]);
+    assert.equal(JSON.parse(doc.json!).live.length, 1, "approved and live, by the sweep alone");
   });
 
   test(`${name}: audit 6: the sweep keeps visiting a coin with no live prediction while a check is due, then drops it`, async () => {

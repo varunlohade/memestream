@@ -14,8 +14,9 @@ const STREAMER = "streamer";
 function fakeMarkets() {
   const calls: string[] = [];
   const fail = { create: 0, close: 0, resolve: 0 };
-  /** Wallets holding YES or NO shares. */
+  /** Wallets holding a real stake of YES or NO; `dust`: wallets holding only a dust amount someone sent them. */
   const holders = new Set<string>();
+  const dust = new Set<string>();
   const deps: MarketDeps = {
     create: async (mint, id, symbol) => {
       calls.push(`create ${id} ${symbol}`);
@@ -41,12 +42,12 @@ function fakeMarkets() {
       calls.push(`resolve ${record.predictionId} ${outcome}`);
       if (fail.resolve-- > 0) throw new Error("devnet said no");
     },
-    holdsShares: async (_record, wallet) => holders.has(wallet),
+    holdsShares: async (_record, wallet, atLeast) => holders.has(wallet) || (atLeast === "any" && dust.has(wallet)),
     redeemOracle: async (record) => {
       calls.push(`redeem ${record.predictionId}`);
     },
   };
-  return { calls, fail, deps, holders };
+  return { calls, fail, deps, holders, dust };
 }
 
 const ADMIN = "admin1";
@@ -266,7 +267,7 @@ test("audit F1: no AI on the coin: the streamer's call on a market is only a pro
   assert.ok(calls.includes(`resolve ${id} yes`), "the admin's decision resolves it");
 });
 
-test("audit 1: a wallet holding shares of the coin's open market can't be made a mod (read on chain); an admin holding shares can't resolve", async () => {
+test("audit 1: a wallet holding shares of the coin's open market can't be made a mod (read on chain); an admin who traded it can't resolve", async () => {
   const { deps, holders } = fakeMarkets();
   const { clock, service, look, launch } = setup(deps);
   const id = await launch();
@@ -277,8 +278,26 @@ test("audit 1: a wallet holding shares of the coin's open market can't be made a
   assert.deepEqual((await service.view(COIN, STREAMER)).mods, ["clean"]);
   clock.t += MIN;
   await look();
-  holders.add(ORACLE);
+  await service.recordParticipant(COIN, id, ORACLE); // the admin built a trade on this market
   await assert.rejects(service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" }), /hold shares of this market/);
+});
+
+test("audit 3-3: dust sent unasked never blocks an admin; a challenger becomes a participant and can't decide", async () => {
+  const { calls, deps, holders, dust } = fakeMarkets();
+  const { clock, service, look, launch, fund } = setup(deps);
+  const id = await launch();
+  await look();
+  clock.t += MIN;
+  await look();
+  dust.add(ORACLE);
+  holders.add(ADMIN); // a balance alone, never traded through us
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
+  await fund(ADMIN, 300);
+  await service.act(COIN, ADMIN, { kind: "challenge", id, reason: "He clearly lost that round" });
+  await assert.rejects(service.act(COIN, ADMIN, { kind: "decide", id, outcome: "no" }), /challenge they made|hold shares/);
+  await service.act(COIN, ORACLE, { kind: "decide", id, outcome: "yes" }); // dust doesn't block the other admin
+  await look();
+  assert.ok(calls.includes(`resolve ${id} yes`), "decided and resolved, no refund forced by dust");
 });
 
 test("audit 4: a market still in its challenge window stays in the view after 5 newer results; plain old results don't", async () => {
@@ -299,6 +318,44 @@ test("audit 4: a market still in its challenge window stays in the view after 5 
   const view = await service.view(COIN, "viewer");
   assert.equal(view.resolved.length, 6, "the 5 newest, plus the older one whose market is up");
   assert.deepEqual([view.resolved.at(-1)?.id, view.resolved.at(-1)?.verdict?.status], [first, "proposed"]);
+});
+
+test("audit 3-1: while the close keeps failing, the resolve is never sent; once it closes, it resolves", async () => {
+  const { calls, deps, fail } = fakeMarkets();
+  const { clock, service, look, launch } = setup(deps);
+  const id = await launch();
+  await look();
+  fail.close = 1_000;
+  clock.t += MIN;
+  await look();
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
+  clock.t += MARKET_CHALLENGE_MS;
+  for (let i = 0; i < 3; i++) {
+    clock.t += MARKET_RETRY_MS;
+    await look();
+  }
+  assert.ok(calls.filter((c) => c === `close ${id}`).length >= 3, "the close is retried");
+  assert.ok(!calls.some((c) => c.startsWith("resolve")), "never resolved with the liquidity still in the pool");
+  fail.close = 0;
+  clock.t += MARKET_RETRY_MS;
+  await look();
+  assert.deepEqual(calls.slice(-3), [`close ${id}`, `resolve ${id} yes`, `redeem ${id}`], "closed, then resolved in the same run");
+});
+
+test("audit 3-8: a settled market is still found to redeem after 21+ newer results", async () => {
+  const { clock, look, id, store, service } = await proposed();
+  clock.t += MARKET_CHALLENGE_MS;
+  assert.equal((await look()).resolved[0].market, "resolved");
+  // 22 newer results (as if many predictions ran since), written straight into the game.
+  const [doc] = await store.read([`coin:${COIN}`]);
+  const stored = JSON.parse(doc.json!);
+  const old = stored.resolved[0];
+  const newer = Array.from({ length: 22 }, (_, i) => ({ ...old, id: String(100 + i), market: undefined, window: undefined, open: null, resolvedAt: clock.t }));
+  await store.commit({ docs: [{ key: `coin:${COIN}`, v: doc.v, json: JSON.stringify({ ...stored, resolved: [...newer, ...stored.resolved] }) }], moves: [], won: [] });
+  clock.t += MIN;
+  const view = await service.view(COIN, "viewer");
+  assert.ok(!view.resolved.some((r) => r.id === id), "not among the recent results");
+  assert.deepEqual(view.pastMarkets.map((m) => [m.id, m.outcome]), [[id, "yes"]], "but listed to redeem");
 });
 
 test("the view shows the proposal, final at the window's end; then final", async () => {

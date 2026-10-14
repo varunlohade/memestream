@@ -143,6 +143,11 @@ export const MAX_UPVOTERS_STORED = 20;
 export const MAX_UPVOTES = 100;
 /** Past results kept per coin, as summaries (results still in their flag window are kept too). */
 export const MAX_HISTORY = 20;
+/**
+ * Settled markets kept past MAX_HISTORY, newest first: holders may come back much later to redeem,
+ * and the app finds their market here. Each is a short summary (no per-bettor lists).
+ */
+export const MAX_MARKET_HISTORY = 50;
 /** Per-stream leaderboard entries kept. */
 export const MAX_WON_ENTRIES = 100;
 /** A wallet holds the coin, for suggesting and upvoting, with at least this many whole coins (UI units, after the mint's decimals). */

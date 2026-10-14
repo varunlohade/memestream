@@ -391,6 +391,7 @@ export const AI_WHY: Record<NonNullable<NonNullable<MarketVerdictView>["aiWhy"]>
   deadline: "no answer in time",
   budget: "the daily AI budget ran out",
   "no-keys": "the AI is off for this coin (no frames or no keys)",
+  source: "it resolves from its official source, not the stream",
 };
 
 /**

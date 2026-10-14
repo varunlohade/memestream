@@ -39,8 +39,11 @@ export type MarketDeps = {
   create: (mint: string, predictionId: string, symbol: string) => Promise<Omit<MarketRecord, "lockAt" | "source">>;
   close: (record: MarketRecord) => Promise<unknown>;
   resolve: (record: MarketRecord, outcome: MarketOutcome) => Promise<unknown>;
-  /** Whether `wallet` holds any YES or NO of the market (one budgeted read). */
-  holdsShares: (record: MarketRecord, wallet: string) => Promise<boolean>;
+  /**
+   * Whether `wallet` holds YES or NO of the market (budgeted reads): "any" amount (a challenger must
+   * hold some), or a real "stake" (above a dust amount anyone could send unasked).
+   */
+  holdsShares: (record: MarketRecord, wallet: string, atLeast: "any" | "stake") => Promise<boolean>;
   /** The oracle redeems the YES/NO its liquidity came back as (nothing held: nothing sent). */
   redeemOracle: (record: MarketRecord) => Promise<unknown>;
 };
@@ -164,8 +167,14 @@ const MAX_CACHE_ENTRIES = 1_000;
  */
 const QUEUE_SHOWN = 20;
 const RESOLVED_SHOWN = 5;
-/** A result's market that people may still act on: open (proposal, challenge, admin) or resolved (redeem). */
-const marketActionable = (p: Summary) => p.market?.step === "open" || p.market?.step === "resolved";
+/** A result's market that still waits on people: open (proposal, challenge, an admin's decision). */
+const marketActionable = (p: Summary) => p.market?.step === "open";
+
+/** Older settled markets (past the recent results), for holders who come back to redeem. */
+const pastMarketsView = (game: Game): PredictionsView["pastMarkets"] =>
+  game.resolved
+    .filter((p, i) => i >= RESOLVED_SHOWN && p.market?.step === "resolved")
+    .map((p) => ({ id: p.id, text: p.text, outcome: p.outcome, resolvedAt: p.resolvedAt, source: p.source ?? null }));
 const LEADERS_SHOWN = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** The daily AI budget's defaults (MEMESTREAM_AI_DAILY_CALLS, MEMESTREAM_AI_DAILY_CALLS_PER_COIN). */
@@ -447,16 +456,16 @@ export function predictionsService(deps: ServiceDeps) {
     const aiCheck = aiOn(coin);
     // Holding the coin is checked only where it matters (one cached read), not on every bet.
     const holder = action.kind === "suggest" || action.kind === "upvote" ? await deps.holds(mint, wallet) : false;
-    // A challenge needs shares of that market; a decision (the streamer's, or an admin's resolve or
-    // decide) must not come from a holder: one read of the wallet's YES/NO, only for those actions.
+    // A challenge needs shares of that market; a decision must not come from someone with a stake in
+    // it (stakeIn): reads only for those actions.
     let shares = false;
-    const decides = action.kind === "challenge" || action.kind === "witness" || action.kind === "resolve" || action.kind === "decide";
-    if (decides && deps.markets) {
-      const record = await market(mint, action.id);
-      shares = record ? await deps.markets.holdsShares(record, wallet) : false;
+    if (action.kind === "challenge" || action.kind === "witness" || action.kind === "resolve" || action.kind === "decide") {
+      const record = deps.markets ? await market(mint, action.id) : null;
+      const role = action.kind === "challenge" ? "challenger" : action.kind === "witness" ? "staff" : "admin";
+      shares = record ? await stakeIn(mint, record, wallet, role) : false;
     }
-    // A new mod decides results too: no shares of any of the coin's open markets (no points bet is no proof).
-    const modShares = action.kind === "mod" && action.add && deps.markets ? await holdsAnyShares(mint, creator, action.wallet) : false;
+    // A new mod decides results too: no stake in any of the coin's open markets (no points bet is no proof).
+    const modShares = action.kind === "mod" && action.add && deps.markets ? await stakeInAny(mint, creator, action.wallet) : false;
     // One id per request: if a commit lands but its reply is lost and the store client re-sends it,
     // the re-send answers "replay" and the action counts once.
     const once = { key: `act:${randomUUID()}`, ttlMs: ACT_ONCE_TTL_MS };
@@ -465,7 +474,10 @@ export function predictionsService(deps: ServiceDeps) {
       const [balance] = await store.balances([wallet]);
       const eligible = isEligible(parseProfile(watchDoc.json));
       const result = apply(game, action, { wallet, eligible, holder, balance, shares, modShares }, now(), envOf(presenceDoc.json, { aiCheck }));
-      const status = await store.commit({ ...save(result.game), ...ledgerChanges(result), nonce: once });
+      const saved = save(result.game);
+      // A challenger took part in that market on purpose, as a trader did: recorded in the same commit.
+      const sets = action.kind === "challenge" ? [...saved.sets, { key: participantsKey(mint, action.id), member: wallet, add: true }] : saved.sets;
+      const status = await store.commit({ docs: saved.docs, sets, ...ledgerChanges(result), nonce: once });
       if (status === "ok" || status === "replay") return true;
       if (status === "insufficient") throw new GameError(action.kind === "bet" ? "You can bet at most half your points" : "Not enough points");
       return RETRY;
@@ -768,14 +780,35 @@ export function predictionsService(deps: ServiceDeps) {
     return doc.json ? (JSON.parse(doc.json) as MarketRecord) : null;
   }
 
-  /** Whether `wallet` holds shares of any of the coin's markets not yet resolved (one budgeted read per market). */
-  async function holdsAnyShares(mint: string, creator: string, wallet: string): Promise<boolean> {
+  /** Wallets that took part in a market on purpose: traded through our API, or challenged its result. */
+  const participantsKey = (mint: string, predictionId: string) => `market-traders:${mint}:${predictionId}`;
+  /** Records a wallet as a participant of a market (it built a trade, or challenged). */
+  const recordParticipant = (mint: string, predictionId: string, wallet: string) =>
+    store.commit({ docs: [], sets: [{ key: participantsKey(mint, predictionId), member: wallet, add: true }], moves: [], won: [] });
+
+  /**
+   * Whether `wallet` has a stake in a market, for its role:
+   * - "challenger": holds any shares (a challenge needs a position);
+   * - "admin" (resolve, decide): took part on purpose (traded through our API or challenged). A balance
+   *   alone never blocks an admin: dust sent unasked must not keep every admin from deciding, which
+   *   would push a challenged market to a refund;
+   * - "staff" (the streamer's or a mod's call, mod promotion): took part, or holds more than dust.
+   */
+  async function stakeIn(mint: string, record: MarketRecord, wallet: string, role: "challenger" | "admin" | "staff"): Promise<boolean> {
     const markets = deps.markets;
     if (!markets) return false;
+    if (role === "challenger") return markets.holdsShares(record, wallet, "any");
+    const took = (await store.members(participantsKey(mint, record.predictionId))).includes(wallet);
+    if (took || role === "admin") return took;
+    return markets.holdsShares(record, wallet, "stake");
+  }
+
+  /** Whether `wallet` has a stake (as staff) in any of the coin's markets not yet resolved. */
+  async function stakeInAny(mint: string, creator: string, wallet: string): Promise<boolean> {
     const { game } = await readGame(mint, creator, []);
     const ids = [...game.live, ...game.resolved].filter((p) => p.market?.step === "open").map((p) => p.id);
     const records = (await Promise.all(ids.map((id) => market(mint, id)))).filter((r): r is MarketRecord => r !== null);
-    return (await Promise.all(records.map((r) => markets.holdsShares(r, wallet)))).some(Boolean);
+    return (await Promise.all(records.map((r) => stakeIn(mint, r, wallet, "staff")))).some(Boolean);
   }
 
   /** The coin's streamer or one of its mods: they resolve its predictions, so they may not bet on its markets either. */
@@ -787,7 +820,7 @@ export function predictionsService(deps: ServiceDeps) {
   }
 
   /** Claims every due market step (so no other server starts it), then runs them one by one: they all sign as the oracle. */
-  async function marketRun(mint: string, coin: CoinFacts) {
+  async function marketRun(mint: string, coin: CoinFacts, redeemed = new Set<string>()) {
     const markets = deps.markets;
     if (!markets) return;
     const { game, save, extra: [presenceDoc] } = await readGame(mint, coin.creator, [presenceKey(mint)]);
@@ -796,14 +829,18 @@ export function predictionsService(deps: ServiceDeps) {
     const status = await store.commit({ ...save(claim.game), ...ledgerChanges(claim) });
     if (status !== "ok") return; // the coin changed meanwhile: the next view claims again
     const failed = new Set<string>();
-    for (const job of claim.jobs) if (!(await marketStep(markets, mint, coin, claim.game, job))) failed.add(job.id);
+    // After a failed step, that market's later steps wait: its next step is worked out again from what's saved.
+    for (const job of claim.jobs) if (!failed.has(job.id) && !(await marketStep(markets, mint, coin, claim.game, job))) failed.add(job.id);
     // A failed step gives the claim back early, so it's tried again soon (the claim itself outlasts any run).
     for (const id of failed) await commitGame(mint, coin.creator, (g, env) => applyMarketTryFailed(g, id, now(), env));
+    // A close that just went through may make a resolve due (it never is before): one more pass.
+    if (claim.jobs.some((j) => j.kind === "close" && !failed.has(j.id))) await marketRun(mint, coin, redeemed);
     // A market both closed and resolved: the oracle takes its seed back (once more is harmless).
     const { game: after } = await readGame(mint, coin.creator, []);
     for (const id of new Set(claim.jobs.filter((j) => j.kind !== "create").map((j) => j.id))) {
       const m = after.resolved.find((p) => p.id === id)?.market;
-      if (m?.step !== "resolved" || !m.closed) continue;
+      if (m?.step !== "resolved" || !m.closed || redeemed.has(id)) continue;
+      redeemed.add(id);
       const record = await market(mint, id);
       if (record) await markets.redeemOracle(record).catch((error: Error) => console.warn(`predictions: the oracle's redeem for prediction ${id} failed (${error.message}); scripts/markets-recover.mts can finish it`));
     }
@@ -940,7 +977,9 @@ export function predictionsService(deps: ServiceDeps) {
         try {
           const coin = await facts(mint);
           if (aiOn(coin)) await runAiOnce(mint, coin);
-          await ticked(mint, coin);
+          const { game } = await ticked(mint, coin);
+          // Question reviews due (a first check, or a retry after a failed one) run now, not after a view.
+          if (reviewsDue(game, now())) await reviewDue(mint, coin);
           await dropIfIdle(mint, coin.creator);
         } catch (error) {
           if (error instanceof UnknownCoinError) await store.commit({ docs: [], sets: [{ key: WORK_COINS_KEY, member: mint, add: false }], moves: [], won: [] });
@@ -1057,6 +1096,7 @@ export function predictionsService(deps: ServiceDeps) {
       queueSize: visibleSuggestions(game, wallet, staff).length,
       queue: queueView(game, wallet, staff),
       resolved: resolvedView(game, wallet, staff, t, env, me?.admin ?? false),
+      pastMarkets: pastMarketsView(game),
       mods: staff ? game.mods : [],
       leaderboard: {
         stream: topWinners(streamBoard),
@@ -1093,7 +1133,7 @@ export function predictionsService(deps: ServiceDeps) {
   /** The signed-in wallet behind a session token, or null. */
   const walletOf = (token: string | null) => walletFromToken(token, now(), deps.secret);
 
-  return { session, beat, act, view, walletOf, reviewDue, aiRun, marketRun, market, staffOf, sweepMarkets, sweepLive, liveAcross };
+  return { session, beat, act, view, walletOf, recordParticipant, reviewDue, aiRun, marketRun, market, staffOf, sweepMarkets, sweepLive, liveAcross };
 }
 
 export type PredictionsService = ReturnType<typeof predictionsService>;
