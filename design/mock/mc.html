@@ -212,6 +212,99 @@ h1 .unvic canvas{width:36px;height:36px}
 .tbar b{display:block;height:100%;background:#80FF20}
 .xpt{color:#80FF20}
 @media (max-width:520px){html,body{overflow-x:hidden;max-width:100vw}.tape{max-width:100vw}body.B .home{display:none}.trow{padding-left:16px;font-size:22px;gap:16px}.tape{height:40px}.tbar{width:60px}}
+
+/* Prediction panel options (?pm=A|B|C), free points only */
+.pm .pq{font-size:28px;color:#fff;line-height:1.1}
+.pm .pclock{font-size:22px;margin:6px 0 16px}
+.pm .prow{display:flex;justify-content:space-between;font-size:24px;margin:8px 0}
+.pm .pamt{margin:14px 0}
+.pm .mbtn.no{background:#B3261E}
+.pm .mbtn.sy,.pm .mbtn.sn{background:#3E3E44}
+.pm .mbtn.sy{color:#5CFF6A}.pm .mbtn.sn{color:#FF5A4E}
+.pfree{font-size:22px;color:var(--mute);text-align:center;margin-top:14px}
+.split{height:24px;border:4px solid #000;background:#FF5A4E;position:relative;overflow:hidden;margin-top:6px}
+.split b{display:block;height:100%;background:#5CFF6A}
+.pm h3{font-size:22px;margin-bottom:10px}
+.lbr{display:grid;grid-template-columns:36px 1fr auto;font-size:24px;padding:6px 0;border-top:4px solid rgba(255,255,255,.07)}
+.lbr.you{color:#80FF20}
+.ptabs{display:flex;gap:18px;margin-bottom:14px;font-size:16px}
+.ptabs span{color:var(--mute);padding-bottom:6px}.ptabs .on{color:#fff;border-bottom:4px solid #80FF20}
+.pm .xpw{margin-top:4px}.pm .xpn{font-size:24px}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.pcs{position:relative;height:72px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;font-size:30px;color:#fff;overflow:hidden}
+.pcs b{position:absolute;left:4px;top:4px;bottom:4px;opacity:.35}
+.pcs b.y{background:#5CFF6A}.pcs b.n{background:#FF5A4E}
+.pcs span{position:relative}
+.lbline{display:flex;align-items:center;gap:12px;font-size:22px;margin-top:16px;padding-top:12px;border-top:4px solid rgba(255,255,255,.07);white-space:nowrap}
+
+.pmA{display:grid;grid-template-columns:1.35fr 1fr;gap:24px;margin-top:24px;align-items:start}
+.pmB,.pmC{margin-top:24px}
+.pcols{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+.pm .mbtn.sy,.pm .mbtn.sn{background:#1C1C1F;text-shadow:none}
+.pmC .pc{max-width:560px}
+
+/* Streamer-question predictions (?pm2=A|B|C&role=viewer|streamer) */
+.small{font-size:20px}
+.phead{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px}.phead span{font-size:22px;color:var(--mute)}
+.mk{padding:14px 0;border-top:4px solid rgba(255,255,255,.07)}
+.mk .mq{font-size:26px;color:#fff;line-height:1.1}
+.mk.card .split{margin:10px 0 2px}
+.mk .tabs{margin:10px 0 0}
+.pmA2{display:grid;grid-template-columns:1.35fr 1fr;gap:24px;margin-top:24px;align-items:start}
+.pmB2,.pmC2{margin-top:24px}
+.subh{font-size:22px;color:var(--mute);margin:6px 0 4px}
+.rr{display:grid;grid-template-columns:1fr auto 150px;gap:12px;align-items:center;font-size:23px;padding:6px 0}
+.otag{font-size:20px;padding:2px 8px;border:3px solid #000;line-height:1}
+.oy{background:#80FF20;color:#000}.ono{background:#B3261E;color:#fff}.oc{background:#3E3E44;color:#D8D8DC}
+.brow{display:grid;grid-template-columns:1.3fr 1fr 210px;gap:20px;align-items:center}
+.bbar .xpw{padding-top:26px}.bbar .xpn{font-size:20px;-webkit-text-stroke:5px #000}
+.bb2{display:grid;grid-template-columns:1fr 1fr;gap:8px}.bb2 .mbtn{height:48px}
+.crow{display:grid;grid-template-columns:1.25fr 1.1fr 170px;gap:18px;align-items:center}
+.cpc .pcs{height:52px;font-size:24px;padding:0 12px}
+.cst{font-size:21px;text-align:right}
+.cres{margin-top:8px;border-top:4px solid rgba(255,255,255,.07);padding-top:8px}
+.ask{padding:4px 0 16px}.askl{font-size:24px;color:#fff;margin-bottom:8px}
+.askrow{display:grid;grid-template-columns:1fr auto 110px;gap:10px;align-items:center;margin-bottom:6px}
+.askrow .in{height:52px;display:flex;align-items:center;padding:0 14px;font-size:24px}.askrow .ph{color:#8E8E93}
+.chips2{display:flex;gap:6px}.chips2 span{width:52px;height:52px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#ccc}.chips2 .on{color:#80FF20}
+.askb{height:52px}
+.pmA2 .askrow{grid-template-columns:1fr;}
+.res3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:10px}.res3 .mbtn{height:48px}
+
+/* Viewer-asked questions that graduate into live polls (?pm3=1&role=viewer|streamer) */
+.pmC3{margin-top:24px}
+.pmC3 .subh{margin-top:18px;font-size:24px;color:#EDEDED}
+.pmC3 .subh .small{color:var(--mute)}
+.askrow3{display:grid;grid-template-columns:1fr 200px;gap:10px;margin-bottom:6px}
+.askrow3 .in{height:52px;display:flex;align-items:center;padding:0 14px;font-size:24px}.askrow3 .ph{color:#8E8E93}
+.askrow3 .mbtn{height:52px;font-size:14px}
+.lrow{display:grid;grid-template-columns:1fr 1.25fr;gap:16px;align-items:center}
+.ltrade{display:grid;grid-template-columns:1fr 64px 76px;gap:8px;align-items:center}
+.lamt{height:52px;display:flex;align-items:center;justify-content:center;font-size:24px;color:#fff}
+.lsell{height:52px!important;font-size:13px!important}
+.ltrade .pcs span{font-size:21px}
+.rrow{display:grid;grid-template-columns:1fr 250px 170px;gap:16px;align-items:center}
+.rmeter{display:flex;align-items:center;gap:10px;font-size:24px}
+.seg10{display:inline-grid;grid-template-columns:repeat(10,1fr);gap:3px;width:180px;height:20px;background:#000;border:3px solid #000}
+.seg10 i{background:#1A1A1A}.seg10 i.f{background:#80FF20}
+.mbtn.uv{height:48px;font-size:14px;background:#3E3E44}
+
+/* Twitch-style predictions, one live at a time (?pm4=1&role=viewer|streamer) */
+.livecard{border:4px solid #000;background:#1C1C1F;box-shadow:inset 4px 4px 0 #2A2A2D;padding:16px 18px;margin-bottom:6px}
+.lchead{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.lctag{background:#C62828;color:#fff;font-family:var(--hf),monospace;font-size:14px;padding:4px 8px;border:3px solid #000}
+.lct{font-size:28px;color:#fff}
+.mq.big{font-size:30px;margin-bottom:12px}
+.cpc2{display:grid;grid-template-columns:1fr 1fr;gap:10px}.cpc2 .pcs{height:60px;font-size:24px;padding:0 14px}
+.lcbet{display:grid;grid-template-columns:72px 1fr auto;gap:14px;align-items:center;margin-top:10px;font-size:22px}
+.qrow{display:grid;grid-template-columns:1fr 120px 210px;gap:14px;align-items:center;font-size:22px}
+.qrow .mq{font-size:24px}
+.qb{display:grid;grid-template-columns:1fr 1fr;gap:8px}.qb .mbtn{height:44px;font-size:13px}
+.qrow .mbtn.uv{height:44px}
+.winrow{display:flex;align-items:center;gap:14px;font-size:22px;margin:6px 0}
+.rr4{display:grid;grid-template-columns:1fr auto 100px 140px 50px;gap:10px;align-items:center;font-size:23px;padding:6px 0}
+.flag{font-size:20px;color:var(--mute);text-decoration:underline;text-align:right}
+.dsp{font-size:18px;color:#FF5A4E}
 </style>
 <body>
 <script>
@@ -292,13 +385,124 @@ const UNV = q.get('unv');
 const TIP = `<div class="tip">We haven't checked that this streamer owns the channel.</div>`;
 const unvTag = (tip) => `<span class="unvtag">Unverified${tip?TIP:''}</span>`;
 const unvIcon = (tip) => `<span class="unvic">${sprite('unv')}${tip?TIP:''}</span>`;
+const PM = q.get('pm') || q.get('pm3') || q.get('pm4');
+const LB = [['7xKp3f',4210],['Gq91Lm',3380],['mR8vYd',2950],['Hc2wQa',1720],['Bn4tZe',1405]];
+const MK = [
+  {q:'Will I eat a banana on stream?', t:'4m 10s', y:72, yp:'1,440', np:'560', st:'100 on Yes'},
+  {q:'Diamond rank tonight?', t:'38m', y:41, yp:'820', np:'1,180', st:''},
+  {q:'Will chat make me sing?', t:'1h 12m', y:23, yp:'230', np:'770', st:'50 on No'}];
+const RES = [['First game a win?','Yes','You won 120','up'],['Rage quit before 8 pm?','No','You lost 100','mute'],['Pet on camera?','Cancelled','Refunded','mute']];
+const ROLE = q.get('role') || 'viewer';
+const outTag = (o) => `<span class="otag ${o==='Yes'?'oy':o==='No'?'ono':'oc'}">${o}</span>`;
+const lb5 = () => LB.map((r,i)=>`<div class="lbr num"><span class="mute">${i+1}</span><span>${r[0]}</span><span class="r">${r[1].toLocaleString()}</span></div>`).join('') + `<div class="lbr num you"><span class="mute">12</span><span>You</span><span class="r">800</span></div>`;
+const askForm = (compact) => `<div class="ask${compact?' cmp':''}"><div class="askl">Ask your viewers</div><div class="askrow"><div class="slot in"><span class="ph">Will I eat a banana on stream?</span></div>
+  <div class="chips2"><span class="slot">5m</span><span class="slot on">15m</span><span class="slot">1h</span><span class="slot">24h</span></div><div class="mbtn buy askb">Ask</div></div><div class="mute small">3 of 5 open. 12 of 60 asked this stream.</div></div>`;
+const closedRow = () => `<div class="mk closed"><div class="mq">Will chat pick the sword?</div><div class="mute small num">Closed. 1,240 points staked. Resolve within 24 h or it cancels.</div>
+  <div class="res3"><div class="mbtn buy">Yes</div><div class="mbtn no">No</div><div class="mbtn off">Cancel</div></div></div>`;
+function predict2(c){
+  const V = ROLE === 'viewer', free = '<div class="pfree">Free points. No money, no prizes.</div>';
+  const head = `<div class="phead"><h3>Predictions</h3><span class="num">${V?'Your points 800':'You can\'t stake on your own questions'}</span></div>`;
+  const resolved = (cls) => `<div class="${cls}"><div class="subh">Resolved</div>${RES.map(r=>`<div class="rr num"><span>${r[0]}</span>${outTag(r[1])}<span class="${r[3]} r">${V?r[2]:''}</span></div>`).join('')}</div>`;
+  if (PM2 === 'A') {
+    const card = m => `<div class="mk card"><div class="mq">${m.q}</div><div class="mute small num">${m.auto?'Automatic. ':''}Closes in ${m.t}</div>
+      <div class="split"><b style="width:${m.y}%"></b></div><div class="prow num"><span class="up">Yes ${m.y}%  ${m.yp}</span><span class="down">${m.np}  No ${100-m.y}%</span></div>
+      ${V?`<div class="prow num"><span class="mute">Your stake</span><span>${m.st||'None'}</span></div><div class="tabs"><div class="mbtn buy">Yes</div><div class="mbtn no">No</div></div>`:''}</div>`;
+    return `<div class="pmA2"><div class="p pm">${head}${V?'':askForm()}${V?'':closedRow()}${MK.map(card).join('')}${free}</div>
+      <div><div class="p pm"><h3>Leaderboard</h3>${lb5()}</div><div class="p pm" style="margin-top:24px">${resolved('')}</div></div></div>`;
+  }
+  if (PM2 === 'B') {
+    const row = m => `<div class="mk brow"><div><div class="mq">${m.q}</div><div class="mute small num">${m.auto?'Automatic. ':''}Closes in ${m.t}${V&&m.st?'. You: '+m.st:''}</div></div>
+      <div class="bbar"><div class="xpw"><div class="xpn num">Yes ${m.y}%</div><div class="xp sm"><b style="width:${m.y}%"></b><i></i></div></div></div>
+      ${V?`<div class="bb2"><div class="mbtn sy">Yes</div><div class="mbtn sn">No</div></div>`:''}</div>`;
+    return `<div class="p pm pmB2">${head}<div class="ptabs"><span class="on hf">Open 3</span><span class="hf">Resolved</span><span class="hf">Leaderboard</span></div>
+      ${V?'':askForm(1)}${V?'':closedRow()}${MK.map(row).join('')}${free}</div>`;
+  }
+  const row = m => `<div class="mk crow"><div class="cq"><div class="mq">${m.q}</div><div class="mute small num">${m.auto?'Automatic. ':''}Closes in ${m.t}</div></div>
+      <div class="pc cpc"><div class="slot pcs"><b class="y" style="width:${m.y}%"></b><span>Yes</span><span class="num">${m.y}%</span></div><div class="slot pcs"><b class="n" style="width:${100-m.y}%"></b><span>No</span><span class="num">${100-m.y}%</span></div></div>
+      <div class="cst num ${m.st?'':'mute'}">${V?(m.st||'Tap to stake 100'):''}</div></div>`;
+  return `<div class="p pm pmC2">${head}${V?'':askForm(1)}${V?'':closedRow()}${MK.map(row).join('')}${resolved('cres')}${free}
+    <div class="lbline num"><span class="mute">Top points</span>1 7xKp3f 4,210<i class="tsep"></i>2 Gq91Lm 3,380<i class="tsep"></i>3 mR8vYd 2,950<i class="tsep"></i><span class="up">You 800, 12th</span></div></div>`;
+}
+const PM2 = q.get('pm2'), PM3 = q.get('pm3');
+function predict4(c){
+  const V = ROLE === 'viewer';
+  const head = `<div class="phead"><h3>Predictions</h3><span class="num">${V?'Your points 780. You earn points by watching.':'You can\'t bet on your own coin'}</span></div>`;
+  const yes = 41;
+  const live = `<div class="livecard"><div class="lchead"><span class="lctag">Live</span><span class="num lct">1:42 left</span></div>
+    <div class="mq big">Will she hit Diamond tonight?</div>
+    <div class="pc cpc2"><div class="slot pcs"><b class="y" style="width:${yes}%"></b><span>Yes ${yes}%</span><span class="num">pays 2.4x</span></div>
+      <div class="slot pcs"><b class="n" style="width:${100-yes}%"></b><span>No ${100-yes}%</span><span class="num">pays 1.7x</span></div></div>
+    ${V?`<div class="lcbet"><div class="slot lamt num">50</div><span class="mute num">Tap Yes or No to bet 50</span><span class="num r">Your bet: 50 on Yes</span></div>`
+       :`<div class="res3"><div class="mbtn buy">Resolve Yes</div><div class="mbtn no">Resolve No</div><div class="mbtn off">Cancel</div></div>`}</div>`;
+  const Q = [['Will he play the banana song?',5],['Pet on camera before 10 pm?',3],['Rage quit this game?',1]];
+  const queue = Q.map(r=>`<div class="mk qrow"><span class="mq">${r[0]}</span><span class="mute num">${r[1]} upvote${r[1]>1?'s':''}</span>
+      ${V?`<div class="mbtn uv">Upvote</div>`:`<div class="qb"><div class="mbtn buy">Launch</div><div class="mbtn off">Remove</div></div>`}</div>`).join('');
+  const win = V?'':`<div class="winrow"><span class="mute">Window</span><div class="chips2"><span class="slot">1m</span><span class="slot on">2m</span><span class="slot">5m</span><span class="slot">10m</span></div></div>`;
+  const suggest = V?`<div class="askrow3"><div class="slot in"><span class="ph">Suggest a yes/no question</span></div><div class="mbtn buy askb">Suggest, 10 points</div></div>`:'';
+  const R = [['First game a win?','Yes','You won 120','up',''],['Will he cry at the ending?','No','You lost 50','mute','disp'],['Stream past midnight?','Cancelled','Refunded','mute','']];
+  const resolved = R.map(r=>`<div class="rr4 num"><span>${r[0]}</span>${outTag(r[1])}${r[4]?'<span class="otag oc dsp">Disputed</span>':'<span></span>'}<span class="${r[3]} r">${V?r[2]:''}</span>${V?'<span class="flag">Flag</span>':'<span></span>'}</div>`).join('');
+  return `<div class="p pm pmC3">${head}${live}
+    <div class="subh">Up next <span class="small">(the top question with 3 or more upvotes goes live next)</span></div>${win}${queue}${suggest}
+    <div class="subh">Resolved</div>${resolved}
+    <div class="pfree">Free points. No money, no prizes.</div>
+    <div class="lbline num"><span class="mute">Top points</span>1 7xKp3f 4,210<i class="tsep"></i>2 Gq91Lm 3,380<i class="tsep"></i>3 mR8vYd 2,950<i class="tsep"></i><span class="up">You 780, 12th</span></div></div>`;
+}
+function predict3(c){
+  const V = ROLE === 'viewer';
+  const head = `<div class="phead"><h3>Predictions</h3><span class="num">${V?'Your points 780':'You can\'t take part on your own coin'}</span></div>`;
+  const ask = V ? `<div class="askrow3"><div class="slot in"><span class="ph">Ask a yes/no question</span></div><div class="mbtn buy askb">Ask, 20 points</div></div>` : '';
+  const LIVE = [{q:'Will she hit Diamond tonight?', t:'12m', y:64, pos:'12 Yes shares'},{q:'Will chat make her sing?', t:'3m 40s', y:23, pos:''}];
+  const live = LIVE.map(m => `<div class="mk lrow"><div class="lq"><div class="mq">${m.q}</div><div class="mute small num">Live poll. Closes in ${m.t}${V&&m.pos?'. You hold '+m.pos:''}</div></div>
+    ${V?`<div class="ltrade"><div class="pc cpc"><div class="slot pcs"><b class="y" style="width:${m.y}%"></b><span>Buy Yes</span><span class="num">${m.y}%</span></div><div class="slot pcs"><b class="n" style="width:${100-m.y}%"></b><span>Buy No</span><span class="num">${100-m.y}%</span></div></div>
+      <div class="slot lamt num">50</div>${m.pos?'<div class="mbtn off lsell">Sell</div>':'<div class="lsell"></div>'}</div>`
+      :`<div class="ltrade"><div class="pc cpc"><div class="slot pcs"><b class="y" style="width:${m.y}%"></b><span>Yes</span><span class="num">${m.y}%</span></div><div class="slot pcs"><b class="n" style="width:${100-m.y}%"></b><span>No</span><span class="num">${100-m.y}%</span></div></div></div>`}</div>`).join('');
+  const RISE = [{q:'Will he play the banana song?', n:7, t:'18m'},{q:'Pet on camera before 10 pm?', n:4, t:'26m'},{q:'Rage quit this game?', n:2, t:'9m'}];
+  const seg = n => `<span class="seg10">${Array.from({length:10},(_,i)=>`<i class="${i<n?'f':''}"></i>`).join('')}</span>`;
+  const rising = RISE.map(m => `<div class="mk rrow"><div><div class="mq">${m.q}</div><div class="mute small num">${m.t} left to reach 10</div></div>
+    <div class="rmeter num">${seg(m.n)}<span class="xpt">${m.n}/10</span></div>${V?`<div class="mbtn uv">Upvote, 10</div>`:'<div></div>'}</div>`).join('');
+  const resolved = [['First game a win?','Yes','You won 120','up'],['Will he cry at the ending?','No','You lost 50','mute'],['Stream past midnight?','Cancelled','Refunded','mute']]
+    .map(r=>`<div class="rr num"><span>${r[0]}</span>${outTag(r[1])}<span class="${r[3]} r">${V?r[2]:''}</span></div>`).join('');
+  const toResolve = V ? '' : `<div class="mk closed"><div class="mq">Will chat pick the sword?</div><div class="mute small num">Poll closed. Resolve within 24 h or it cancels.</div><div class="res3"><div class="mbtn buy">Yes</div><div class="mbtn no">No</div><div class="mbtn off">Cancel</div></div></div>`;
+  return `<div class="p pm pmC3">${head}${ask}${toResolve}
+    <div class="subh">Live polls</div>${live}
+    <div class="subh">Rising <span class="small">(10 upvotes in 30 min make a live poll)</span></div>${rising}
+    <div class="subh">Resolved</div>${resolved}
+    <div class="pfree">Free points. No money, no prizes.</div>
+    <div class="lbline num"><span class="mute">Top points</span>1 7xKp3f 4,210<i class="tsep"></i>2 Gq91Lm 3,380<i class="tsep"></i>3 mR8vYd 2,950<i class="tsep"></i><span class="up">You 780, 12th</span></div></div>`;
+}
+function predict(c){
+  if (q.get('pm4')) return predict4(c);
+  if (PM3) return predict3(c);
+  if (PM2) return predict2(c);
+  if (!PM) return '';
+  const yes = 64, free = '<div class="pfree">Free points. No money, no prizes.</div>';
+  const q1 = `<div class="pq">Will $${c.tk} graduate before 9 pm?</div><div class="pclock mute num">Closes in 1h 12m</div>`;
+  const stake = `<div class="prow num"><span class="mute">Your stake</span><span>200 on Yes</span></div><div class="prow num"><span class="mute">Your points</span><span>800</span></div>`;
+  const amt = `<div class="pamt"><div class="slot amt num">100<small>points</small></div></div>`;
+  const lbRows = (n) => LB.slice(0,n).map((r,i)=>`<div class="lbr num"><span class="mute">${i+1}</span><span>${r[0]}</span><span class="r">${r[1].toLocaleString()}</span></div>`).join('') + `<div class="lbr num you"><span class="mute">12</span><span>You</span><span class="r">800</span></div>`;
+  if (PM === 'A') return `<div class="pmA"><div class="p pm">${q1}
+      <div class="split"><b style="width:${yes}%"></b><i></i></div>
+      <div class="prow num"><span class="up">Yes ${yes}%  6,400</span><span class="down">3,600  No ${100-yes}%</span></div>
+      ${stake}${amt}<div class="tabs"><div class="mbtn buy">Yes</div><div class="mbtn no">No</div></div>${free}</div>
+    <div class="p pm"><h3>Leaderboard</h3>${lbRows(5)}</div></div>`;
+  if (PM === 'B') return `<div class="p pm pmB"><div class="ptabs"><span class="on hf">Predict</span><span class="hf">Leaderboard</span></div>
+      <div class="pcols"><div>${q1}<div class="xpw"><div class="xpn num">Yes ${yes}%</div>${xp(yes)}</div>
+      <div class="prow num"><span class="mute">Yes 6,400 points</span><span class="mute">No 3,600 points</span></div></div>
+      <div>${stake}${amt}<div class="tabs"><div class="mbtn sy">Yes</div><div class="mbtn sn">No</div></div></div></div>${free}</div>`;
+  return `<div class="p pm pmC">${q1}
+      <div class="pc"><div class="slot pcs"><b class="y" style="width:${yes}%"></b><span>Yes</span><span class="num">${yes}%</span></div>
+      <div class="slot pcs"><b class="n" style="width:${100-yes}%"></b><span>No</span><span class="num">${100-yes}%</span></div></div>
+      <div class="prow num"><span class="mute">Tap Yes or No to stake</span><span>100 points</span></div>
+      ${stake}${free}
+      <div class="lbline num"><span class="mute">Top points</span>1 7xKp3f 4,210<i class="tsep"></i>2 Gq91Lm 3,380<i class="tsep"></i>3 mR8vYd 2,950<i class="tsep"></i><span class="up">You 800, 12th</span></div></div>`;
+}
 function coinPage(){
   const c = COINS[0];
   const trades = TRADES.map(t=>`<div class="tr num"><span class="${t[0]=='Buy'?'up':'down'}">${t[0]}</span><span>${t[1]} SOL</span><span>${t[2]} ${c.tk}</span><span class="mute">${t[3]}</span><span class="r mute">${t[4]} ago</span></div>`).join('');
   return topBar() + `<div class="coin">
     <div><div class="embed">${sc(c.seed,192,108)}<span class="live">Live</span></div>
       <div class="p" style="margin-top:24px"><div class="ident"><div class="slot">${sc(c.seed,16,16)}</div><div><h1>$${c.tk}${UNV==='A'?unvTag(1):UNV==='C'?unvIcon(1):''}</h1><p>${c.name} by ${UNV?'5NSMpd':c.by}</p>${UNV==='B'?'<p class="unvline">Unverified. We haven\'t checked that this streamer owns the channel.</p>':''}</div></div>
-      <div class="trades"><h3>Recent trades</h3>${trades}</div></div></div>
+      <div class="trades"><h3>Recent trades</h3>${trades}</div></div>${predict(c)}</div>
     <div style="display:flex;flex-direction:column;gap:24px">
       <div class="p"><div class="lbl mute">Market cap</div><div class="cap num">${c.mc}</div><div class="chg up num">${pct(c.ch)} in the last hour</div>
         <div class="chart"><canvas data-chart width="132" height="40"></canvas></div>
@@ -379,7 +583,7 @@ if (SCR === 'overlay') document.body.style.backgroundImage = 'none';
 document.querySelectorAll('[data-tex]').forEach(e => e.style.backgroundImage = `url(${tex(e.dataset.tex, 2)})`);
 if (OPT === 'A') document.querySelectorAll('.top').forEach(e => e.style.backgroundImage = `url(${tex('grassside',2)})`);
 if (OPT === 'C') document.querySelectorAll('.p').forEach(e => e.style.borderTop = '14px solid #4E8A32');
-if (OPT === 'B') document.querySelectorAll('.mbtn:not(.buy):not(.off)').forEach(e => e.style.backgroundImage = `url(${tex('stone',6)})`);
+if (OPT === 'B') document.querySelectorAll('.mbtn:not(.buy):not(.off):not(.no):not(.sy):not(.sn):not(.askb):not(.uv)').forEach(e => e.style.backgroundImage = `url(${tex('stone',6)})`);
 if (OPT !== 'B') document.querySelectorAll('.mbtn:not(.buy):not(.off)').forEach(e => e.style.cssText += `;background-image:url(${tex('stone',6)});background-size:64px 64px`);
 document.querySelectorAll('canvas.scene').forEach(c => scene(c, +c.dataset.seed));
 document.querySelectorAll('canvas[data-chart]').forEach(c => chart(c, {A:'#2E8B22',B:'#80FF20',C:'#2E1F0E'}[OPT]));

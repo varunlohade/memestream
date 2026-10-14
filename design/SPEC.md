@@ -116,6 +116,23 @@ A strip under the top bar, on every page except the OBS overlay. Board: `design/
 - Motion (all): slow scroll (~40 px/s). Pause on hover and focus. No motion under prefers-reduced-motion: the strip sits still and scrolls by hand. Each item links to its coin.
 - (art_design had recommended C: it uses data the coin list already has, it repeats the product's one hook (the XP bar), and it stays quiet. B is the liveliest, but its trades come only from coin pages people opened, so it goes stale or empty when traffic is low. Boss man chose B; the thin data rule above covers that.)
 
+## Predictions (2026-10-09, branch `prediction-market`, behind a flag): FINAL
+Twitch-Predictions style, free points only. FINAL as art_design's pick: Boss man was out and had varun-14 decide; he reviews it later. Supersedes the earlier rounds (graduation question A/B/C, streamer-asks C2, viewer-asks live polls), which stay only as mocks (`pm`, `pm2`, `pm3` in mc.html).
+Board: `design/boards/MS-predict-final.png`. Mock: `mc.html?opt=B&screen=coin&pm4=1&role=viewer|streamer`.
+- Place: coin page, left column, one "Predictions" panel under Recent trades.
+- Header: "Predictions". Viewer: "Your points 780. You earn points by watching." Streamer: "You can't bet on your own coin."
+- Live card (one at a time): dark inset card (`#1C1C1F`, 4px black border). Red "Live" tag, countdown "1:42 left" (VT323 28px, white), the question (30px). Two slot buttons that are also the pool bars: "Yes 41%" and "pays 2.4x", "No 59%" and "pays 1.7x", with a faint fill (green `#5CFF6A` / red `#FF5A4E` at 35%) showing the share. Viewer: amount slot (default 50), "Tap Yes or No to bet 50", and "Your bet: 50 on Yes". Streamer: Resolve Yes (green) / Resolve No (red `#B3261E`) / Cancel (off) instead.
+- Up next: label plus the muted rule "(the top question with 3 or more upvotes goes live next)". Rows: question, "N upvotes", and for viewers a free "Upvote" button (stone `#3E3E44`); for streamers Launch (green) and Remove (off). Streamers also get the Window chips 1m / 2m / 5m / 10m (selected chip has XP-green text). Viewers get "Suggest a yes/no question" + "Suggest, 10 points".
+- Resolved: question, outcome tag (Yes = XP green, black text; No = `#B3261E`; Cancelled = stone), an optional "Disputed" tag (stone, red text), the viewer's result ("You won 120" in green, "You lost 50" / "Refunded" muted), and a small underlined "Flag" link. Streamers see no result or Flag.
+- Footer: "Free points. No money, no prizes." then the one-line leaderboard "Top points 1 ... 2 ... 3 ... You 780, 12th" (the "You" part only for viewers).
+- Fairness (in the build brief): the streamer's wallet can't bet on its own coin, and points can't be bought, sold or sent.
+- Added in the build (accepted 2026-10-09): resolved rows carry a small muted "time, resolved by" note ("04:54 PM, streamer 9KNnrf", "mod ...", "auto-cancelled"). After you flag, the link becomes muted "Flagged". The streamer can also launch their own question ("Ask your own yes/no question" + Launch). Suggest and Launch use the quiet stone button.
+- Resolve buttons: while betting is open, all three use the off style with the note "Resolve once betting closes." After it closes: Resolve Yes green, Resolve No red, Cancel off. Launch buttons are off while a question is live.
+- Signed off 2026-10-09 on qa/2026-10-09-predictions/ (prediction-market worktree), with the Resolve fix above.
+- Resolve fix checked 2026-10-09 (streamer-open-panel.png, streamer-closed-panel.png). After betting closes, the card tag changes from red "Live" to stone "Closed", to match "Betting closed".
+- Coin holding: a viewer without the coin sees the muted line "Hold $TICKER to suggest and upvote." under the Suggest row, and the Upvote and Suggest buttons use the off style.
+- Streamer toggle "Crowd picks questions: on/off" (XP-green text when on) sits at the right of the Window chips. Accepted.
+
 ## Open
 - Signed off 2026-10-08 on stills from commit d37aa1b (qa/2026-10-08-stream-pictures/): home, coin, go-live, overlay A live + graduated.
 - Overlay on the deployed site signed off 2026-10-08 (672c701, qa/.../overlay-deployed.png), with one tweak: the link row in `#EDEDED`.
