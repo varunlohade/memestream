@@ -165,6 +165,7 @@ Set:
 | `MEMESTREAM_PRIORITY_FEE_MAX` | optional; default 1000000 micro-lamports per CU | no |
 | `TYPESAFE_API_KEY` | as today | **yes** |
 | `OPENROUTER_API_KEY` | as today | **yes** |
+| `MEMESTREAM_CRON_SECRET` | a NEW random value, 32+ characters (`openssl rand -hex 32`). The Railway worker sends it to call the AI referee every minute | **yes** |
 | `KV_*` | from a NEW Upstash database (below) | **yes** |
 
 Remove (they must not exist on mainnet):
@@ -175,7 +176,6 @@ vercel env rm MEMESTREAM_MARKET_ORACLE production
 vercel env rm MEMESTREAM_MARKET_ORACLE_KEY production
 vercel env rm MEMESTREAM_MARKET_SECRET production
 vercel env rm MEMESTREAM_MARKET_SEED_SOL production
-vercel env rm MEMESTREAM_CRON_SECRET production
 vercel env rm MEMESTREAM_HIDDEN_CREATORS production
 vercel env rm MEMESTREAM_HIDDEN_MINTS production
 vercel env rm MEMESTREAM_DEV_WALLET_KEY production
