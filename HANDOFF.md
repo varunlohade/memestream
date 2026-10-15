@@ -38,8 +38,8 @@ label "Mainnet", and the build stops if `MEMESTREAM_DEV_WALLET_KEY` is set (`src
      - Mainnet on www; devnet on devnet.memestream.lol.
      - The judges' iota link redirects to devnet.
    - Scope: coins plus free points on mainnet. Real-SOL markets stay OFF on mainnet.
-   - Open question: Varun still has to confirm the tiny curve (about 0.94 SOL market cap at launch,
-     15 SOL at graduation).
+   - Curve confirmed by Varun (2026-10-15): about 0.94 SOL market cap at launch, 3 SOL raised and
+     about 15 SOL market cap at graduation.
 3. **`readme-oracle`.** The README "The oracle" section. Merge it after `ai-referee`.
 
 **Varun's to-dos:**
