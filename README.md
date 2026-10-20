@@ -11,6 +11,20 @@ and Polymarket-style YES/NO markets in devnet SOL.
 - **Pitch deck:** _[pitch deck link]_
 - **Built for:** Colosseum (Solana track), the Meteora DBC bounty, Superteam India
 
+## Screenshots
+
+Taken from the live devnet app on 20 Oct 2026.
+
+| Home | Coin page with the live stream |
+|---|---|
+| ![Home: live predictions, king of the hill, coin grid](docs/screenshots/home.png) | ![Coin page: stream, trade box, predictions tab](docs/screenshots/coin-predictions.png) |
+| **Graduated coin (trades in its Meteora DAMM v2 pool)** | **Go live: launch a coin for a stream** |
+| ![Graduated coin page](docs/screenshots/coin-graduated.png) | ![Go live form](docs/screenshots/go-live.png) |
+
+| Phone: home | Phone: coin page |
+|---|---|
+| <img src="docs/screenshots/phone-home.png" width="280" alt="Home on a phone"> | <img src="docs/screenshots/phone-coin.png" width="280" alt="Coin page on a phone"> |
+
 ## What it does
 
 1. A streamer pastes a Twitch or YouTube link, picks a ticker and launches a coin in one transaction.
