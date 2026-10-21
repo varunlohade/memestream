@@ -36,7 +36,7 @@ type WalletState = {
   disconnect: () => void;
   /**
    * Signs and sends base64 transaction bytes; resolves to the signature once sent (not confirmed).
-   * Throws "Connect a wallet first" without opening any prompt if no wallet is connected.
+   * Throws WalletNotConnected (lib/tx-flow.ts) without opening any prompt if no wallet is connected.
    */
   signAndSend: (base64Tx: string) => Promise<string>;
   /** The app's cluster as a Wallet Standard id, e.g. "solana:devnet" (read-only; for links). */
