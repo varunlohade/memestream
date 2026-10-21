@@ -27,6 +27,7 @@ import {
   type Side,
   SUGGEST_COST,
 } from "@/lib/predictions/rules";
+import { serverDroppedSession, sessionDropAt, sessionUsable } from "@/lib/predictions/session";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
 import { AI_WHY, MarketCard, useMarket } from "./MarketCard";
@@ -36,8 +37,6 @@ const POLL_MS = 5_000;
 const REVIEW_POLL_MS = 1_500;
 const CLOCK_TICK_MS = 1_000;
 const SESSION_KEY = "memestream.predictions.session";
-/** A saved session this close to expiry is dropped, so a request never carries a token about to lapse. */
-const SESSION_EXPIRY_MARGIN_MS = 60_000;
 /** Bets top out at 1,000 points, so the amount box takes at most 4 digits. */
 const MAX_BET_DIGITS = 4;
 /** Recent results shown; older ones stay while their market is up (challenge, decision, redeem). */
@@ -51,7 +50,7 @@ const savedSession = {
     if (!wallet) return null;
     try {
       const s = JSON.parse(localStorage.getItem(SESSION_KEY) ?? "null") as Session | null;
-      return s && s.wallet === wallet && s.expiresAt > Date.now() + SESSION_EXPIRY_MARGIN_MS ? s : null;
+      return sessionUsable(s, wallet, Date.now()) ? s : null;
     } catch {
       return null;
     }
@@ -169,10 +168,22 @@ export function Predictions({
   // The saved session for the connected wallet (re-read after signing in or out).
   const [sessionVersion, setSessionVersion] = useState(0);
   const session = useMemo(() => (sessionVersion >= 0 ? savedSession.get(address) : null), [address, sessionVersion]);
-  const setSession = (next: Session | null) => {
+  const setSession = useCallback((next: Session | null) => {
     savedSession.set(next);
     setSessionVersion((v) => v + 1);
-  };
+  }, []);
+  // Re-read the saved session when it is due to drop, and when the tab comes back (a sleeping tab's timer may be late).
+  useEffect(() => {
+    if (!session) return;
+    const reread = () => setSessionVersion((v) => v + 1);
+    const timer = setTimeout(reread, Math.max(0, sessionDropAt(session) - Date.now()));
+    const onVisible = () => document.hidden || reread();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [session]);
 
   const authHeaders = useCallback((): HeadersInit => (session ? { authorization: `Bearer ${session.token}` } : {}), [session]);
 
@@ -183,7 +194,11 @@ export function Predictions({
   useEffect(() => {
     const load = async () => {
       try {
-        setView(await fetchJson<PredictionsView>(`/api/predictions/coin/${encodeURIComponent(mint)}`, { headers: authHeaders() }));
+        const sentToken = session?.token ?? null;
+        const next = await fetchJson<PredictionsView>(`/api/predictions/coin/${encodeURIComponent(mint)}`, { headers: authHeaders() });
+        setView(next);
+        // The server no longer knows this session: show "Sign in to play" again.
+        if (serverDroppedSession(sentToken, savedSession.get(address)?.token ?? null, next.me)) setSession(null);
       } catch (e) {
         setError((e as Error).message);
       }
@@ -193,7 +208,7 @@ export function Predictions({
       if (!document.hidden) void load();
     }, pollMs);
     return () => clearInterval(timer);
-  }, [mint, authHeaders, pollMs]);
+  }, [mint, authHeaders, pollMs, session, address, setSession]);
 
   // The streamer's presence: one beat a minute while their own coin's page is visible.
   const isStreamer = Boolean(session) && view?.me?.role === "streamer";
