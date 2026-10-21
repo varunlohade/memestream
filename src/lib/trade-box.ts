@@ -84,3 +84,29 @@ export function tradeChips(side: Side, unit: Unit, holdings: { sol: string; coin
 
 /** "set max slippage" choices, in basis points, with their labels. */
 export const slippageLabel = (bps: number) => `${bps / 100}%`;
+
+/** The trade box re-quotes this often while it shows an amount: a graduated coin's quote key never changes on its own. */
+export const QUOTE_REFRESH_MS = 10_000;
+
+export const quoteUrl = (mint: string, side: Side, amount: string, slippageBps: number) =>
+  `/api/quote?${new URLSearchParams({ mint, side, amount, slippageBps: String(slippageBps) })}`;
+
+/** A decimal amount in base units (exact), or null if it isn't one with at most `decimals` places. */
+function baseUnits(text: string, decimals: number): bigint | null {
+  const match = /^(\d+)(?:\.(\d+))?$/.exec(text.trim());
+  if (!match || (match[2]?.length ?? 0) > decimals) return null;
+  return BigInt(match[1] + (match[2] ?? "").padEnd(decimals, "0"));
+}
+
+/**
+ * The minimum a trade sends always comes from a quote fetched as it is placed (`fresh`), never the
+ * one on screen. If that minimum is below the one the user saw (`shown`), the price moved against
+ * them: nothing is sent, and the new quote is shown first.
+ */
+export function freshFloor(side: Side, shown: string | null | undefined, fresh: string): { floor: string } | { moved: true } {
+  const decimals = side === "buy" ? COIN_DECIMALS : SOL_DECIMALS;
+  const now = baseUnits(fresh, decimals);
+  const seen = shown == null ? null : baseUnits(shown, decimals);
+  if (now === null || seen === null || now < seen) return { moved: true };
+  return { floor: fresh };
+}

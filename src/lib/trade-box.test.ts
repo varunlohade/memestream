@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coinsToSol, convertTyped, slippageLabel, solToCoins, tradeAmount, tradeChips } from "./trade-box";
+import { coinsToSol, convertTyped, freshFloor, QUOTE_REFRESH_MS, quoteUrl, slippageLabel, solToCoins, tradeAmount, tradeChips } from "./trade-box";
 
 const PRICE = 3e-8; // SOL per coin
 
@@ -83,4 +83,18 @@ test("100% in SOL sells exactly the holdings across awkward prices", () => {
 
 test("slippage labels", () => {
   assert.deepEqual([50, 100, 300, 500].map(slippageLabel), ["0.5%", "1%", "3%", "5%"]);
+});
+
+test("freshFloor: the floor sent is the fresh quote's; a fresh minimum below the one shown holds the trade", () => {
+  assert.deepEqual(freshFloor("buy", "1000.5", "1000.500001"), { floor: "1000.500001" }, "the price moved our way: the fresh, higher floor");
+  assert.deepEqual(freshFloor("buy", "1000.5", "1000.50"), { floor: "1000.50" }, "the same amount, written differently");
+  assert.deepEqual(freshFloor("buy", "1000.5", "1000.499999"), { moved: true });
+  assert.deepEqual(freshFloor("sell", "0.123456789", "0.123456788"), { moved: true }, "SOL compares to the lamport");
+  assert.deepEqual(freshFloor("sell", null, "0.2"), { moved: true }, "nothing was shown: show it first");
+  assert.deepEqual(freshFloor("sell", "0.2", "abc"), { moved: true });
+});
+
+test("quoteUrl and the refresh interval", () => {
+  assert.equal(quoteUrl("Mint1", "sell", "5", 100), "/api/quote?mint=Mint1&side=sell&amount=5&slippageBps=100");
+  assert.equal(QUOTE_REFRESH_MS, 10_000);
 });

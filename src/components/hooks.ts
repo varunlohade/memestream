@@ -5,6 +5,7 @@ import type { CoinDetail, CoinView, HolderView, TapeItem, TradePreview } from "@
 import type { LiveFeed } from "@/lib/predictions/live";
 import { percentChange } from "@/lib/format";
 import { fetchJson } from "@/lib/http";
+import { QUOTE_REFRESH_MS, quoteUrl } from "@/lib/trade-box";
 
 export type { CoinDetail, CoinView, HolderView, Holdings, TradePreview, TradeView } from "@/lib/api-types";
 
@@ -80,23 +81,31 @@ export function usePriceTrend(detail: CoinDetail | null) {
 
 const QUOTE_DEBOUNCE_MS = 300;
 
-/** Live price check for the trade box. Keeps the last good quote while a new one loads. */
 /**
- * `curveState` is anything that changes when the pool does (the coin's raised SOL): after any trade
- * lands, the old quote no longer counts and a fresh one is fetched.
+ * Live price check for the trade box. `curveState` is anything that changes when the pool does (the
+ * coin's raised SOL): after any trade lands, the old quote no longer counts and a fresh one is
+ * fetched. A graduated coin's raised SOL never changes, so the quote is also fetched again every
+ * QUOTE_REFRESH_MS while the tab is visible, and on `refresh()`; the last good quote stays on screen
+ * while a refresh loads.
  */
 export function useQuote(mint: string, side: "buy" | "sell", amount: string, curveState: string, slippageBps: number) {
   const [quote, setQuote] = useState<{ key: string; preview: TradePreview | null; error: string | null } | null>(null);
+  const [round, setRound] = useState(0);
+  const refresh = useCallback(() => setRound((r) => r + 1), []);
   const key = `${mint}|${side}|${amount}|${curveState}|${slippageBps}`;
+
+  useEffect(() => {
+    if (!amount.trim()) return;
+    const ticker = setInterval(() => document.hidden || refresh(), QUOTE_REFRESH_MS);
+    return () => clearInterval(ticker);
+  }, [amount, refresh]);
 
   useEffect(() => {
     if (!amount.trim()) return;
     const controller = new AbortController();
     const timer = setTimeout(async () => {
       try {
-        const preview = await fetchJson<TradePreview>(`/api/quote?${new URLSearchParams({ mint, side, amount, slippageBps: String(slippageBps) })}`, {
-          signal: controller.signal,
-        });
+        const preview = await fetchJson<TradePreview>(quoteUrl(mint, side, amount, slippageBps), { signal: controller.signal });
         setQuote({ key, preview, error: null });
       } catch (e) {
         if (!controller.signal.aborted) setQuote({ key, preview: null, error: (e as Error).message });
@@ -106,12 +115,13 @@ export function useQuote(mint: string, side: "buy" | "sell", amount: string, cur
       controller.abort();
       clearTimeout(timer);
     };
-  }, [key, mint, side, amount, slippageBps]);
+  }, [key, round, mint, side, amount, slippageBps]);
 
   const fresh = quote?.key === key;
   return {
     preview: amount.trim() && fresh ? quote.preview : null,
     error: amount.trim() && fresh ? quote.error : null,
     loading: Boolean(amount.trim()) && !fresh,
+    refresh,
   };
 }

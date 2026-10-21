@@ -1,14 +1,15 @@
 "use client";
 /** Buy/sell panel (pump.fun layout). Quotes as you type; the server builds the swap; the wallet signs it. */
 import { useState, useSyncExternalStore } from "react";
-import { type CoinView, type Holdings, useQuote } from "@/components/hooks";
+import { type CoinView, type Holdings, type TradePreview, useQuote } from "@/components/hooks";
 import { noSubscription } from "@/components/no-subscription";
 import { useTx } from "@/components/tx";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { DEFAULT_SLIPPAGE_BPS, SLIPPAGE_CHOICES_BPS } from "@/lib/api-types";
+import { fetchJson } from "@/lib/http";
 import { compact, SIDE_LABEL } from "@/lib/format";
 import { LAUNCH_FEE, launchFeeAt } from "@/lib/launch-fee";
-import { convertTyped, NATURAL_UNIT, type Side, slippageLabel, tradeAmount, tradeChips, type Unit } from "@/lib/trade-box";
+import { convertTyped, freshFloor, NATURAL_UNIT, quoteUrl, type Side, slippageLabel, tradeAmount, tradeChips, type Unit } from "@/lib/trade-box";
 
 type Status = { kind: "busy" | "done" | "error"; text: string };
 
@@ -76,7 +77,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const converted = unit !== NATURAL_UNIT[side];
 
   const [status, setStatus] = useState<Status | null>(null);
-  const { preview, error: quoteError, loading } = useQuote(coin.mint, side, sent, coin.raisedSol, slippageBps);
+  const { preview, error: quoteError, loading, refresh: refreshQuote } = useQuote(coin.mint, side, sent, coin.raisedSol, slippageBps);
 
   const unitLabel = unit === "sol" ? "SOL" : coin.symbol;
   const spendLabel = side === "buy" ? "SOL" : coin.symbol;
@@ -101,7 +102,16 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const submit = async () => {
     if (!address) return;
     try {
-      await run("trade", actionLabel, { wallet: address, mint: coin.mint, side, amount: sent, slippageBps, minReceived: preview?.minimumReceived }, (stage) =>
+      // The floor comes from a quote fetched now, never the one on screen; a worse one is shown first.
+      setStatus({ kind: "busy", text: "Preparing" });
+      const latest = await fetchJson<TradePreview>(quoteUrl(coin.mint, side, sent, slippageBps));
+      const checked = freshFloor(side, preview?.minimumReceived, latest.minimumReceived);
+      if ("moved" in checked) {
+        refreshQuote();
+        setStatus({ kind: "error", text: "The price moved. Check the new amount and place the trade again." });
+        return;
+      }
+      await run("trade", actionLabel, { wallet: address, mint: coin.mint, side, amount: sent, slippageBps, minReceived: checked.floor }, (stage) =>
         setStatus({ kind: "busy", text: stage }),
       );
       setStatus({ kind: "done", text: side === "buy" ? `Bought ${coin.symbol}` : `Sold ${coin.symbol}` });
@@ -109,6 +119,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
     } catch (e) {
       setStatus({ kind: "error", text: (e as Error).message });
     }
+    refreshQuote();
   };
 
   const label = !address
