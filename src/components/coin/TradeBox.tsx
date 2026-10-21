@@ -95,13 +95,14 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   };
 
   const submit = async () => {
-    if (!address || submitting.current) return;
+    // No quote on screen yet (still loading): nothing to compare against, so wait for it (the button is off until then).
+    if (!address || !preview || submitting.current) return;
     submitting.current = true;
     try {
       // A quote fetched now checks the minimum on screen still holds; past the slippage, the new quote is shown first.
       setStatus({ kind: "busy", text: "Preparing" });
       const latest = await fetchJson<TradePreview>(quoteUrl(coin.mint, side, sent, slippageBps));
-      const checked = freshFloor(side, preview?.minimumReceived, latest.received);
+      const checked = freshFloor(side, preview.minimumReceived, latest.received);
       if ("moved" in checked) {
         showQuote(latest);
         setStatus({ kind: "error", text: "The price moved. Check the new amount and place the trade again." });
