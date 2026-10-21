@@ -396,7 +396,7 @@ for (const [name, make] of STORES) {
     assert.deepEqual([r.outcome, r.resolvedBy.role], ["yes", "ai"]);
     assert.match(r.aiReason ?? "", /\[audio\] A girl says hello to chat \(clip\)/, "audio facts count for points");
     const sent = JSON.parse(models.jevBodies[0]).state.frames.at(-1);
-    assert.deepEqual([sent.grabbed, sent.taken], ["after", new Date(LOCK + FRAME_GAP_MS).toISOString()], "the clip's time is the grabber's, never after the grab");
+    assert.deepEqual([sent.grabbed, sent.taken], ["after", undefined], "a clip has no picture time (its media may start before the grab)");
   });
 
   test(`${name}: clips only for the first ${LOCK_CLIPS} pictures after the lock; later grabs use the preview`, async () => {

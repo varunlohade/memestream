@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import { CHECK_RULE_MAX, FRAME_NOTE_MAX } from "@/lib/predictions/rules";
+import { freshNotes } from "@/lib/predictions/engine";
 import { AI_CHECK_MIN_CONFIDENCE, aiCheck, AiCheckFailed, BudgetSpent, decideClient, describeClient, NO_EVIDENCE, OPENROUTER_URL, parseDescription, parseHappened, ruleClient } from "./ai-check";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { TYPESAFE_URL } from "./review";
@@ -157,7 +158,7 @@ test("aiCheck.capture: grabs the preview, describes a new picture once (same has
   assert.deepEqual(hits, []);
 });
 
-const CLIP = { frames: [{ mime: "image/jpeg" as const, base64: "AAEC" }, { mime: "image/jpeg" as const, base64: "AAED" }], audio: { format: "mp3" as const, base64: "AAAA" }, startedAt: Date.parse("2026-10-12T10:03:00Z"), hash: "fedcba9876543210" };
+const CLIP = { frames: [{ mime: "image/jpeg" as const, base64: "AAEC" }, { mime: "image/jpeg" as const, base64: "AAED" }], audio: { format: "mp3" as const, base64: "AAAA" }, hash: "fedcba9876543210" };
 
 test("describeClient with a clip: every frame as an image, then the audio as an OpenRouter input_audio part, in one call; audio facts kept", async () => {
   const bodies: string[] = [];
@@ -167,13 +168,15 @@ test("describeClient with a clip: every frame as an image, then the audio as an 
   assert.equal(content[1].text, "A clip: 2 frame(s) 5 s apart, oldest first, then its audio.");
   assert.deepEqual(content.slice(2).map((c: { type: string }) => c.type), ["image_url", "image_url", "input_audio"]);
   assert.deepEqual(content[4], { type: "input_audio", input_audio: { data: "AAAA", format: "mp3" } });
-  assert.match(JSON.parse(bodies[0]).messages[0].content, /"audio" \(speech or sounds heard/);
+  assert.match(JSON.parse(bodies[0]).messages[0].content, /"audio" \(the stream's own sound/);
+  assert.match(JSON.parse(bodies[0]).messages[0].content, /"audio_alert" \(text-to-speech voices/);
   assert.equal(bodies.length, 1);
 });
 
-test("parseDescription: audio facts count only when audio was sent", () => {
-  const facts = factsAnswer(["He says he won", "audio"], ["A man jumps", "camera"]);
+test("parseDescription: the stream's own audio counts only when audio was sent; audio alerts (text-to-speech, donation sounds) never", () => {
+  const facts = factsAnswer(["He says he won", "audio"], ["A TTS voice reads: the streamer won!", "audio_alert"], ["A man jumps", "camera"]);
   assert.equal(parseDescription(facts, true), "[audio] He says he won; [camera] A man jumps");
+  assert.equal(parseDescription(factsAnswer(["A donation voice says YES", "audio_alert"]), true), NO_EVIDENCE);
   assert.equal(parseDescription(facts), "[camera] A man jumps", "a still frame has no audio: an audio fact is made up");
 });
 
@@ -183,12 +186,12 @@ test("aiCheck.capture with a grabber: a clip at a key moment (lock, resolve), th
   const vision = { apiKey: "k", fetch: async (url: string | URL | Request, init?: RequestInit) => (hits.push(String(url)), answers.push(String(init!.body)), json(factsAnswer(["A girl at a desk", "camera"]))) };
   const frames = { fetch: async (url: string | URL | Request) => (hits.push(String(url)), new Response("img", { headers: { "content-type": "image/jpeg" } })) };
   let clips = 0;
-  const source = (clip: typeof CLIP | null) => aiCheck(vision, { apiKey: "k" }, frames, async () => (clips++, clip));
+  const source = (clip: typeof CLIP | { failed: string }) => aiCheck(vision, { apiKey: "k" }, frames, async () => (clips++, clip));
   const spend = async () => true;
   for (const moment of ["lock", "resolve"] as const) {
     hits.length = 0;
     const got = await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend, moment);
-    assert.deepEqual(got, { hash: CLIP.hash, text: "[camera] A girl at a desk", shot: CLIP.startedAt });
+    assert.deepEqual(got, { hash: CLIP.hash, text: "[camera] A girl at a desk" }, "no picture time");
     assert.deepEqual(hits, [OPENROUTER_URL], "no preview fetched");
     assert.match(answers.at(-1)!, /input_audio/);
   }
@@ -197,12 +200,24 @@ test("aiCheck.capture with a grabber: a clip at a key moment (lock, resolve), th
   await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend);
   assert.deepEqual([clips, hits.filter((h) => h === FRAME.url).length], [0, 1], "no key moment: the preview");
   hits.length = 0;
-  const fallback = await source(null).capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock");
+  const warn = mock.method(console, "warn", () => {});
+  const fallback = await source({ failed: "HTTP 429" }).capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock");
   assert.deepEqual([fallback?.text, hits], ["[camera] A girl at a desk", [FRAME.url, OPENROUTER_URL]], "no clip: the preview");
+  assert.deepEqual(warn.mock.calls.map((c) => c.arguments[0]), ["predictions: no clip at lock (HTTP 429); using the preview"], "one line with the reason");
+  warn.mock.restore();
   let failing = 0;
   const broken = aiCheck({ apiKey: "k", fetch: async (_u, init) => (++failing === 1 && String(init!.body).includes("input_audio") ? json({}, 400) : json(factsAnswer(["A desk", "camera"]))) }, { apiKey: "k" }, frames, async () => CLIP);
   assert.equal((await broken.capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock"))?.text, "[camera] A desk", "the clip's description failed: the preview");
   hits.length = 0;
   await assert.rejects(source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], async () => false, "lock"), BudgetSpent);
   assert.deepEqual(hits, [], "budget spent: no model call and no preview");
+});
+
+test("a clip after the lock is never a fresh market picture (its media can be from before the lock); for points it is", async () => {
+  const lockAt = Date.parse("2026-10-12T10:02:00Z");
+  const evidence = await aiCheck({ apiKey: "k", fetch: async () => json(factsAnswer(["A win screen", "game_ui"])) }, { apiKey: "k" }, {}, async () => CLIP).capture("https://twitch.tv/lofigirl", ASK, [], async () => true, "lock");
+  // As applyFrames saves it: grabbed after the lock.
+  const note = { kind: "after" as const, at: lockAt + 30_000, text: evidence!.text, hash: evidence!.hash, ...(evidence!.shot !== undefined ? { shot: evidence!.shot } : {}) };
+  assert.equal(freshNotes({ lockAt, frames: [note] }, true).length, 0, "markets: not fresh");
+  assert.equal(freshNotes({ lockAt, frames: [note] }).length, 1, "points: fresh");
 });

@@ -11,7 +11,7 @@ const SECRET = "g".repeat(32);
 test("parseClip: the grabber's answer checked strictly; hash = sha256 of the frames' and audio's bytes", () => {
   const clip = parseClip(GOOD)!;
   const expected = createHash("sha256").update(Buffer.from("AAEC", "base64")).update(Buffer.from("AAAA", "base64")).digest("hex").slice(0, 16);
-  assert.deepEqual(clip, { frames: GOOD.frames, audio: GOOD.audio, startedAt: GOOD.startedAt, hash: expected });
+  assert.deepEqual(clip, { frames: GOOD.frames, audio: GOOD.audio, hash: expected }, "no time: a clip proves nothing about the lock");
   assert.equal(parseClip({ ...GOOD, audio: null })!.audio, null);
   for (const bad of [
     null,
@@ -27,21 +27,21 @@ test("parseClip: the grabber's answer checked strictly; hash = sha256 of the fra
     assert.equal(parseClip(bad), null, JSON.stringify(bad));
 });
 
-test("clipClient: posts the normalized link, the seconds and the secret, no redirects; any failure is null", async () => {
+test("clipClient: posts the normalized link, the seconds and the secret, no redirects; any failure says why, never a URL", async () => {
   const inits: RequestInit[] = [];
   const client = (answer: () => Response | Promise<Response>) => clipClient({ url: URL_, secret: SECRET, fetch: async (url, init) => (assert.equal(String(url), URL_), inits.push(init!), answer()) });
-  assert.equal((await client(() => json(GOOD))("https://www.twitch.tv/LofiGirl"))?.startedAt, GOOD.startedAt);
+  assert.ok("frames" in (await client(() => json(GOOD))("https://www.twitch.tv/LofiGirl")));
   assert.deepEqual(JSON.parse(String(inits[0].body)), { url: "https://twitch.tv/LofiGirl", seconds: CLIP_SECONDS });
   assert.deepEqual([(inits[0].headers as Record<string, string>)["x-grabber-secret"], inits[0].redirect], [SECRET, "error"]);
-  assert.equal(await client(() => json(GOOD))("https://evil.test/live"), null);
+  assert.deepEqual(await client(() => json(GOOD))("https://evil.test/live"), { failed: "bad link" });
   assert.equal(inits.length, 1, "a bad stream link is never sent");
-  assert.equal(await client(() => json({ error: "busy" }, 429))("https://kick.com/somebody"), null);
-  assert.equal(await client(() => json({ ...GOOD, frames: "x" }))("https://kick.com/somebody"), null);
-  assert.equal(await client(() => new Response("not json"))("https://kick.com/somebody"), null);
-  assert.equal(await client(() => json({ ...GOOD, pad: "x".repeat(MAX_CLIP_BYTES) }))("https://kick.com/somebody"), null, "too big");
-  assert.equal(await client(() => Promise.reject(new TypeError("down")))("https://kick.com/somebody"), null);
+  assert.deepEqual(await client(() => json({ error: "busy" }, 429))("https://kick.com/somebody"), { failed: "HTTP 429" });
+  assert.deepEqual(await client(() => json({ ...GOOD, frames: "x" }))("https://kick.com/somebody"), { failed: "malformed" });
+  assert.deepEqual(await client(() => new Response("not json"))("https://kick.com/somebody"), { failed: "malformed" });
+  assert.deepEqual(await client(() => json({ ...GOOD, pad: "x".repeat(MAX_CLIP_BYTES) }))("https://kick.com/somebody"), { failed: "too big" });
+  assert.deepEqual(await client(() => Promise.reject(new TypeError("down")))("https://kick.com/somebody"), { failed: "error" });
   const hang: typeof fetch = (_u, init) => new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
-  assert.equal(await clipClient({ url: URL_, secret: SECRET, fetch: hang, timeoutMs: 20 })("https://kick.com/somebody"), null);
+  assert.deepEqual(await clipClient({ url: URL_, secret: SECRET, fetch: hang, timeoutMs: 20 })("https://kick.com/somebody"), { failed: "timeout" });
 });
 
 test("clipFromEnv: only an https grabber with a 32+ character secret", (t) => {

@@ -98,8 +98,9 @@ watches the stream, with people as the fallback and the court of appeal.
   few frames and its sound. Later grabs use the preview. If the clip fails, it uses the preview picture. Kick has no preview, so there only clips work.
 - A vision model (Gemini 2.5 Flash) turns each picture or clip into facts, each tagged with where it
   came from: the game screen, the camera, the audio, an overlay or chat. Overlay and chat text is
-  dropped, so a viewer's donation alert can't fake a result. Real-SOL markets also drop audio facts:
-  anyone on stream can say anything into the mic.
+  dropped, so a viewer's donation alert can't fake a result. Text-to-speech and alert sounds are
+  dropped for the same reason. Real-SOL markets also drop the stream's own audio (anyone on stream
+  can say anything into the mic), and a clip never counts as a fresh market picture.
 - Only pictures taken after betting closed count as evidence.
 
 **When betting closes**

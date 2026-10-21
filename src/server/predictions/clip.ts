@@ -2,7 +2,8 @@
  * Short video clips of a coin's stream for the AI check, from the video grabber (grabber/, a Railway
  * service): the last few seconds as a few JPEG frames and a small mp3. Only a validated stream link
  * is sent, to one https grabber set in the environment, with its shared secret; the answer is time-
- * and size-capped and checked strictly. Any failure is null, so the caller falls back to the preview.
+ * and size-capped and checked strictly. Any failure is `{ failed: reason }`, so the caller can say why
+ * it falls back to the preview.
  */
 import "server-only";
 import { createHash } from "node:crypto";
@@ -11,7 +12,7 @@ import { HASH_CHARS } from "./frames";
 
 /** Seconds of stream per clip: a 10 s clip takes the grabber about 16 s. */
 export const CLIP_SECONDS = 10;
-/** The wait for a clip past its seconds: with the description, an AI run fits the routes' 120 s maxDuration. */
+/** The wait for a clip past its seconds (the grabber kills its tools at + 30 s): with the description, an AI run fits the routes' 120 s maxDuration. */
 const CLIP_EXTRA_MS = 35_000;
 /** The grabber keeps its answer under about 4 MB of base64; this allows for the JSON around it. */
 export const MAX_CLIP_BYTES = 5 * 1024 * 1024;
@@ -20,11 +21,14 @@ const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export type ClipFrame = { mime: "image/jpeg"; base64: string };
 export type ClipAudio = { format: "mp3"; base64: string };
-/** `hash`: a short hash of the frames' and audio's bytes. `startedAt`: when the grabber began the cut (its clock). */
-export type Clip = { frames: ClipFrame[]; audio: ClipAudio | null; startedAt: number; hash: string };
+/**
+ * `hash`: a short hash of the frames' and audio's bytes. No time: the media starts some segments
+ * before the grabber's own clock, plus the platform's delay, so no clip proves it was after a lock.
+ */
+export type Clip = { frames: ClipFrame[]; audio: ClipAudio | null; hash: string };
 export type ClipDeps = { url: string; secret: string; fetch?: typeof fetch; timeoutMs?: number; seconds?: number };
-/** A clip of the stream now, or null (no grabber answer, or a bad one). */
-export type ClipSource = (streamUrl: string) => Promise<Clip | null>;
+/** A clip of the stream now, or why not: "HTTP 429", "timeout", "error", "too big", "malformed" or "bad link" (never a URL or the secret). */
+export type ClipSource = (streamUrl: string) => Promise<Clip | { failed: string }>;
 
 const isBase64 = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length % 4 === 0 && BASE64.test(value);
 
@@ -41,7 +45,6 @@ export function parseClip(body: unknown): Clip | null {
   return {
     frames: (frames as ClipFrame[]).map(({ base64 }) => ({ mime: "image/jpeg", base64 })),
     audio: audio ? { format: "mp3", base64: (audio as ClipAudio).base64 } : null,
-    startedAt,
     hash: hash.digest("hex").slice(0, HASH_CHARS),
   };
 }
@@ -69,7 +72,7 @@ export function clipClient(deps: ClipDeps): ClipSource {
   const seconds = deps.seconds ?? CLIP_SECONDS;
   return async (streamUrl) => {
     const link = parseStreamLink(streamUrl);
-    if (!link) return null;
+    if (!link) return { failed: "bad link" };
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), deps.timeoutMs ?? seconds * 1000 + CLIP_EXTRA_MS);
     try {
@@ -82,16 +85,13 @@ export function clipClient(deps: ClipDeps): ClipSource {
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
-        console.warn(`predictions: the video grabber answered HTTP ${response.status}`);
-        return null;
+        return { failed: `HTTP ${response.status}` };
       }
       const text = await readCapped(response, MAX_CLIP_BYTES);
-      const clip = text === null ? null : parseClip(JSON.parse(text));
-      if (!clip) console.warn("predictions: the video grabber's answer was too big or malformed");
-      return clip;
-    } catch {
-      console.warn(`predictions: the video grabber ${abort.signal.aborted ? "timed out" : "failed"}`);
-      return null;
+      if (text === null) return { failed: "too big" };
+      return parseClip(JSON.parse(text)) ?? { failed: "malformed" };
+    } catch (error) {
+      return { failed: abort.signal.aborted ? "timeout" : error instanceof SyntaxError ? "malformed" : "error" };
     } finally {
       clearTimeout(timer);
     }
