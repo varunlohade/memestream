@@ -22,3 +22,18 @@ export async function pollUntil<T>(check: () => Promise<T | undefined>, { timeou
     await sleep(intervalMs);
   }
 }
+
+/**
+ * For a value polled and refreshed by hand: only the newest request's answer may land. `start()`
+ * returns a check that stays true until a newer request starts, so a slow, older answer (an earlier
+ * poll, or a request made for another wallet) is dropped.
+ */
+export function newestOnly(): { start: () => () => boolean } {
+  let latest = 0;
+  return {
+    start() {
+      const mine = ++latest;
+      return () => mine === latest;
+    },
+  };
+}

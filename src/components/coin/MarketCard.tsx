@@ -8,6 +8,7 @@
  */
 import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { useTx } from "@/components/tx";
+import { newestOnly } from "@/lib/poll";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { DEFAULT_SLIPPAGE_BPS, SOL_DECIMALS } from "@/lib/api-types";
 import { compact, fractionOf, minusReserve } from "@/lib/format";
@@ -48,18 +49,24 @@ function countdown(ms: number) {
 const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 const OUTCOME_TEXT = { yes: "YES", no: "NO", refund: "refund (every share pays 0.5 SOL)" } as const;
 
-/** The market's odds and the wallet's position, polled while `pollMs` is set. */
+/**
+ * The market's odds and the wallet's position, polled while `pollMs` is set. Kept per coin, question
+ * and wallet: on a wallet change (or disconnect) the old position is gone at once, and only the
+ * newest request's answer lands (never a slow one for another wallet, or an older poll).
+ */
 export function useMarket(mint: string, predictionId: string, wallet: string | null, pollMs: number | null) {
-  const [market, setMarket] = useState<MarketView | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const key = `${mint}|${predictionId}|${wallet ?? ""}`;
+  const [state, setState] = useState<{ key: string; market: MarketView | null; error: string | null }>({ key, market: null, error: null });
+  const [requests] = useState(newestOnly);
   const load = useCallback(async () => {
+    const current = requests.start();
     try {
-      setMarket(await postJson<MarketView>("/api/markets/odds", { mint, predictionId, wallet }));
-      setError(null);
+      const market = await postJson<MarketView>("/api/markets/odds", { mint, predictionId, wallet });
+      if (current()) setState({ key, market, error: null });
     } catch (e) {
-      setError((e as Error).message);
+      if (current()) setState((s) => ({ key, market: s.key === key ? s.market : null, error: (e as Error).message }));
     }
-  }, [mint, predictionId, wallet]);
+  }, [requests, key, mint, predictionId, wallet]);
   useEffect(() => {
     const first = setTimeout(load, 0);
     const timer = pollMs
@@ -72,7 +79,8 @@ export function useMarket(mint: string, predictionId: string, wallet: string | n
       clearInterval(timer);
     };
   }, [load, pollMs]);
-  return { market, error, refresh: load };
+  const mine = state.key === key;
+  return { market: mine ? state.market : null, error: mine ? state.error : null, refresh: load };
 }
 
 /** "Your position: 12 YES shares · pays 12 SOL if Yes", or null with nothing held. */
