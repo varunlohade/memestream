@@ -15,12 +15,13 @@ mp3. Kick has no preview picture, so there the clip is the only evidence.
 - `seconds` is kept within 5..30 (15 when missing).
 - A wrong or missing secret gets 401. If `GRABBER_SECRET` is unset or under 32 characters, every clip
   gets 401.
-- At most 2 clips run at once; a third gets 429.
+- At most 4 clips run at once (`GRABBER_MAX_RUNNING`); one more gets 429.
 - yt-dlp finds the stream's HLS URLs (YouTube: one video and one audio; Twitch and Kick: one with
   both). ffmpeg starts 4 segments back from the live edge, takes a frame every 5 s (1280 wide, at most
   6) and 16 kHz mono mp3 audio at 32 kbps. A stream with no audio still gives frames, with `audio: null`.
-- Both tools run without a shell. They are killed at the clip's seconds + 40 s. Each request has its
-  own temp dir, which is always removed.
+- Both tools run without a shell. They are killed at the clip's seconds + 30 s (the site gives up
+  at seconds + 35 s), or at once when the caller hangs up. Each request has its own temp dir, which
+  is always removed.
 - The answer stays under about 4 MB: the oldest frames go first, then the audio.
 - One log line per request: the outcome, the reason, the host and the video id or channel. It never
   logs the secret or an HLS URL.
@@ -33,6 +34,7 @@ A 10 s clip of a YouTube live takes about 16 s and gives 2 frames of about 150 K
 |---|---|
 | `GRABBER_SECRET` | a random secret, 32+ characters (`openssl rand -hex 32`); the same value as the site's `MEMESTREAM_GRABBER_SECRET` in Vercel |
 | `YTDLP_COOKIES_B64` | optional: a base64 Netscape `cookies.txt` from a throwaway YouTube account (see below) |
+| `GRABBER_MAX_RUNNING` | optional: clips at once, default 4 |
 
 Railway sets `PORT`.
 
@@ -47,6 +49,10 @@ YouTube often blocks data-center IPs with "Sign in to confirm you're not a bot".
 To get past it, export the cookies of a throwaway Google account as `cookies.txt` and set
 `YTDLP_COOKIES_B64` to `base64 -i cookies.txt`. Each request writes them to its own temp dir and
 passes them to yt-dlp with `--cookies`. Twitch and Kick need no cookies.
+
+## Known limits
+
+- Twitch may show an ad at the start of a new viewing session, so a clip can be ad frames and ad audio instead of the stream.
 
 ## Deploy (run these yourself, from this folder)
 

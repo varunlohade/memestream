@@ -3,8 +3,8 @@
  * a small mono mp3, for the site's AI referee. yt-dlp finds the stream's HLS URLs (YouTube gives a
  * video and an audio one, Twitch and Kick one with both), then ffmpeg reads from near the live edge.
  * Only https links on a fixed list of stream sites are taken (no SSRF), the caller needs the shared
- * secret, at most MAX_RUNNING clips run at once, each child process is killed at a hard deadline, and
- * every request's temp dir is removed. Logs one line per request: outcome, reason, host and video
+ * secret, at most MAX_RUNNING clips run at once, each child process is killed at a hard deadline (or
+ * as soon as the caller hangs up), and every request's temp dir is removed. Logs one line per request: outcome, reason, host and video
  * id or channel, never the secret or an HLS URL.
  */
 import { spawn as nodeSpawn } from "node:child_process";
@@ -18,10 +18,11 @@ export const MIN_SECRET_CHARS = 32;
 export const MIN_SECONDS = 5;
 export const MAX_SECONDS = 30;
 export const DEFAULT_SECONDS = 15;
-/** Each request's children are killed this long after the clip's own seconds. */
-export const KILL_AFTER_MS = 40_000;
+/** Each request's children are killed this long after the clip's own seconds: before the site gives up (seconds + 35 s). */
+export const KILL_AFTER_MS = 30_000;
 export const MAX_FRAMES = 6;
-export const MAX_RUNNING = 2;
+/** Clips at once by default (GRABBER_MAX_RUNNING). */
+export const MAX_RUNNING = 4;
 /** The response's frames and audio together (base64), about 4 MB; frames go first when over. */
 export const MAX_RESPONSE_BYTES = 4 * 1024 * 1024;
 const MAX_BODY_BYTES = 2_048;
@@ -115,26 +116,37 @@ const NO_AUDIO = /does not contain any stream/i;
 /** A failed clip, with a short reason for the log and the answer (never a URL or the tool's whole output). */
 export class GrabFailed extends Error {}
 
-/** Runs `cmd` (args array, never a shell); killed at `timeoutMs`. Resolves with its exit code, stdout and the tail of stderr. */
-export function run(spawn, cmd, args, timeoutMs) {
+/**
+ * Runs `cmd` (args array, never a shell); killed at `timeoutMs`, or when `signal` aborts (the caller
+ * hung up). Resolves with its exit code, stdout and the tail of stderr.
+ */
+export function run(spawn, cmd, args, timeoutMs, signal) {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new GrabFailed("caller gone"));
     const child = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
-    let killed = false;
-    const timer = setTimeout(() => {
-      killed = true;
+    let killed = null;
+    const kill = (why) => {
+      killed ??= why;
       child.kill("SIGKILL");
-    }, Math.max(0, timeoutMs));
+    };
+    const timer = setTimeout(() => kill(`${cmd} timed out`), Math.max(0, timeoutMs));
+    const hangUp = () => kill("caller gone");
+    signal?.addEventListener("abort", hangUp, { once: true });
     child.stdout.on("data", (d) => (stdout += d));
     child.stderr.on("data", (d) => (stderr = (stderr + d).slice(-STDERR_TAIL_CHARS)));
-    child.on("error", (error) => {
+    const done = () => {
       clearTimeout(timer);
+      signal?.removeEventListener("abort", hangUp);
+    };
+    child.on("error", (error) => {
+      done();
       reject(new GrabFailed(`${cmd} could not start (${error.code ?? "error"})`));
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
-      if (killed) reject(new GrabFailed(`${cmd} timed out`));
+      done();
+      if (killed) reject(new GrabFailed(killed));
       else resolve({ code, stdout, stderr });
     });
   });
@@ -152,7 +164,7 @@ function ytdlpReason(stderr) {
  * that is always removed. Frames newest-kept when over MAX_RESPONSE_BYTES, then the audio is dropped.
  */
 export async function grabClip(target, seconds, deps) {
-  const { spawn = nodeSpawn, now = Date.now, ytdlp = "yt-dlp", ffmpeg = "ffmpeg", tmp = tmpdir(), cookiesB64 = null } = deps;
+  const { spawn = nodeSpawn, now = Date.now, ytdlp = "yt-dlp", ffmpeg = "ffmpeg", tmp = tmpdir(), cookiesB64 = null, signal } = deps;
   const deadline = now() + seconds * 1000 + KILL_AFTER_MS;
   const dir = await mkdtemp(join(tmp, "clip-"));
   try {
@@ -161,16 +173,16 @@ export async function grabClip(target, seconds, deps) {
       cookiesPath = join(dir, "cookies.txt");
       await writeFile(cookiesPath, Buffer.from(cookiesB64, "base64"), { mode: 0o600 });
     }
-    const found = await run(spawn, ytdlp, ytdlpArgs(target.url, cookiesPath), deadline - now());
+    const found = await run(spawn, ytdlp, ytdlpArgs(target.url, cookiesPath), deadline - now(), signal);
     const inputs = found.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
     if (found.code !== 0 || inputs.length === 0) throw new GrabFailed(ytdlpReason(found.stderr));
     if (inputs.length > 2 || !inputs.every((input) => input.startsWith("https://"))) throw new GrabFailed("yt-dlp gave unexpected URLs");
     let startedAt = now();
-    let cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir), deadline - now());
+    let cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir), deadline - now(), signal);
     // A stream with no audio: ffmpeg stops at once (the mp3 has no stream), so cut the frames alone.
     if (cut.code !== 0 && NO_AUDIO.test(cut.stderr)) {
       startedAt = now();
-      cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir, false), deadline - now());
+      cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir, false), deadline - now(), signal);
     }
     const endedAt = now();
     if (cut.code !== 0) throw new GrabFailed("ffmpeg failed");
@@ -230,6 +242,9 @@ export function createHandler({ secret, log = console.log, maxRunning = MAX_RUNN
     running++;
     const started = Date.now();
     let where = "";
+    // The caller hung up before the answer: stop the tools now, so the slot frees at once.
+    const hangUp = new AbortController();
+    response.on("close", () => response.writableFinished || hangUp.abort());
     try {
       const body = await readJson(request);
       const target = streamTarget(body?.url);
@@ -239,7 +254,7 @@ export function createHandler({ secret, log = console.log, maxRunning = MAX_RUNN
       }
       where = `${target.host} ${target.id || "-"}`;
       const seconds = clampSeconds(body.seconds);
-      const clip = await grabClip(target, seconds, deps);
+      const clip = await grabClip(target, seconds, { ...deps, signal: hangUp.signal });
       const audioKb = clip.audio ? Math.round((clip.audio.base64.length * 3) / 4 / 1024) : 0;
       log(`clip ok ${where} ${seconds}s frames=${clip.frames.length} audio=${audioKb}KB ${Date.now() - started}ms`);
       return send(response, 200, clip);

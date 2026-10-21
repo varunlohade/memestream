@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { authorized, clampSeconds, createHandler, ffmpegArgs, grabClip, KILL_AFTER_MS, MAX_FRAMES, MAX_RESPONSE_BYTES, streamTarget, ytdlpArgs } from "./grab.mjs";
+import { authorized, clampSeconds, createHandler, ffmpegArgs, grabClip, KILL_AFTER_MS, MAX_FRAMES, MAX_RESPONSE_BYTES, MAX_RUNNING, streamTarget, ytdlpArgs } from "./grab.mjs";
 
 const SECRET = "s".repeat(40);
 const LIVE = "https://www.youtube.com/watch?v=MW3fisTCXRQ";
@@ -18,8 +18,8 @@ const HLS = ["https://manifest.googlevideo.com/video.m3u8", "https://manifest.go
 function fakeSpawn({ urls = HLS, ytdlpCode = 0, ytdlpErr = "", frames = 3, frameBytes = 1_000, audio = true, ffmpegCode = 0, mute = false, hang = null, gate = null } = {}) {
   const calls = [];
   const spawn = (cmd, args) => {
-    calls.push({ cmd, args });
     const child = new EventEmitter();
+    calls.push({ cmd, args, child });
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
     child.kill = (sig) => ((child.killedWith = sig), setImmediate(() => child.emit("close", null)));
@@ -148,7 +148,8 @@ test("grabClip: frames and audio from a fake spawn, cookies written to the temp 
   assert.deepEqual(await readdir(tmp), [], "temp dir removed after failures too");
 });
 
-test("grabClip: a child that hangs is killed at seconds + 40 s", async (t) => {
+test("grabClip: a child that hangs is killed at seconds + 30 s, before the site gives up at seconds + 35 s", async (t) => {
+  assert.equal(KILL_AFTER_MS, 30_000);
   const tmp = await tempRoot(t);
   const fake = fakeSpawn({ hang: "ffmpeg" });
   let clock = 0;
@@ -189,11 +190,12 @@ test("handler: health, 401 without the secret (and with no usable server secret)
   assert.equal((await closed.post({ url: LIVE }, "short")).status, 401, "a short server secret refuses all");
 });
 
-test("handler: a third clip while two run gets 429; the slots free up after", async (t) => {
+test("handler: 4 clips at once by default; one more than maxRunning gets 429; the slots free up after", async (t) => {
+  assert.equal(MAX_RUNNING, 4);
   const tmp = await tempRoot(t);
   let open;
   const gate = new Promise((resolve) => (open = resolve));
-  const { post } = await serve(t, { spawn: fakeSpawn({ gate }).spawn, tmp });
+  const { post } = await serve(t, { maxRunning: 2, spawn: fakeSpawn({ gate }).spawn, tmp });
   const first = post({ url: LIVE });
   const second = post({ url: LIVE });
   await new Promise((resolve) => setTimeout(resolve, 100));
@@ -201,5 +203,25 @@ test("handler: a third clip while two run gets 429; the slots free up after", as
   open();
   assert.deepEqual([(await first).status, (await second).status], [200, 200]);
   assert.equal((await post({ url: LIVE })).status, 200);
+  assert.deepEqual(await readdir(tmp), []);
+});
+
+test("handler: when the caller hangs up, the running tool is killed and the slot frees at once", async (t) => {
+  const tmp = await tempRoot(t);
+  const fake = fakeSpawn({ hang: "ffmpeg" });
+  const { post, base, lines } = await serve(t, { maxRunning: 1, spawn: fake.spawn, tmp });
+  const abort = new AbortController();
+  const pending = fetch(`${base}/clip`, { method: "POST", headers: { "x-grabber-secret": SECRET }, body: JSON.stringify({ url: LIVE }), signal: abort.signal }).catch(() => null);
+  const until = async (ok) => {
+    for (let i = 0; i < 200 && !ok(); i++) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.ok(ok());
+  };
+  await until(() => fake.calls.length === 2);
+  assert.equal((await post({ url: LIVE })).status, 429, "the slot is taken while ffmpeg runs");
+  abort.abort();
+  await pending;
+  await until(() => lines.some((l) => l.startsWith("clip failed (caller gone)")));
+  assert.equal(fake.calls[1].child.killedWith, "SIGKILL");
+  assert.equal((await post({ url: "https://evil.test/" })).status, 400, "the slot is free again");
   assert.deepEqual(await readdir(tmp), []);
 });
