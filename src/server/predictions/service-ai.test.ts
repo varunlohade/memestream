@@ -9,7 +9,7 @@ import { loadFengari, luaRedis } from "./lua-harness";
 import { REVIEW_PAUSED_TEXT } from "@/lib/predictions/engine";
 import { ReviewBudgetSpent, TYPESAFE_URL } from "./review";
 import { liveSlotKeys } from "./game-doc";
-import { type CoinFacts, LOCK_CLIPS, marketFacts, predictionsService, type ServiceDeps, urgentFirst } from "./service";
+import { type CoinFacts, LOCK_CLIPS, lockClipDue, marketFacts, predictionsService, type ServiceDeps, urgentFirst } from "./service";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
@@ -80,7 +80,7 @@ function fakeModels(withClip = false, now: () => number = Date.now) {
     return models.fail ? json({}, 500) : json(models.happened);
   };
   const clip = withClip ? clipClient({ url: GRABBER, secret: "g".repeat(32), fetch }) : null;
-  const ai = aiCheck({ apiKey: "or-test", fetch, sleep: async () => {} }, { apiKey: "ts-test", fetch, sleep: async () => {} }, { fetch }, clip);
+  const ai = aiCheck({ apiKey: "or-test", fetch, sleep: async () => {} }, { apiKey: "ts-test", fetch, sleep: async () => {} }, { fetch }, clip, now);
   return { models, ai };
 }
 
@@ -389,12 +389,10 @@ for (const [name, make] of STORES) {
     await viewAt(T0 + FRAME_GAP_MS);
     assert.equal(models.calls.clip, 0, "live grabs use the preview");
     await viewAt(LOCK + FRAME_GAP_MS);
-    assert.deepEqual([models.calls.clip, models.calls.vision], [1, 2], "the grab after the lock is a clip, described in one call");
-    assert.match(models.visionBodies.at(-1)!, /"type":"input_audio","input_audio":\{"data":"AAAA","format":"mp3"\}/);
-    assert.equal((await viewAt(LOCK + FRAME_GAP_MS + 1_000)).live.length, 1, "50 s after the lock the clip may still show pre-lock footage: not fresh, the referee waits");
-    assert.equal(models.calls.jev, 0);
+    assert.deepEqual([models.calls.clip, models.calls.frame], [0, 3], "within CLIP_LAG_MS of the lock a clip may hold pre-lock footage: the preview");
     await viewAt(LOCK + 2 * FRAME_GAP_MS);
-    assert.deepEqual([models.calls.clip, models.calls.vision], [2, 3], "the second clip");
+    assert.deepEqual([models.calls.clip, models.calls.vision], [1, 2], "past it, a clip, described in one call");
+    assert.match(models.visionBodies.at(-1)!, /"type":"input_audio","input_audio":\{"data":"AAAA","format":"mp3"\}/);
     const decided = await viewAt(LOCK + 2 * FRAME_GAP_MS + 1_000);
     const r = decided.resolved[0];
     assert.deepEqual([r.outcome, r.resolvedBy.role], ["yes", "ai"]);
@@ -407,14 +405,15 @@ for (const [name, make] of STORES) {
     const { models, viewAt, playToLive } = setup(make, TWITCH, true, undefined, true);
     models.happened = happenedAnswer("UNCLEAR", 0.95); // the referee waits, so grabbing goes on
     await playToLive();
-    for (let i = 0; i < 5; i++) {
-      models.picture = 10 + i; // a new preview each time, so each grab is described
-      await viewAt(LOCK + i * FRAME_GAP_MS);
+    // One grab inside CLIP_LAG_MS of the lock (a preview, which takes no clip slot), then every FRAME_GAP_MS from the clip window on.
+    for (const t of [LOCK + 10_000, ...[0, 1, 2, 3, 4].map((i) => LOCK + CLIP_LAG_MS + i * FRAME_GAP_MS)]) {
+      models.picture++; // a new preview each time, so each grab is described
+      await viewAt(t);
     }
     assert.equal(models.calls.clip, LOCK_CLIPS);
     const described = models.visionBodies.slice(1).map((body) => (body.includes("input_audio") ? "clip" : "preview"));
-    assert.deepEqual(described.slice(0, LOCK_CLIPS), ["clip", "clip"]);
-    assert.ok(described.length > LOCK_CLIPS && described.slice(LOCK_CLIPS).every((d) => d === "preview"), described.join(", "));
+    assert.deepEqual(described.slice(0, 1 + LOCK_CLIPS), ["preview", "clip", "clip"]);
+    assert.ok(described.length > 1 + LOCK_CLIPS && described.slice(1 + LOCK_CLIPS).every((d) => d === "preview"), described.join(", "));
   });
 
   test(`${name}: a failing grabber falls back to the preview after the lock; at resolve the check uses a clip`, async () => {
@@ -423,9 +422,13 @@ for (const [name, make] of STORES) {
     const id = await playToLive();
     models.clipFails = true;
     models.picture = 2;
-    await viewAt(LOCK);
+    await viewAt(LOCK + CLIP_LAG_MS);
     assert.deepEqual([models.calls.clip, models.calls.frame], [1, 2], "the clip failed: the preview was grabbed");
     assert.doesNotMatch(models.visionBodies.at(-1)!, /input_audio/);
+    models.picture = 3;
+    await viewAt(LOCK + CLIP_LAG_MS + FRAME_GAP_MS); // the referee's early run (the preview was fresh)
+    await viewAt(LOCK + CLIP_LAG_MS + 2 * FRAME_GAP_MS); // still inside CLIP_PAUSE_MS of the failure
+    assert.deepEqual([models.calls.clip, models.calls.frame], [1, 3], "after a failure the next grab uses the preview, without asking the grabber");
     assert.equal((await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1_000)).live[0].ai, "unclear");
     models.clipFails = false;
     const clips = models.calls.clip;
@@ -468,4 +471,14 @@ test("audit F3: a market decides on game-screen and camera facts only (unknown a
   assert.equal(marketFacts(note).text, "[game_ui] Score 13-11; [camera] A man jumps");
   assert.match(marketFacts({ ...note, text: "[unknown] WIN" }).text!, /^Nothing on the game screen/);
   assert.equal(marketFacts({ ...note, text: "[audio] The streamer says he won; [camera] A man jumps" }).text, "[camera] A man jumps", "anyone can say anything into the mic");
+});
+
+test("lockClipDue: a clip only once the lock is CLIP_LAG_MS behind (so it is fresh), for the first LOCK_CLIPS pictures from then on", () => {
+  const base = { id: "1", text: "Q?", rule: null, kind: "after" as const, lockAt: LOCK, hashes: [] };
+  const note = (at: number) => ({ kind: "after" as const, at, text: "x" });
+  assert.equal(lockClipDue({ ...base, at: LOCK + CLIP_LAG_MS - 1, frames: [] }), false, "too soon: the preview");
+  assert.equal(lockClipDue({ ...base, at: LOCK + CLIP_LAG_MS, frames: [note(LOCK + 10_000)] }), true, "a preview grabbed earlier takes no clip slot");
+  assert.equal(lockClipDue({ ...base, at: LOCK + 3 * MIN, frames: [note(LOCK + CLIP_LAG_MS)] }), true, "one clip so far");
+  assert.equal(lockClipDue({ ...base, at: LOCK + 3 * MIN, frames: [note(LOCK + CLIP_LAG_MS), note(LOCK + 2 * MIN)] }), false, "two: later grabs use the preview");
+  assert.equal(lockClipDue({ ...base, kind: "live", at: LOCK + 3 * MIN, frames: [] }), false, "betting still open");
 });

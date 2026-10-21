@@ -280,10 +280,13 @@ export function decideClient(deps: ModelDeps) {
  * seen (same hash, no model call) and describes a new one once for all the questions asked, with the
  * time the CDN says it was made. With a video grabber (`clip`), a grab at a key moment (the first
  * ones after the lock, or at resolve) describes a clip instead: its frames and audio in one call,
- * timed CLIP_LAG_MS before the grabber's start (the earliest its footage may be). A clip that fails
- * quickly (under CLIP_FALLBACK_MS) falls back to the preview; one that fails slowly gives nothing this
- * run, and a clip whose description fails fails the run (the next run retries). jev decides; the text
- * model writes the check rule. Every model call (each HTTP attempt) takes one from the budget.
+ * timed CLIP_LAG_MS before the grabber's start (the earliest its footage may be). The budget is
+ * checked before the grabber is asked (that call pays for the description's first try). A clip that
+ * fails quickly (under CLIP_FALLBACK_MS) falls back to the preview; one that fails slowly gives
+ * nothing this run; either way that stream's grabs use the preview for CLIP_PAUSE_MS, so a failing
+ * grabber never starves the referee. A clip whose description fails fails the run (the next run
+ * retries). jev decides; the text model writes the check rule. Every model call (each HTTP attempt)
+ * takes one from the budget.
  *
  * Worst case, every step timing out, so a run stays under the AI run lease (2 min) and the routes'
  * 120 s maxDuration, with room to commit:
@@ -295,20 +298,31 @@ export function decideClient(deps: ModelDeps) {
  */
 /** A clip failure quicker than this (busy, refused, offline) still leaves time for the preview. */
 export const CLIP_FALLBACK_MS = 15_000;
+/** After a clip failure, that stream's grabs use the preview this long (about two grabs). In memory, per server. */
+export const CLIP_PAUSE_MS = 2 * 60_000;
 
-export function aiCheck(vision: ModelDeps, jev: ModelDeps, frames: FrameDeps = {}, clip: ClipSource | null = null): AiCheckDeps {
+export function aiCheck(vision: ModelDeps, jev: ModelDeps, frames: FrameDeps = {}, clip: ClipSource | null = null, now: () => number = Date.now): AiCheckDeps {
   const describe = describeClient(vision);
+  /** Streams whose last clip failed, and until when their grabs use the preview. */
+  const pausedUntil = new Map<string, number>();
   return {
     capture: async (streamUrl, asked, seen, spend, moment) => {
-      if (clip && moment) {
+      if (clip && moment && now() >= (pausedUntil.get(streamUrl) ?? 0)) {
+        // No grabber work a coin can't describe: this call pays for the description's first try.
+        if (!(await spend())) throw new BudgetSpent("The daily AI budget is used up");
+        let prepaid = true;
+        const paid: Spend = async () => (prepaid ? ((prepaid = false), true) : spend());
         const got = await clip(streamUrl);
         if (!("failed" in got)) {
+          pausedUntil.delete(streamUrl);
           if (seen.includes(got.hash)) return null;
-          return { hash: got.hash, text: await describe(asked, got, spend), shot: got.startedAt - CLIP_LAG_MS };
+          return { hash: got.hash, text: await describe(asked, got, paid), shot: got.startedAt - CLIP_LAG_MS };
         }
+        pausedUntil.set(streamUrl, now() + CLIP_PAUSE_MS);
         const late = got.ms >= CLIP_FALLBACK_MS;
         console.warn(`predictions: no clip at ${moment} (${got.failed}); ${late ? "too late for the preview" : "using the preview"}`);
         if (late) return null;
+        spend = paid;
       }
       const frame = await fetchFrame(frameUrls(streamUrl), frames);
       if (!frame || seen.includes(frame.hash)) return null;

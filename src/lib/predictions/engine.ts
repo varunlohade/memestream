@@ -414,8 +414,8 @@ export function applyReviewPaused(state: Game, target: ReviewTarget, now: number
   });
 }
 
-/** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has, `afterLock` how many were grabbed after the lock. */
-export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; hashes: string[]; afterLock: number };
+/** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has, `frames` its notes so far. */
+export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; lockAt: number; hashes: string[]; frames: FrameNote[] };
 /** A result to check: its question, the outcome someone else gave, the frames grabbed before, which run this is, and whether it has a real-SOL market. */
 export type CheckTarget = { id: string; text: string; rule: string | null; outcome: Side; frames: FrameNote[]; tries: number; market: boolean };
 /**
@@ -535,8 +535,7 @@ export function startAi(state: Game, now: number, env: Env): Result & { rules: R
         live.grabAt = now;
         const kind = now >= live.lockAt ? "after" : live.frames?.length ? "live" : "launch";
         const frames = live.frames ?? [];
-        const afterLock = frames.filter((f) => f.text && (f.kind === "after" || f.kind === "lock")).length;
-        captures.push({ id: live.id, text: live.text, rule, kind, at: now, hashes: frames.flatMap((f) => (f.hash ? [f.hash] : [])), afterLock });
+        captures.push({ id: live.id, text: live.text, rule, kind, at: now, lockAt: live.lockAt, hashes: frames.flatMap((f) => (f.hash ? [f.hash] : [])), frames });
       }
     }
     for (const p of game.resolved) {

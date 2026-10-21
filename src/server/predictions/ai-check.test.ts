@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { CHECK_RULE_MAX, FRAME_NOTE_MAX } from "@/lib/predictions/rules";
 import { freshNotes } from "@/lib/predictions/engine";
-import { AI_CHECK_MIN_CONFIDENCE, aiCheck, AiCheckFailed, CLIP_FALLBACK_MS, BudgetSpent, decideClient, describeClient, NO_EVIDENCE, OPENROUTER_URL, parseDescription, parseHappened, ruleClient } from "./ai-check";
+import { AI_CHECK_MIN_CONFIDENCE, aiCheck, AiCheckFailed, CLIP_FALLBACK_MS, CLIP_PAUSE_MS, BudgetSpent, decideClient, describeClient, NO_EVIDENCE, OPENROUTER_URL, parseDescription, parseHappened, ruleClient } from "./ai-check";
 import { CLIP_LAG_MS } from "./clip";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { TYPESAFE_URL } from "./review";
@@ -245,4 +245,33 @@ test("clip freshness: a clip counts as after the lock only if its earliest foota
   assert.deepEqual([freshNotes({ lockAt, frames: [early] }, true).length, freshNotes({ lockAt, frames: [early] }).length], [0, 0], "10 s after the lock: not fresh");
   const late = await note(lockAt + 70_000);
   assert.deepEqual([freshNotes({ lockAt, frames: [late] }, true).length, freshNotes({ lockAt, frames: [late] }).length], [1, 1], "70 s after the lock: fresh");
+});
+
+test("aiCheck.capture: the budget is checked before the grabber is asked, and that call pays for the description's first try", async () => {
+  let clips = 0;
+  let spent = 0;
+  const source = aiCheck({ apiKey: "k", fetch: async () => json(factsAnswer(["A desk", "camera"])) }, { apiKey: "k" }, {}, async () => (clips++, CLIP));
+  await assert.rejects(source.capture("https://twitch.tv/lofigirl", ASK, [], async () => false, "lock"), BudgetSpent);
+  assert.equal(clips, 0, "no budget: the grabber is never asked");
+  await source.capture("https://twitch.tv/lofigirl", ASK, [], async () => (spent++, true), "lock");
+  assert.deepEqual([clips, spent], [1, 1], "one model call, one budget unit");
+});
+
+test("aiCheck.capture: after a clip failure, that stream uses the preview for CLIP_PAUSE_MS; other streams still get clips", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const clock = { t: 1_000_000 };
+  let fails = true;
+  const asked: string[] = [];
+  const frames = { fetch: async () => new Response(String(clock.t), { headers: { "content-type": "image/jpeg" } }) };
+  const source = aiCheck({ apiKey: "k", fetch: async () => json(factsAnswer(["A desk", "camera"])) }, { apiKey: "k" }, frames, async (url) => (asked.push(url), fails ? { failed: "timeout", ms: 45_000 } : CLIP), () => clock.t);
+  const spend = async () => true;
+  assert.equal(await source.capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock"), null, "a slow failure: nothing this run");
+  fails = false;
+  clock.t += CLIP_PAUSE_MS - 1;
+  const paused = await source.capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock");
+  assert.deepEqual([asked.length, paused?.text], [1, "[camera] A desk"], "paused: the preview, the grabber not asked");
+  await source.capture("https://kick.com/somebody", ASK, [], spend, "lock");
+  assert.equal(asked.length, 2, "another stream is not paused");
+  clock.t += 1;
+  assert.equal((await source.capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock"))?.hash, CLIP.hash, "the pause is over: a clip again");
 });

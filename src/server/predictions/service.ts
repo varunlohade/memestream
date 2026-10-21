@@ -17,6 +17,7 @@ import { AI_CHECK_MAX_TRIES, DEFAULT_WINDOW_MIN, FLAG_WINDOW_MS, MAX_GRANTS_PER_
 import type { LeaderRow, MarketStepView, PredictionsView, Standing, WitnessView } from "@/lib/predictions/view";
 import { grant, isEligible, newProfile, onLeaderboard, type Profile, utcDay } from "@/lib/predictions/watch";
 import { type Asked, BudgetSpent, NO_EVIDENCE, type Spend } from "./ai-check";
+import { CLIP_LAG_MS } from "./clip";
 import { frameUrls } from "./frames";
 import { ReviewBudgetSpent } from "./review";
 import { coinKey, GAME_KEY_COUNT, gameKeys, LIVE_COINS_KEY, liveIndex, liveSlotKeys, loadGame, WORK_COINS_KEY, workIndex } from "./game-doc";
@@ -54,6 +55,15 @@ export type Evidence = { hash: string; text: string; shot?: number };
 export type KeyMoment = "lock" | "resolve";
 /** Post-lock pictures taken at a key moment: a market needs MIN_MARKET_PICTURES fresh ones that agree; later grabs are ordinary. */
 export const LOCK_CLIPS = MIN_MARKET_PICTURES;
+
+/**
+ * Whether a grab is a key moment: past the lock by CLIP_LAG_MS (so even a clip's earliest footage is
+ * after it, and the clip is fresh), with fewer than LOCK_CLIPS pictures grabbed since then.
+ */
+export function lockClipDue(target: CaptureTarget): boolean {
+  const from = target.lockAt + CLIP_LAG_MS;
+  return target.kind === "after" && target.at >= from && target.frames.filter((f) => f.text && f.at >= from).length < LOCK_CLIPS;
+}
 
 /**
  * Where the AI referee's evidence comes from, and how it decides: the seam a source plugs into
@@ -652,8 +662,8 @@ export function predictionsService(deps: ServiceDeps) {
     const seenByAll = targets[0].hashes.filter((hash) => targets.every((t) => t.hashes.includes(hash)));
     let saved: Evidence | null;
     try {
-      // Grabs claimed together share one picture: a key moment when any of them is past its lock with fewer than LOCK_CLIPS pictures since.
-      const moment = targets.some((t) => t.kind === "after" && t.afterLock < LOCK_CLIPS) ? "lock" : undefined;
+      // Grabs claimed together share one picture: a key moment when it is one for any of them.
+      const moment = targets.some(lockClipDue) ? "lock" : undefined;
       saved = await ai.capture(streamUrl, targets.map((t) => ({ question: t.text, rule: t.rule })), seenByAll, spend, moment);
       if (!saved) return;
     } catch (error) {
