@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { coinsToSol, convertTyped, freshFloor, QUOTE_REFRESH_MS, quoteUrl, slippageLabel, solToCoins, tradeAmount, tradeChips } from "./trade-box";
+import { amountKey, coinsToSol, convertTyped, freshFloor, QUOTE_REFRESH_MS, quoteUrl, slippageLabel, solToCoins, tradeAmount, tradeChips, unitKey } from "./trade-box";
 
 const PRICE = 3e-8; // SOL per coin
 
@@ -97,4 +97,11 @@ test("freshFloor: the floor sent is the fresh quote's; a fresh minimum below the
 test("quoteUrl and the refresh interval", () => {
   assert.equal(quoteUrl("Mint1", "sell", "5", 100), "/api/quote?mint=Mint1&side=sell&amount=5&slippageBps=100");
   assert.equal(QUOTE_REFRESH_MS, 10_000);
+});
+
+test("saved amounts: a versioned key per coin and side, so an amount saved before units were kept is ignored", () => {
+  assert.equal(amountKey("Mint1", "sell"), "memestream.amount2.Mint1.sell");
+  assert.notEqual(amountKey("Mint1", "sell"), "memestream.amount.Mint1.sell", "the old key is never read");
+  assert.equal(unitKey("Mint1", "sell"), "memestream.unit.Mint1.sell");
+  assert.notEqual(amountKey("Mint1", "buy"), amountKey("Mint2", "buy"));
 });

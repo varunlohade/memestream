@@ -110,3 +110,12 @@ export function freshFloor(side: Side, shown: string | null | undefined, fresh: 
   if (now === null || seen === null || now < seen) return { moved: true };
   return { floor: fresh };
 }
+
+/**
+ * Where the trade box keeps the typed amount and its input unit (sessionStorage, this tab only), per
+ * coin and side: another tab or coin flipping its unit must never reinterpret this amount (a coin
+ * amount read as SOL would cap to a 100% sell). The amount key is versioned with the unit key: an
+ * amount saved before units were kept (no unit beside it) is ignored, never read as SOL.
+ */
+export const amountKey = (mint: string, side: Side) => `memestream.amount2.${mint}.${side}`;
+export const unitKey = (mint: string, side: Side) => `memestream.unit.${mint}.${side}`;

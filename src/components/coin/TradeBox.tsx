@@ -9,20 +9,13 @@ import { DEFAULT_SLIPPAGE_BPS, SLIPPAGE_CHOICES_BPS } from "@/lib/api-types";
 import { fetchJson } from "@/lib/http";
 import { compact, SIDE_LABEL } from "@/lib/format";
 import { LAUNCH_FEE, launchFeeAt } from "@/lib/launch-fee";
-import { convertTyped, freshFloor, NATURAL_UNIT, quoteUrl, type Side, slippageLabel, tradeAmount, tradeChips, type Unit } from "@/lib/trade-box";
+import { amountKey, convertTyped, freshFloor, NATURAL_UNIT, quoteUrl, type Side, slippageLabel, tradeAmount, tradeChips, type Unit, unitKey } from "@/lib/trade-box";
 
 type Status = { kind: "busy" | "done" | "error"; text: string };
 
-/** The typed amount survives a reload (per coin and side) via sessionStorage; this tab only. */
-const amountKey = (mint: string, side: Side) => `memestream.amount.${mint}.${side}`;
 const DEFAULT_AMOUNT: Record<Side, string> = { buy: "0.5", sell: "" };
 
-/**
- * The input unit lives in sessionStorage next to the typed amount it describes, with the same key
- * (coin and side): another tab or another coin flipping its unit must never reinterpret this amount
- * (a coin amount read as SOL would cap to a 100% sell). The max slippage is a browser-wide choice in localStorage.
- */
-const unitKey = (mint: string, side: Side) => `memestream.unit.${mint}.${side}`;
+/** The typed amount and its unit live in sessionStorage (amountKey, unitKey); the max slippage is a browser-wide choice in localStorage. */
 const SLIPPAGE_KEY = "memestream.slippageBps";
 
 function read(storage: () => Storage, key: string): string | null {
