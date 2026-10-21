@@ -30,7 +30,7 @@ test("an identical trade while the first is signed and pending is refused with 4
   const response = duplicateResponse(SIG);
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { error: DUPLICATE_MESSAGE, duplicate: true, pendingSignature: SIG });
-  assert.equal(DUPLICATE_MESSAGE, "Your last trade is still confirming. Check your wallet before trading again.");
+  assert.equal(DUPLICATE_MESSAGE, "This trade may still be on its way. Wait up to 2 minutes or check your wallet before trying again.");
 });
 
 test("slippage and the quoted minimum don't make a trade different", () => {
@@ -272,4 +272,28 @@ test("a wallet error never replaces a reported signature", async () => {
   const { intents, key, token } = await setup();
   await intents.maybeSent(token, T0 + 2_000);
   assert.deepEqual(await intents.pending(key, T0 + 3_000), { signature: SIG });
+});
+
+test("a trade reported confirmed or failed is done: a late wallet-error or rejection report never holds or touches it again", async () => {
+  for (const status of ["confirmed", "failed"] as const) {
+    const { intents, key, token } = await setup();
+    await intents.report(token, HASH, SIG, status, T0 + 5_000);
+    await intents.maybeSent(token, T0 + 6_000);
+    assert.equal(await intents.pending(key, T0 + 7_000), null, `${status}: no new hold`);
+    const next = (await intents.remember(key, HASH, T0 + 8_000)) as string;
+    await intents.release(token);
+    assert.deepEqual(await intents.pending(key, T0 + 9_000), { signature: null }, "the old token can't drop the new build's hold");
+    assert.ok(next);
+  }
+});
+
+test("done also when the confirm report comes after the build hold lapsed", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  const token = (await intents.remember(key, HASH, T0)) as string;
+  clock.t = T0 + BUILD_HOLD_MS + 1_000;
+  await intents.report(token, HASH, SIG, "confirmed", clock.t);
+  await intents.maybeSent(token, clock.t + 1_000);
+  assert.equal(await intents.pending(key, clock.t + 2_000), null);
 });
