@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS, REVIEW_RETRY_MS, FRAME_GAP_MS, FRAMES_AFTER_LOCK_MS } from "@/lib/predictions/rules";
 import { newProfile } from "@/lib/predictions/watch";
 import { aiCheck, OPENROUTER_URL } from "./ai-check";
+import { clipClient } from "./clip";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { REVIEW_PAUSED_TEXT } from "@/lib/predictions/engine";
@@ -34,8 +35,10 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
  * Fake models behind one fake fetch (no test reaches a real API): the frame CDN, OpenRouter (the
  * check rule and frame descriptions) and jev. `picture` is what the preview shows now (its bytes);
  * `happened` is jev's answer; `fail` makes the model calls fail; `frame: false` is an offline stream.
+ * `withClip`: a video grabber too (`clipFails`: it answers 502), whose clips have audio.
  */
-function fakeModels() {
+const GRABBER = "https://grabber.test/clip";
+function fakeModels(withClip = false, now: () => number = Date.now) {
   const models = {
     happened: happenedAnswer("YES") as unknown,
     fail: false,
@@ -44,7 +47,9 @@ function fakeModels() {
     picture: 1,
     /** The CDN's Last-Modified for the picture (ms), if it sends one. */
     shot: undefined as number | undefined,
-    calls: { frame: 0, rule: 0, vision: 0, jev: 0 },
+    clipFails: false,
+    calls: { frame: 0, rule: 0, vision: 0, jev: 0, clip: 0 },
+    visionBodies: [] as string[],
     jevBodies: [] as string[],
   };
   const fetch: typeof globalThis.fetch = async (url, init) => {
@@ -54,12 +59,19 @@ function fakeModels() {
       const headers = { "content-type": "image/jpeg", ...(models.shot !== undefined ? { "last-modified": new Date(models.shot).toUTCString() } : {}) };
       return models.frame ? new Response(new Uint8Array([models.picture, 2, 3]), { headers }) : Promise.reject(new TypeError("redirect"));
     }
+    if (u === GRABBER) {
+      models.calls.clip++;
+      const frame = { mime: "image/jpeg", base64: Buffer.from([9, models.picture, models.calls.clip]).toString("base64") };
+      return models.clipFails ? json({ error: "stream not live" }, 502) : json({ frames: [frame, frame], audio: { format: "mp3", base64: "AAAA" }, startedAt: now(), endedAt: now() });
+    }
     if (u === OPENROUTER_URL) {
       if (String(init!.body).includes("You write the check rule")) {
         models.calls.rule++;
         return models.ruleFails ? json({}, 500) : json(visionAnswer(RULE));
       }
       models.calls.vision++;
+      models.visionBodies.push(String(init!.body));
+      if (String(init!.body).includes('"input_audio"')) return models.fail ? json({}, 500) : json(factsAnswer(["A girl says hello to chat (clip)", "audio"], ["A girl at a desk (clip)", "camera"]));
       return models.fail ? json({}, 500) : json(factsAnswer([`A girl with headphones writes at a desk (picture ${models.picture})`, "camera"]));
     }
     assert.equal(u, TYPESAFE_URL);
@@ -67,14 +79,15 @@ function fakeModels() {
     models.jevBodies.push(String(init!.body));
     return models.fail ? json({}, 500) : json(models.happened);
   };
-  const ai = aiCheck({ apiKey: "or-test", fetch, sleep: async () => {} }, { apiKey: "ts-test", fetch, sleep: async () => {} }, { fetch });
+  const clip = withClip ? clipClient({ url: GRABBER, secret: "g".repeat(32), fetch }) : null;
+  const ai = aiCheck({ apiKey: "or-test", fetch, sleep: async () => {} }, { apiKey: "ts-test", fetch, sleep: async () => {} }, { fetch }, clip);
   return { models, ai };
 }
 
-function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null = TWITCH, withAi = true, aiBudget?: ServiceDeps["aiBudget"]) {
+function setup(make: (clock: Clock) => PredictionStore, streamUrl: string | null = TWITCH, withAi = true, aiBudget?: ServiceDeps["aiBudget"], withClip = false) {
   const clock = { t: T0 };
   const store = make(clock);
-  const { models, ai } = fakeModels();
+  const { models, ai } = fakeModels(withClip, () => clock.t);
   const deferred: (() => Promise<void>)[] = [];
   /** The next this many question reviews fail. */
   let reviewFailures = 0;
@@ -216,7 +229,7 @@ for (const [name, make] of STORES) {
       await s.settle();
       const r = (await s.service.view(COIN, "v1")).resolved[0];
       assert.deepEqual([r.outcome, r.resolvedBy.role, r.ai], ["no", "streamer", null]);
-      assert.deepEqual(s.models.calls, { frame: 0, rule: 0, vision: 0, jev: 0 });
+      assert.deepEqual(s.models.calls, { frame: 0, rule: 0, vision: 0, jev: 0, clip: 0 });
     }
   });
 
@@ -369,6 +382,44 @@ for (const [name, make] of STORES) {
     assert.equal((await service.view(COIN, "v1")).resolved[0].resolvedBy.role, "ai");
   });
 
+  test(`${name}: with the video grabber, a clip (frames and audio) is the evidence after the lock and at resolve; launch keeps the preview`, async () => {
+    const { models, viewAt, playToLive } = setup(make, TWITCH, true, undefined, true);
+    await playToLive();
+    assert.deepEqual([models.calls.clip, models.calls.frame, models.calls.vision], [0, 1, 1], "the launch grab uses the preview");
+    await viewAt(T0 + FRAME_GAP_MS);
+    assert.equal(models.calls.clip, 0, "live grabs use the preview");
+    await viewAt(LOCK + FRAME_GAP_MS);
+    assert.deepEqual([models.calls.clip, models.calls.vision], [1, 2], "the grab after the lock is a clip, described in one call");
+    assert.match(models.visionBodies.at(-1)!, /"type":"input_audio","input_audio":\{"data":"AAAA","format":"mp3"\}/);
+    const decided = await viewAt(LOCK + FRAME_GAP_MS + 1_000);
+    const r = decided.resolved[0];
+    assert.deepEqual([r.outcome, r.resolvedBy.role], ["yes", "ai"]);
+    assert.match(r.aiReason ?? "", /\[audio\] A girl says hello to chat \(clip\)/, "audio facts count for points");
+    const sent = JSON.parse(models.jevBodies[0]).state.frames.at(-1);
+    assert.deepEqual([sent.grabbed, sent.taken], ["after", new Date(LOCK + FRAME_GAP_MS).toISOString()], "the clip's time is the grabber's, never after the grab");
+  });
+
+  test(`${name}: a failing grabber falls back to the preview after the lock; at resolve the check uses a clip`, async () => {
+    const { models, viewAt, playToLive, service, settle } = setup(make, TWITCH, true, undefined, true);
+    models.happened = happenedAnswer("UNCLEAR", 0.95);
+    const id = await playToLive();
+    models.clipFails = true;
+    models.picture = 2;
+    await viewAt(LOCK);
+    assert.deepEqual([models.calls.clip, models.calls.frame], [1, 2], "the clip failed: the preview was grabbed");
+    assert.doesNotMatch(models.visionBodies.at(-1)!, /input_audio/);
+    assert.equal((await viewAt(LOCK + FRAMES_AFTER_LOCK_MS + 1_000)).live[0].ai, "unclear");
+    models.clipFails = false;
+    const clips = models.calls.clip;
+    models.happened = happenedAnswer("NO", 0.9);
+    await service.act(COIN, STREAMER, { kind: "witness", id, outcome: "yes" });
+    await settle();
+    assert.equal(models.calls.clip, clips + 1, "the check at resolve grabbed a clip");
+    assert.match(models.visionBodies.at(-1)!, /input_audio/);
+    assert.equal(JSON.parse(models.jevBodies.at(-1)!).state.frames.at(-1).grabbed, "resolve");
+    assert.deepEqual((await service.view(COIN, "v1")).resolved[0].ai, "disagree");
+  });
+
   test(`${name}: the live sweep grabs frames and runs the referee with nobody watching`, async () => {
     const { models, service, playToLive, clock, settle } = setup(make);
     await playToLive();
@@ -394,8 +445,9 @@ test("audit N2: the sweep takes coins inside an evidence window first", () => {
   assert.deepEqual(order, ["locked", "open", "done", "none"]);
 });
 
-test("audit F3: a market decides on game-screen and camera facts only (unknown sources dropped too)", () => {
+test("audit F3: a market decides on game-screen and camera facts only (unknown and audio sources dropped too)", () => {
   const note = { kind: "after" as const, at: T0, text: "[game_ui] Score 13-11; [unknown] A banner says WIN; [camera] A man jumps" };
   assert.equal(marketFacts(note).text, "[game_ui] Score 13-11; [camera] A man jumps");
   assert.match(marketFacts({ ...note, text: "[unknown] WIN" }).text!, /^Nothing on the game screen/);
+  assert.equal(marketFacts({ ...note, text: "[audio] The streamer says he won; [camera] A man jumps" }).text, "[camera] A man jumps", "anyone can say anything into the mic");
 });

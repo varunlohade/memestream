@@ -156,3 +156,53 @@ test("aiCheck.capture: grabs the preview, describes a new picture once (same has
   assert.equal(await source("img").capture("https://kick.com/somebody", ASK, [], spend), null);
   assert.deepEqual(hits, []);
 });
+
+const CLIP = { frames: [{ mime: "image/jpeg" as const, base64: "AAEC" }, { mime: "image/jpeg" as const, base64: "AAED" }], audio: { format: "mp3" as const, base64: "AAAA" }, startedAt: Date.parse("2026-10-12T10:03:00Z"), hash: "fedcba9876543210" };
+
+test("describeClient with a clip: every frame as an image, then the audio as an OpenRouter input_audio part, in one call; audio facts kept", async () => {
+  const bodies: string[] = [];
+  const describe = describeClient({ apiKey: "k", fetch: async (_url, init) => (bodies.push(String(init!.body)), json(factsAnswer(["The streamer says GG", "audio"], ["A win screen", "game_ui"]))) });
+  assert.equal(await describe(ASK, CLIP), "[audio] The streamer says GG; [game_ui] A win screen");
+  const content = JSON.parse(bodies[0]).messages[1].content;
+  assert.equal(content[1].text, "A clip: 2 frame(s) 5 s apart, oldest first, then its audio.");
+  assert.deepEqual(content.slice(2).map((c: { type: string }) => c.type), ["image_url", "image_url", "input_audio"]);
+  assert.deepEqual(content[4], { type: "input_audio", input_audio: { data: "AAAA", format: "mp3" } });
+  assert.match(JSON.parse(bodies[0]).messages[0].content, /"audio" \(speech or sounds heard/);
+  assert.equal(bodies.length, 1);
+});
+
+test("parseDescription: audio facts count only when audio was sent", () => {
+  const facts = factsAnswer(["He says he won", "audio"], ["A man jumps", "camera"]);
+  assert.equal(parseDescription(facts, true), "[audio] He says he won; [camera] A man jumps");
+  assert.equal(parseDescription(facts), "[camera] A man jumps", "a still frame has no audio: an audio fact is made up");
+});
+
+test("aiCheck.capture with a grabber: a clip after the lock and at resolve, the preview otherwise or when the clip fails; a spent budget is not retried", async () => {
+  const hits: string[] = [];
+  const answers: string[] = [];
+  const vision = { apiKey: "k", fetch: async (url: string | URL | Request, init?: RequestInit) => (hits.push(String(url)), answers.push(String(init!.body)), json(factsAnswer(["A girl at a desk", "camera"]))) };
+  const frames = { fetch: async (url: string | URL | Request) => (hits.push(String(url)), new Response("img", { headers: { "content-type": "image/jpeg" } })) };
+  let clips = 0;
+  const source = (clip: typeof CLIP | null) => aiCheck(vision, { apiKey: "k" }, frames, async () => (clips++, clip));
+  const spend = async () => true;
+  for (const moment of ["after", "resolve"] as const) {
+    hits.length = 0;
+    const got = await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend, moment);
+    assert.deepEqual(got, { hash: CLIP.hash, text: "[camera] A girl at a desk", shot: CLIP.startedAt });
+    assert.deepEqual(hits, [OPENROUTER_URL], "no preview fetched");
+    assert.match(answers.at(-1)!, /input_audio/);
+  }
+  clips = 0;
+  hits.length = 0;
+  for (const moment of ["launch", "live", undefined] as const) await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend, moment);
+  assert.deepEqual([clips, hits.filter((h) => h === FRAME.url).length], [0, 3], "launch and live use the preview");
+  hits.length = 0;
+  const fallback = await source(null).capture("https://twitch.tv/lofigirl", ASK, [], spend, "after");
+  assert.deepEqual([fallback?.text, hits], ["[camera] A girl at a desk", [FRAME.url, OPENROUTER_URL]], "no clip: the preview");
+  let failing = 0;
+  const broken = aiCheck({ apiKey: "k", fetch: async (_u, init) => (++failing === 1 && String(init!.body).includes("input_audio") ? json({}, 400) : json(factsAnswer(["A desk", "camera"]))) }, { apiKey: "k" }, frames, async () => CLIP);
+  assert.equal((await broken.capture("https://twitch.tv/lofigirl", ASK, [], spend, "after"))?.text, "[camera] A desk", "the clip's description failed: the preview");
+  hits.length = 0;
+  await assert.rejects(source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], async () => false, "after"), BudgetSpent);
+  assert.deepEqual(hits, [], "budget spent: no model call and no preview");
+});

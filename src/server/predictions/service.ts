@@ -8,7 +8,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, AI, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary, type Witness } from "@/lib/predictions/engine";
 import { applyReview, applyReviewPaused, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
-import { aiDue, type AiVerdict, applyAiVerdict, applyFrames, applyReferee, applyRule, releaseAiRun, type CaptureTarget, type CheckTarget, type FrameNote, freshNotes } from "@/lib/predictions/engine";
+import { aiDue, type AiVerdict, applyAiVerdict, applyFrames, applyReferee, applyRule, releaseAiRun, type CaptureTarget, type CheckTarget, type FrameKind, type FrameNote, freshNotes } from "@/lib/predictions/engine";
 import { type RefereeAnswer, refereeState, type RefereeTarget, refereeWhy, type RuleTarget, startAi } from "@/lib/predictions/engine";
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
@@ -61,9 +61,10 @@ export type Evidence = { hash: string; text: string; shot?: number };
 export type EvidenceSource = {
   /**
    * Evidence on the stream now, described once for every question `asked`; null if the stream has
-   * none now or it is the same as one in `seen` (then no model is asked).
+   * none now or it is the same as one in `seen` (then no model is asked). `moment`: what the grab is
+   * for (a source may use richer evidence once betting closed and at resolve).
    */
-  capture: (streamUrl: string, asked: Asked[], seen: string[], spend: Spend) => Promise<Evidence | null>;
+  capture: (streamUrl: string, asked: Asked[], seen: string[], spend: Spend, moment?: FrameKind) => Promise<Evidence | null>;
   /** What happened, from the question, its rule and the notes only (never anyone's outcome); `lockAt`: when betting closed. */
   decide: (question: string, notes: FrameNote[], rule: string | null, lockAt: number | null, spend: Spend) => Promise<{ happened: "yes" | "no" | "unclear"; confidence: number; model: string }>;
   /** The check rule for a question that went live: what on stream decides YES or NO. */
@@ -108,7 +109,10 @@ export type ServiceDeps = {
   closeWaitMs?: number;
 };
 
-/** A market decides on the game screen and the camera only: facts of unknown source are dropped too. */
+/**
+ * A market (real SOL) decides on the game screen and the camera only: facts of unknown source are
+ * dropped too, and so are audio facts (anyone on stream can say anything into the mic).
+ */
 export const marketFacts = (note: FrameNote): FrameNote => ({
   ...note,
   text: (note.text ?? "").split("; ").filter((fact) => fact.startsWith("[game_ui] ") || fact.startsWith("[camera] ")).join("; ") || NO_EVIDENCE,
@@ -642,7 +646,9 @@ export function predictionsService(deps: ServiceDeps) {
     const seenByAll = targets[0].hashes.filter((hash) => targets.every((t) => t.hashes.includes(hash)));
     let saved: Evidence | null;
     try {
-      saved = await ai.capture(streamUrl, targets.map((t) => ({ question: t.text, rule: t.rule })), seenByAll, spend);
+      // Grabs claimed together share one moment: "after" when any of them is past its lock.
+      const moment = targets.some((t) => t.kind === "after") ? "after" : targets[0].kind;
+      saved = await ai.capture(streamUrl, targets.map((t) => ({ question: t.text, rule: t.rule })), seenByAll, spend, moment);
       if (!saved) return;
     } catch (error) {
       console.warn(`predictions: frame description failed (${errorText(error)})`);
@@ -712,7 +718,7 @@ export function predictionsService(deps: ServiceDeps) {
     let verdict: AiVerdict | null;
     try {
       const notes = target.frames.filter((f) => f.text);
-      const atResolve = await ai.capture(streamUrl, [{ question: target.text, rule: target.rule }], notes.flatMap((f) => (f.hash ? [f.hash] : [])), spend);
+      const atResolve = await ai.capture(streamUrl, [{ question: target.text, rule: target.rule }], notes.flatMap((f) => (f.hash ? [f.hash] : [])), spend, "resolve");
       if (atResolve) notes.push({ kind: "resolve", at: now(), ...atResolve });
       if (notes.length === 0) verdict = null;
       else {

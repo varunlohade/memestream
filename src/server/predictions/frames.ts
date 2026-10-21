@@ -36,7 +36,7 @@ export function frameUrls(streamUrl: string | null | undefined): string[] {
  */
 export type Frame = { url: string; mime: string; base64: string; hash: string; shot?: number };
 /** Hex characters of the picture's SHA-256 kept as its hash. */
-const HASH_CHARS = 16;
+export const HASH_CHARS = 16;
 export type FrameDeps = { fetch?: typeof fetch; timeoutMs?: number };
 
 /** The first preview that loads as an image (no redirects: an offline Twitch channel redirects to a placeholder), or null. */
