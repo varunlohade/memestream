@@ -26,6 +26,7 @@ import {
 import bs58 from "bs58";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { fetchJson, postJson } from "@/lib/http";
+import { WalletNotConnected } from "@/lib/tx-flow";
 
 export type WalletOption = { name: string; icon?: string; connect: (silent?: boolean) => Promise<void> };
 
@@ -190,7 +191,7 @@ export function WalletProvider({ chain, children }: { chain: IdentifierString; c
 
   const signAndSend = useCallback(
     async (base64Tx: string): Promise<string> => {
-      if (!active) throw new Error("Connect a wallet first");
+      if (!active) throw new WalletNotConnected();
       if (active.kind === "dev") {
         return (await postJson<{ signature: string }>("/api/dev-wallet", { transaction: base64Tx })).signature;
       }

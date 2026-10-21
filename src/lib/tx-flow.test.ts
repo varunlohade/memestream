@@ -10,8 +10,9 @@ import {
   type Entry,
   EXPIRY_GRACE_MS,
   isBusy,
-  isUserRejection,
   walletFailure,
+  WalletNotConnected,
+  walletSaid,
   type Ledger,
   lateSignature,
   lockOwner,
@@ -52,11 +53,6 @@ test("row 3: a wallet rejection removes the entry and frees the wallet", () => {
   assert.equal(l.last?.kind, "rejected");
 });
 
-test("only the wallet's code 4001 counts as a rejection; message text is never trusted", () => {
-  assert.equal(isUserRejection({ code: 4001 }), true);
-  assert.equal(isUserRejection(new Error("User rejected")), false);
-  assert.equal(isUserRejection(null), false);
-});
 
 test("row 4: signed -> tracking, and the clock restarts at signing", () => {
   const l = signed(T0 + 80_000);
@@ -213,18 +209,29 @@ test("unlock never shows sooner than the minimum after the wallet prompt opened 
   }
 });
 
-test("walletFailure: rejections and known pre-send failures release the hold; only an unknown wallet error may have sent it", () => {
-  for (const rejected of [{ code: 4001 }, new Error("User rejected the request."), new Error("Transaction rejected the request"), new Error("User denied transaction signature"), new Error("User cancelled")])
-    assert.equal(walletFailure(rejected), "rejected", String((rejected as Error).message ?? "4001"));
-  for (const notSent of [
+test("walletFailure: the hold is dropped only on code 4001, code 4100, or our own error before the wallet was asked; message text never counts", () => {
+  assert.equal(walletFailure({ code: 4001, message: "User rejected the request." }), "rejected");
+  assert.equal(walletFailure({ code: 4100, message: "The requested method and/or account has not been authorized" }), "not-sent");
+  assert.equal(walletFailure(new WalletNotConnected()), "not-sent");
+  for (const maybeSent of [
+    new Error("Transaction simulation failed: This transaction has already been processed"),
+    new Error("User rejected"),
+    new Error("Request cancelled"),
     new Error("Connect a wallet first"),
-    new Error("Transaction simulation failed: Error processing Instruction 2"),
-    new Error("Attempt to debit an account but found no record of a prior credit. insufficient lamports"),
     new Error("Insufficient funds for fee"),
-    { code: 4100, message: "The requested method and/or account has not been authorized" },
     { code: 4900, message: "Disconnected" },
+    { code: -32603, message: "Internal JSON-RPC error." },
+    null,
+    "boom",
   ])
-    assert.equal(walletFailure(notSent), "not-sent", (notSent as Error).message);
-  for (const unknown of [new Error("Unexpected error"), { code: -32603, message: "Internal JSON-RPC error." }, new Error(""), null, "boom"])
-    assert.equal(walletFailure(unknown), "maybe-sent", String(unknown));
+    assert.equal(walletFailure(maybeSent), "maybe-sent", String((maybeSent as Error | null)?.message ?? maybeSent));
+});
+
+test("walletSaid: the wallet's own message, plainly prefixed and cut to 140 characters", () => {
+  assert.equal(walletSaid(new Error("  Blockhash\n not found ")), "Your wallet said: Blockhash not found");
+  const long = walletSaid(new Error("x".repeat(500)))!;
+  assert.equal(long.length, "Your wallet said: ".length + 140);
+  assert.ok(long.endsWith("…"));
+  assert.equal(walletSaid(new Error("")), null);
+  assert.equal(walletSaid(null), null);
 });

@@ -106,27 +106,39 @@ export const MESSAGES = {
   failed: (error?: string) => `Transaction failed on-chain${error ? `: ${error}` : ""}`,
 } as const;
 
-/** Only an explicit user rejection counts; message text is never trusted. */
-export const isUserRejection = (error: unknown) => (error as { code?: unknown } | null)?.code === 4001;
-/** Wallet codes that mean nothing was signed: the user rejected it (4001), or the app isn't allowed / the wallet is disconnected (4100, 4900). */
-const NOT_SENT_CODES = new Set([4001, 4100, 4900]);
-/** How wallets word a rejection when they don't use code 4001. */
-const REJECTED_TEXT = /user rejected|rejected the request|user denied|denied by (the )?user|user (cancel+ed|declined)|request (was )?cancel+ed|approval denied/i;
-/** Failures a wallet reports before it sends anything: no wallet, a failed simulation, too little SOL. */
-const NOT_SENT_TEXT = /connect a wallet first|simulation failed|failed to simulate|insufficient (funds|lamports|balance)|not enough sol|wallet not connected|wallet is locked/i;
+/** Thrown by the app before any wallet is asked to sign (no wallet connected): nothing can have been sent. */
+export class WalletNotConnected extends Error {
+  constructor() {
+    super("Connect a wallet first");
+    this.name = "WalletNotConnected";
+  }
+}
 
 /**
- * Why signing failed, for the server's double-pay hold. "rejected" and "not-sent": nothing went out,
- * so the hold is dropped and the same trade may be built again at once. "maybe-sent": an unknown
- * error from the sign-and-send call itself, which may come after the wallet sent it, so the hold is
- * kept as for a signed trade.
+ * Why signing failed, for the server's double-pay hold. Message text is never trusted: a wallet may
+ * report "simulation failed: already processed" for a transaction that went out, or "cancelled" when
+ * its session dropped after sending. The hold is dropped only when nothing can have been sent:
+ * - "rejected": the user rejected it in the wallet (code 4001);
+ * - "not-sent": the app isn't allowed to ask (code 4100), or our own error before the wallet was asked.
+ * Anything else from the sign-and-send call is "maybe-sent": the hold is kept as for a signed trade.
  */
 export function walletFailure(error: unknown): "rejected" | "not-sent" | "maybe-sent" {
+  if (error instanceof WalletNotConnected) return "not-sent";
   const code = (error as { code?: unknown } | null)?.code;
-  const message = String((error as { message?: unknown } | null)?.message ?? "");
-  if (code === 4001 || REJECTED_TEXT.test(message)) return "rejected";
-  if ((typeof code === "number" && NOT_SENT_CODES.has(code)) || NOT_SENT_TEXT.test(message)) return "not-sent";
+  if (code === 4001) return "rejected";
+  if (code === 4100) return "not-sent";
   return "maybe-sent";
+}
+
+/** Characters of a wallet's own error message shown. */
+const WALLET_SAID_MAX = 140;
+/** A wallet's own error, plainly prefixed and cut short; null when it gave no message. */
+export function walletSaid(error: unknown): string | null {
+  const message = String((error as { message?: unknown } | null)?.message ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!message) return null;
+  return `Your wallet said: ${message.length > WALLET_SAID_MAX ? `${message.slice(0, WALLET_SAID_MAX - 1)}…` : message}`;
 }
 /** "Busy" answers (rate limited / RPC budget spent) don't count as failures. */
 export const isBusy = (error: unknown) => [429, 503].includes((error as { status?: unknown } | null)?.status as number);
