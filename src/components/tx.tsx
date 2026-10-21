@@ -1,7 +1,10 @@
 "use client";
 /**
  * Runs a transaction: the server builds it, the wallet signs and sends it, then we poll its status
- * until it lands, fails or expires. No lock: other trades stay open while one confirms. The banner
+ * until it lands or fails (giving up after CONFIRM_WAIT_MS). Nothing in the browser blocks other
+ * trades; paying twice is stopped by the server, which refuses an identical build while an earlier
+ * one may still land (server/tx-intents.ts). Each build's fate is reported to it: the status polls,
+ * or /api/tx/rejected (nothing was sent) and /api/tx/wallet-error (it may have been). The banner
  * shows only the last result (went through / failed), kept in memory for this tab.
  */
 import { createContext, type ReactNode, useCallback, useContext, useMemo, useState } from "react";
@@ -18,6 +21,19 @@ const CONFIRM_WAIT_MS = 120_000;
 const UNKNOWN = "We couldn't confirm it yet. Check your wallet history before you try again.";
 /** A wallet error that wasn't a rejection may come after the wallet sent it. */
 const WALLET_ERROR = "Your wallet gave an error. The trade may still land; check your wallet before trying again.";
+/** Some wallets reject with no error code, which reads as "may have been sent": the hold then runs its 3 minutes. */
+const REJECTED_HINT = "If you rejected it in your wallet, you can try again in about 3 minutes.";
+
+/** Tells the server's double-pay check what became of a build. A failed report only means its hold runs its course. */
+async function reportIntent(route: "rejected" | "wallet-error", intent: string | undefined) {
+  if (!intent) return;
+  try {
+    const response = await fetch(`/api/tx/${route}?${new URLSearchParams({ intent })}`, { method: "POST" });
+    if (!response.ok) console.warn(`tx ${route} report: HTTP ${response.status}`);
+  } catch (error) {
+    console.warn(`tx ${route} report failed:`, (error as Error).message);
+  }
+}
 
 export type Stage = "Preparing" | "Check your wallet" | "Confirming";
 
@@ -73,11 +89,11 @@ export function TxProvider({ children }: { children: ReactNode }) {
         const said = walletSaid(error);
         if (failure === "maybe-sent") {
           // It may have been sent anyway: keep the server's double-pay hold as long as for a signed one.
-          if (prepared.intent) await fetch(`/api/tx/wallet-error?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
-          throw new Error(said ? `${WALLET_ERROR} ${said}` : WALLET_ERROR);
+          await reportIntent("wallet-error", prepared.intent);
+          throw new Error([WALLET_ERROR, said, REJECTED_HINT].filter(Boolean).join(" "));
         }
         // Nothing went out: drop the server's double-pay hold so a retry works at once.
-        if (prepared.intent) await fetch(`/api/tx/rejected?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
+        await reportIntent("rejected", prepared.intent);
         if (failure === "rejected") throw new Error(MESSAGES.rejected);
         throw new Error(error instanceof WalletNotConnected ? error.message : (said ?? "Your wallet couldn't send it"));
       }
