@@ -40,3 +40,6 @@ export function formatPrice(value: number): string {
   const sub = String(zeros).replace(/\d/g, (d) => SUBSCRIPT[Number(d)]);
   return `${sign}0.0${sub}${digits}`;
 }
+
+/** Two series with the same points (time and price): a poll that brings no new trade changes nothing on the chart. */
+export const samePoints = (a: PricePoint[], b: PricePoint[]) => a.length === b.length && a.every((p, i) => p.time === b[i].time && p.value === b[i].value);

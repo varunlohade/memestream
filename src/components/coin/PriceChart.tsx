@@ -2,7 +2,7 @@
 /** The coin page's price chart (TradingView lightweight-charts), drawn from the trades we already load. */
 import { AreaSeries, ColorType, createChart, CrosshairMode, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 import { useEffect, useRef } from "react";
-import { formatPrice, type PricePoint } from "@/lib/price-series";
+import { formatPrice, type PricePoint, samePoints } from "@/lib/price-series";
 
 const LINE = "#7DFF8F";
 const FONT = "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif";
@@ -13,10 +13,14 @@ const timeLabel = (time: number) =>
 const tickLabel = (time: number) => new Date(time * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 const legendText = (point: PricePoint | undefined) => (point ? `${formatPrice(point.value)} SOL · ${timeLabel(point.time)}` : "");
 
-export function PriceChart({ points }: { points: PricePoint[] }) {
+/**
+ * `coinKey` (the coin's mint): the chart fits all its trades on first load and when the coin changes;
+ * later polls add trades but keep the range the user zoomed or scrolled to.
+ */
+export function PriceChart({ points, coinKey }: { points: PricePoint[]; coinKey: string }) {
   const box = useRef<HTMLDivElement>(null);
   const legend = useRef<HTMLDivElement>(null);
-  const chart = useRef<{ api: IChartApi; series: ISeriesApi<"Area">; points: PricePoint[] } | null>(null);
+  const chart = useRef<{ api: IChartApi; series: ISeriesApi<"Area">; points: PricePoint[]; fittedFor: string | null } | null>(null);
 
   useEffect(() => {
     if (!box.current) return;
@@ -37,7 +41,7 @@ export function PriceChart({ points }: { points: PricePoint[] }) {
       priceFormat: { type: "custom", formatter: formatPrice, minMove: 1e-12 },
       priceLineVisible: false,
     });
-    const state = { api, series, points: [] as PricePoint[] };
+    const state = { api, series, points: [] as PricePoint[], fittedFor: null as string | null };
     chart.current = state;
     api.subscribeCrosshairMove((param) => {
       const hovered = param.time === undefined ? undefined : state.points.find((p) => p.time === param.time);
@@ -52,12 +56,19 @@ export function PriceChart({ points }: { points: PricePoint[] }) {
   useEffect(() => {
     const current = chart.current;
     if (!current) return;
+    const fit = current.fittedFor !== coinKey || current.points.length === 0;
+    if (!fit && samePoints(current.points, points)) return;
+    const timeScale = current.api.timeScale();
+    const kept = fit ? null : timeScale.getVisibleLogicalRange();
     current.points = points;
     current.series.setData(points.map((p) => ({ time: p.time as UTCTimestamp, value: p.value })));
     current.series.applyOptions({ pointMarkersVisible: points.length === 1 });
-    current.api.timeScale().fitContent();
+    if (fit) {
+      timeScale.fitContent();
+      current.fittedFor = coinKey;
+    } else if (kept) timeScale.setVisibleLogicalRange(kept);
     if (legend.current) legend.current.textContent = legendText(points.at(-1));
-  }, [points]);
+  }, [points, coinKey]);
 
   return (
     <div className="price-chart">

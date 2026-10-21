@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { TradeView } from "./api-types";
-import { formatPrice, priceSeries } from "./price-series";
+import { formatPrice, priceSeries, samePoints } from "./price-series";
 
 const trade = (time: number | null, priceSol: number, signature = `s${time}-${priceSol}`): TradeView => ({
   signature,
@@ -50,4 +50,12 @@ test("formatPrice keeps tiny SOL prices readable", () => {
   assert.equal(formatPrice(0.99999), "1");
   assert.equal(formatPrice(12.3456), "12.35");
   assert.equal(formatPrice(0), "0");
+});
+
+test("samePoints: a poll with no new trade changes nothing; a new trade or price does", () => {
+  const a = [{ time: 1, value: 0.5 }, { time: 2, value: 0.6 }];
+  assert.equal(samePoints(a, a.map((p) => ({ ...p }))), true);
+  assert.equal(samePoints(a, [...a, { time: 3, value: 0.7 }]), false);
+  assert.equal(samePoints(a, [a[0], { time: 2, value: 0.61 }]), false);
+  assert.equal(samePoints([], []), true);
 });

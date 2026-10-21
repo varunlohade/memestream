@@ -296,7 +296,7 @@ export function CoinPageView({
           {tab === "trades" && (
             <>
               <section className="p cp-chart" aria-label="Price chart">
-                {points.length > 0 ? <PriceChart points={points} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
+                {points.length > 0 ? <PriceChart points={points} coinKey={coin.mint} /> : <p className="mute chart-empty">The chart starts with the first trade.</p>}
               </section>
               <section className="p" aria-label="Recent trades">
                 <TradeList trades={trades} symbol={coin.symbol} />
