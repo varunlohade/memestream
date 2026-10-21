@@ -1,6 +1,6 @@
 "use client";
 /** Buy/sell panel (pump.fun layout). Quotes as you type; the server builds the swap; the wallet signs it. */
-import { useState, useSyncExternalStore } from "react";
+import { useRef, useState, useSyncExternalStore } from "react";
 import { type CoinView, type Holdings, type TradePreview, useQuote } from "@/components/hooks";
 import { noSubscription } from "@/components/no-subscription";
 import { useTx } from "@/components/tx";
@@ -70,7 +70,9 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   const converted = unit !== NATURAL_UNIT[side];
 
   const [status, setStatus] = useState<Status | null>(null);
-  const { preview, error: quoteError, loading, refresh: refreshQuote } = useQuote(coin.mint, side, sent, coin.raisedSol, slippageBps);
+  const { preview, error: quoteError, loading, refresh: refreshQuote, show: showQuote } = useQuote(coin.mint, side, sent, coin.raisedSol, slippageBps);
+  /** Set before any await, so a second click before the next render does nothing. */
+  const submitting = useRef(false);
 
   const unitLabel = unit === "sol" ? "SOL" : coin.symbol;
   const spendLabel = side === "buy" ? "SOL" : coin.symbol;
@@ -93,14 +95,15 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
   };
 
   const submit = async () => {
-    if (!address) return;
+    if (!address || submitting.current) return;
+    submitting.current = true;
     try {
-      // The floor comes from a quote fetched now, never the one on screen; a worse one is shown first.
+      // A quote fetched now checks the minimum on screen still holds; past the slippage, the new quote is shown first.
       setStatus({ kind: "busy", text: "Preparing" });
       const latest = await fetchJson<TradePreview>(quoteUrl(coin.mint, side, sent, slippageBps));
-      const checked = freshFloor(side, preview?.minimumReceived, latest.minimumReceived);
+      const checked = freshFloor(side, preview?.minimumReceived, latest.received);
       if ("moved" in checked) {
-        refreshQuote();
+        showQuote(latest);
         setStatus({ kind: "error", text: "The price moved. Check the new amount and place the trade again." });
         return;
       }
@@ -111,6 +114,8 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
       onTraded();
     } catch (e) {
       setStatus({ kind: "error", text: (e as Error).message });
+    } finally {
+      submitting.current = false;
     }
     refreshQuote();
   };

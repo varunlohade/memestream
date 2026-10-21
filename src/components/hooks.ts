@@ -86,7 +86,7 @@ const QUOTE_DEBOUNCE_MS = 300;
  * coin's raised SOL): after any trade lands, the old quote no longer counts and a fresh one is
  * fetched. A graduated coin's raised SOL never changes, so the quote is also fetched again every
  * QUOTE_REFRESH_MS while the tab is visible, and on `refresh()`; the last good quote stays on screen
- * while a refresh loads.
+ * while a refresh loads. `show(preview)` puts a quote fetched elsewhere for these same inputs on screen.
  */
 export function useQuote(mint: string, side: "buy" | "sell", amount: string, curveState: string, slippageBps: number) {
   const [quote, setQuote] = useState<{ key: string; preview: TradePreview | null; error: string | null } | null>(null);
@@ -117,11 +117,14 @@ export function useQuote(mint: string, side: "buy" | "sell", amount: string, cur
     };
   }, [key, round, mint, side, amount, slippageBps]);
 
+  const show = useCallback((preview: TradePreview) => setQuote({ key, preview, error: null }), [key]);
+
   const fresh = quote?.key === key;
   return {
     preview: amount.trim() && fresh ? quote.preview : null,
     error: amount.trim() && fresh ? quote.error : null,
     loading: Boolean(amount.trim()) && !fresh,
     refresh,
+    show,
   };
 }
