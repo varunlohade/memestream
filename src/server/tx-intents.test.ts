@@ -162,13 +162,21 @@ test("it's per wallet: another wallet's identical trade goes through", async () 
   assert.equal(await intents.pending(intentKey(trade({ wallet: "walletB" })), T0 + 5_000), null);
 });
 
-for (const status of ["confirmed", "failed", "expired"] as const) {
+for (const status of ["confirmed", "failed"] as const) {
   test(`once the first is ${status}, the same trade goes through`, async () => {
     const { intents, key, token } = await setup();
     await intents.report(token, HASH, SIG, status, T0 + 5_000);
     assert.equal(await intents.pending(key, T0 + 6_000), null);
   });
 }
+
+test("expired (the server's blockhash died) keeps the hold until the signed hold ends: the wallet's own blockhash may still land", async () => {
+  const { intents, key, token } = await setup();
+  await intents.report(token, HASH, SIG, "expired", T0 + 100_000);
+  assert.deepEqual(await intents.pending(key, T0 + 100_001), { signature: SIG });
+  assert.deepEqual(await intents.pending(key, T0 + SIGNED_HOLD_MS - 1), { signature: SIG });
+  assert.equal(await intents.pending(key, T0 + SIGNED_HOLD_MS), null);
+});
 
 test("signed, it stays held past the build hold until the signed hold ends", async () => {
   const { clock, intents, key } = await setup();

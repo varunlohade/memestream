@@ -4,7 +4,9 @@
  * - from its build for BUILD_HOLD_MS (the wallet popup), so a second tab or a reload can't build it again;
  *   a signature reported after that hold lapsed (a slow popup) holds it again;
  * - once the client reports its signature (status poll, ?intent=), until SIGNED_HOLD_MS after the build;
- * - until it's confirmed, failed or expired (status poll), or the wallet rejected it (/api/tx/rejected).
+ * - until it's confirmed or failed (status poll), or the wallet rejected it (/api/tx/rejected). "Expired"
+ *   only means the server's blockhash died: a wallet may sign with its own, so it may still land, and
+ *   the hold stays until SIGNED_HOLD_MS after the build.
  * A record is only ever added if none exists (never overwritten), so two racing builds can't both pass.
  *
  * State lives in the shared Redis (one record per wallet + intent, expiring on its own);
@@ -172,7 +174,7 @@ export function txIntents(store: IntentStore) {
         if (record && record.id === id && !record.signature) await store.del(key);
       }, undefined),
 
-    /** From a status poll: the signature makes the intent pending; a final answer ends it. */
+    /** From a status poll: the signature makes the intent pending; only a definite answer (confirmed or failed) ends it early. */
     report: (token: string, blockhash: string, signature: string | null, status: TxStatus["status"], now: number) =>
       safely(async () => {
         const match = TOKEN.exec(token);
@@ -183,7 +185,7 @@ export function txIntents(store: IntentStore) {
           // The popup outlasted the build hold. Hold it again only for an intent this server really
           // built with this blockhash (never from a token someone made up), until SIGNED_HOLD_MS after
           // that build. Never overwrites.
-          if (!signature || status !== "pending") return;
+          if (!signature || status === "confirmed" || status === "failed") return;
           const issued = await store.get(issuedKey(key, id));
           if (!issued || issued.id !== id || issued.blockhash !== blockhash) return;
           const left = SIGNED_HOLD_MS - (now - issued.at);
@@ -191,7 +193,7 @@ export function txIntents(store: IntentStore) {
           return;
         }
         if (record.id !== id || record.blockhash !== blockhash) return;
-        if (status !== "pending") return store.del(key);
+        if (status === "confirmed" || status === "failed") return store.del(key);
         const left = SIGNED_HOLD_MS - (now - record.at);
         if (signature && !record.signature && left > 0) await store.set(key, { ...record, signature }, left);
       }, undefined),
