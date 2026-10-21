@@ -4,6 +4,8 @@
  * - from its build for BUILD_HOLD_MS (the wallet popup), so a second tab or a reload can't build it again;
  *   a signature reported after that hold lapsed (a slow popup) holds it again;
  * - once the client reports its signature (status poll, ?intent=), until SIGNED_HOLD_MS after the build;
+ * - the same when the wallet failed with an error that wasn't a rejection (/api/tx/wallet-error): it may
+ *   have sent it without telling us the signature;
  * - until it's confirmed or failed (status poll), or the wallet rejected it (/api/tx/rejected). "Expired"
  *   only means the server's blockhash died: a wallet may sign with its own, so it may still land, and
  *   the hold stays until SIGNED_HOLD_MS after the build.
@@ -28,7 +30,8 @@ const REDIS_TIMEOUT_MS = 800;
 const REDIS_PAUSE_MS = 30_000;
 const PREFIX = "memestream:intent:";
 
-export type IntentRecord = { id: string; blockhash: string; at: number; signature: string | null };
+/** `maybeSent`: the wallet errored after it may have sent it (no signature known): held as if signed. */
+export type IntentRecord = { id: string; blockhash: string; at: number; signature: string | null; maybeSent?: boolean };
 
 export type IntentStore = {
   get: (key: string) => Promise<IntentRecord | null>;
@@ -147,7 +150,7 @@ export function txIntents(store: IntentStore) {
       safely(async () => {
         const record = await store.get(key);
         if (!record) return null;
-        return now - record.at < (record.signature ? SIGNED_HOLD_MS : BUILD_HOLD_MS) ? { signature: record.signature } : null;
+        return now - record.at < (record.signature || record.maybeSent ? SIGNED_HOLD_MS : BUILD_HOLD_MS) ? { signature: record.signature } : null;
       }, null),
 
     /**
@@ -171,7 +174,26 @@ export function txIntents(store: IntentStore) {
         if (!match) return;
         const [, key, id] = match;
         const record = await store.get(key);
-        if (record && record.id === id && !record.signature) await store.del(key);
+        if (record && record.id === id && !record.signature && !record.maybeSent) await store.del(key);
+      }, undefined),
+
+    /**
+     * The wallet failed with an error that wasn't a rejection: it may have sent the transaction
+     * anyway, so the intent is held as if signed, until SIGNED_HOLD_MS after its build. Only an
+     * intent this server built (its issuance record) can be held; never overwrites a signed one.
+     */
+    maybeSent: (token: string, now: number) =>
+      safely(async () => {
+        const match = TOKEN.exec(token);
+        if (!match) return;
+        const [, key, id] = match;
+        const record = await store.get(key);
+        const issued = record ?? (await store.get(issuedKey(key, id)));
+        if (!issued || issued.id !== id || record?.signature) return;
+        const left = SIGNED_HOLD_MS - (now - issued.at);
+        if (left <= 0) return;
+        if (record) await store.set(key, { ...record, maybeSent: true }, left);
+        else await store.add(key, { ...issued, maybeSent: true }, left);
       }, undefined),
 
     /** From a status poll: the signature makes the intent pending; only a definite answer (confirmed or failed) ends it early. */

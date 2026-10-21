@@ -16,6 +16,8 @@ const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve,
 /** How long to wait for an answer before telling the user to check their wallet. */
 const CONFIRM_WAIT_MS = 120_000;
 const UNKNOWN = "We couldn't confirm it yet. Check your wallet history before you try again.";
+/** A wallet error that wasn't a rejection may come after the wallet sent it. */
+const WALLET_ERROR = "Your wallet gave an error. The trade may still land; check your wallet before trying again.";
 
 export type Stage = "Preparing" | "Check your wallet" | "Confirming";
 
@@ -69,7 +71,12 @@ export function TxProvider({ children }: { children: ReactNode }) {
       try {
         signature = await signAndSend(prepared.transaction);
       } catch (error) {
-        if (!isUserRejection(error)) throw new Error((error as Error).message || "Your wallet couldn't send it");
+        if (!isUserRejection(error)) {
+          // It may have been sent anyway: keep the server's double-pay hold as long as for a signed one.
+          console.warn("wallet error:", (error as Error).message);
+          if (prepared.intent) await fetch(`/api/tx/wallet-error?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
+          throw new Error(WALLET_ERROR);
+        }
         // Nothing was signed: drop the server's double-pay hold so a retry works at once.
         if (prepared.intent) await fetch(`/api/tx/rejected?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
         throw new Error(MESSAGES.rejected);

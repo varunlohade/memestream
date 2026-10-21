@@ -241,3 +241,35 @@ test("with Redis unreachable, the shared store falls back to memory and still de
     console.warn = warn;
   }
 });
+
+test("a wallet error that wasn't a rejection (maybe sent, no signature): held as long as a signed one, and a rejection report can't drop it", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  const token = (await intents.remember(key, HASH, T0)) as string;
+  await intents.maybeSent(token, T0 + 2_000);
+  await intents.release(token);
+  assert.deepEqual(await intents.pending(key, T0 + BUILD_HOLD_MS + 10_000), { signature: null }, "past the build hold: still held");
+  assert.deepEqual(await intents.pending(key, T0 + SIGNED_HOLD_MS - 1), { signature: null });
+  assert.equal(await intents.pending(key, T0 + SIGNED_HOLD_MS), null);
+});
+
+test("a wallet error reported after the build hold lapsed holds it again, only for a real build", async () => {
+  const clock = { t: T0 };
+  const intents = txIntents(memoryIntentStore(() => clock.t));
+  const key = intentKey(trade());
+  const token = (await intents.remember(key, HASH, T0)) as string;
+  clock.t = T0 + BUILD_HOLD_MS + 5_000;
+  assert.equal(await intents.pending(key, clock.t), null, "the build hold lapsed");
+  await intents.maybeSent(`${key}.00000000-0000-4000-8000-000000000000`, clock.t);
+  assert.equal(await intents.pending(key, clock.t), null, "a made-up token holds nothing");
+  await intents.maybeSent(token, clock.t);
+  assert.deepEqual(await intents.pending(key, clock.t + 1_000), { signature: null });
+  assert.equal(await intents.pending(key, T0 + SIGNED_HOLD_MS), null, "until the signed hold ends");
+});
+
+test("a wallet error never replaces a reported signature", async () => {
+  const { intents, key, token } = await setup();
+  await intents.maybeSent(token, T0 + 2_000);
+  assert.deepEqual(await intents.pending(key, T0 + 3_000), { signature: SIG });
+});
