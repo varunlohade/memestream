@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useLivePredictions } from "@/components/hooks";
 import { StreamThumb } from "@/components/pixel/StreamThumb";
-import type { LivePrediction } from "@/lib/predictions/live";
+import { type LivePrediction, predictionHref } from "@/lib/predictions/live";
 
 const percent = (probability: number) => `${Math.round(probability * 100)}%`;
 
@@ -34,7 +34,7 @@ function useServerNow(serverNow: number | undefined) {
 }
 
 function LiveCard({ item, now }: { item: LivePrediction; now: number | null }) {
-  const href = `/coin/${item.mint}#predictions`;
+  const href = predictionHref(item.mint, item.id);
   const odds = item.probability;
   const market = item.kind === "market";
   const price = (side: "yes" | "no") => (market && odds ? ` ${odds[side].toFixed(2)}` : "");
@@ -62,10 +62,10 @@ function LiveCard({ item, now }: { item: LivePrediction; now: number | null }) {
         {market ? "" : " · points"}
       </p>
       <div className="lp-btns">
-        <Link href={href} className="mbtn buy">
+        <Link href={predictionHref(item.mint, item.id, "yes")} className="mbtn buy">
           Yes{price("yes")}
         </Link>
-        <Link href={href} className="mbtn mk-no">
+        <Link href={predictionHref(item.mint, item.id, "no")} className="mbtn mk-no">
           No{price("no")}
         </Link>
       </div>

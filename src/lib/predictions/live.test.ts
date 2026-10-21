@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { hiddenCreators } from "../hidden-coins";
-import { type LiveCoin, type LiveFound, pickLive, pointsProbability, toLivePrediction } from "./live";
+import { type LiveCoin, type LiveFound, pickLive, pointsProbability, predictionHref, predictionPick, toLivePrediction } from "./live";
 
 const NOW = 1_000_000;
 const coin = (mint: string, creator = "streamer"): LiveCoin => ({ mint, creator, symbol: mint.toUpperCase(), name: `${mint} coin`, streamUrl: null });
@@ -48,4 +48,14 @@ test("toLivePrediction: points split from the pools (50/50 when empty), market o
   assert.deepEqual(card.probability, { yes: 0.62, no: 0.38 });
   assert.equal(card.points, null);
   assert.equal(toLivePrediction(market, null).probability, null, "an unread pool is unknown, never the points split");
+});
+
+test("home row links carry the question and side; the coin page reads them back, and nothing malformed", () => {
+  const yes = predictionHref("MintA1", "7", "yes");
+  assert.equal(yes, "/coin/MintA1?p=7&side=yes#predictions");
+  assert.equal(predictionHref("MintA1", "7"), "/coin/MintA1?p=7#predictions");
+  assert.deepEqual(predictionPick(new URL(yes, "https://x.test").search), { id: "7", side: "yes" });
+  assert.deepEqual(predictionPick("?p=7"), { id: "7", side: null });
+  assert.deepEqual(predictionPick("?p=7&side=maybe"), { id: "7", side: null }, "a bad side is dropped");
+  for (const bad of ["", "?side=yes", "?p=", "?p=../x", `?p=${"9".repeat(41)}`, "?p=<script>"]) assert.equal(predictionPick(bad), null, bad);
 });

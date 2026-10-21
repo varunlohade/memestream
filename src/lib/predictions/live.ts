@@ -67,3 +67,19 @@ export function toLivePrediction({ found, coin }: ReturnType<typeof pickLive>[nu
     bettors: found.bettors,
   };
 }
+
+const PREDICTION_ID = /^[A-Za-z0-9_-]{1,40}$/;
+
+/** A link from the home row to one question on its coin page, with the side tapped (if any). */
+export function predictionHref(mint: string, id: string, side?: Side): string {
+  return `/coin/${encodeURIComponent(mint)}?${new URLSearchParams({ p: id, ...(side ? { side } : {}) })}#predictions`;
+}
+
+/** The question (and side) a coin page was opened for, from its query string; null if none or malformed. A bad side is just dropped. */
+export function predictionPick(search: string): { id: string; side: Side | null } | null {
+  const params = new URLSearchParams(search);
+  const id = params.get("p") ?? "";
+  if (!PREDICTION_ID.test(id)) return null;
+  const side = params.get("side");
+  return { id, side: side === "yes" || side === "no" ? side : null };
+}

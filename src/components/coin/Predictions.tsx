@@ -27,6 +27,7 @@ import {
   type Side,
   SUGGEST_COST,
 } from "@/lib/predictions/rules";
+import { predictionPick } from "@/lib/predictions/live";
 import { serverDroppedSession, sessionDropAt, sessionUsable } from "@/lib/predictions/session";
 import type { LeaderRow, PredictionsView, Session, Standing } from "@/lib/predictions/view";
 import bs58 from "bs58";
@@ -163,6 +164,16 @@ export function Predictions({
   const [openId, setOpenId] = useState<string | null>(null);
   /** The side picked on a compact row, to open its buy box at once. */
   const [openSide, setOpenSide] = useState<"yes" | "no" | null>(null);
+  // Opened from the home row for one question (and side): open it with that side picked. Nothing is sent.
+  useEffect(() => {
+    const pick = predictionPick(window.location.search);
+    if (!pick) return;
+    const first = setTimeout(() => {
+      setOpenId(pick.id);
+      setOpenSide(pick.side);
+    }, 0);
+    return () => clearTimeout(first);
+  }, []);
   const now = useServerNow(view);
 
   // The saved session for the connected wallet (re-read after signing in or out).
@@ -337,7 +348,7 @@ export function Predictions({
             live={p}
             now={now}
             canBet={Boolean(address) && staff === null}
-            initialSide={openSide}
+            initialSide={p.id === openId ? openSide : null}
             viewer={viewer}
             staff={staff !== null}
             admin={me?.admin ?? false}
