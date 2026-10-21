@@ -82,10 +82,10 @@ export function ytdlpArgs(url, cookiesPath = null) {
 
 /**
  * ffmpeg's arguments: each input read from LIVE_START_INDEX segments back; `seconds` of it as a JPEG
- * every 5 s (1280 wide, at most MAX_FRAMES) from the video, and as a 16 kHz mono mp3 from the audio
- * (the second input, or the only one).
+ * every 5 s (1280 wide, at most MAX_FRAMES) from the video, and (with `audio`) as a 16 kHz mono mp3
+ * from the audio: the second input, or the only one's audio if it has any.
  */
-export function ffmpegArgs(inputs, seconds, dir) {
+export function ffmpegArgs(inputs, seconds, dir, audio = true) {
   const audioInput = inputs.length > 1 ? 1 : 0;
   return [
     "-hide_banner",
@@ -105,19 +105,12 @@ export function ffmpegArgs(inputs, seconds, dir) {
     "-q:v",
     "4",
     join(dir, "frame-%02d.jpg"),
-    "-map",
-    `${audioInput}:a:0`,
-    "-t",
-    String(seconds),
-    "-ac",
-    "1",
-    "-ar",
-    "16000",
-    "-b:a",
-    "32k",
-    join(dir, "audio.mp3"),
+    ...(audio ? ["-map", `${audioInput}:a:0?`, "-t", String(seconds), "-ac", "1", "-ar", "16000", "-b:a", "32k", join(dir, "audio.mp3")] : []),
   ];
 }
+
+/** ffmpeg's answer when the optional audio map found no audio: the mp3 output has nothing in it. */
+const NO_AUDIO = /does not contain any stream/i;
 
 /** A failed clip, with a short reason for the log and the answer (never a URL or the tool's whole output). */
 export class GrabFailed extends Error {}
@@ -172,8 +165,13 @@ export async function grabClip(target, seconds, deps) {
     const inputs = found.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
     if (found.code !== 0 || inputs.length === 0) throw new GrabFailed(ytdlpReason(found.stderr));
     if (inputs.length > 2 || !inputs.every((input) => input.startsWith("https://"))) throw new GrabFailed("yt-dlp gave unexpected URLs");
-    const startedAt = now();
-    const cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir), deadline - now());
+    let startedAt = now();
+    let cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir), deadline - now());
+    // A stream with no audio: ffmpeg stops at once (the mp3 has no stream), so cut the frames alone.
+    if (cut.code !== 0 && NO_AUDIO.test(cut.stderr)) {
+      startedAt = now();
+      cut = await run(spawn, ffmpeg, ffmpegArgs(inputs, seconds, dir, false), deadline - now());
+    }
     const endedAt = now();
     if (cut.code !== 0) throw new GrabFailed("ffmpeg failed");
     const names = (await readdir(dir)).filter((name) => /^frame-\d+\.jpg$/.test(name)).sort();

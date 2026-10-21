@@ -1,7 +1,7 @@
 # memestream video grabber (Railway)
 
 The AI referee normally looks at the platform's preview picture, which can be minutes old. At the
-moments that matter (after betting closes, and when it checks a result) the site asks this service
+moments that matter (the first two pictures after betting closes, and when it checks a result) the site asks this service
 for a short clip instead: the last few seconds of the live stream as a few JPEG frames and a small
 mp3. Kick has no preview picture, so there the clip is the only evidence.
 
@@ -18,7 +18,7 @@ mp3. Kick has no preview picture, so there the clip is the only evidence.
 - At most 2 clips run at once; a third gets 429.
 - yt-dlp finds the stream's HLS URLs (YouTube: one video and one audio; Twitch and Kick: one with
   both). ffmpeg starts 4 segments back from the live edge, takes a frame every 5 s (1280 wide, at most
-  6) and 16 kHz mono mp3 audio at 32 kbps.
+  6) and 16 kHz mono mp3 audio at 32 kbps. A stream with no audio still gives frames, with `audio: null`.
 - Both tools run without a shell. They are killed at the clip's seconds + 40 s. Each request has its
   own temp dir, which is always removed.
 - The answer stays under about 4 MB: the oldest frames go first, then the audio.

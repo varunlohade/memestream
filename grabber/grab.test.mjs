@@ -15,7 +15,7 @@ const HLS = ["https://manifest.googlevideo.com/video.m3u8", "https://manifest.go
  * A fake spawn: yt-dlp prints `urls`; ffmpeg writes `frames` JPEGs (of `frameBytes`) and an mp3 into
  * the dir in its args. `hang` never exits until killed. Records every call.
  */
-function fakeSpawn({ urls = HLS, ytdlpCode = 0, ytdlpErr = "", frames = 3, frameBytes = 1_000, audio = true, ffmpegCode = 0, hang = null, gate = null } = {}) {
+function fakeSpawn({ urls = HLS, ytdlpCode = 0, ytdlpErr = "", frames = 3, frameBytes = 1_000, audio = true, ffmpegCode = 0, mute = false, hang = null, gate = null } = {}) {
   const calls = [];
   const spawn = (cmd, args) => {
     calls.push({ cmd, args });
@@ -31,9 +31,14 @@ function fakeSpawn({ urls = HLS, ytdlpCode = 0, ytdlpErr = "", frames = 3, frame
         if (ytdlpErr) child.stderr.emit("data", ytdlpErr);
         return child.emit("close", ytdlpCode);
       }
-      const dir = args.at(-1).replace(/\/audio\.mp3$/, "");
+      // A mute stream: ffmpeg refuses an mp3 output with no stream, before writing anything.
+      if (mute && args.at(-1).endsWith("audio.mp3")) {
+        child.stderr.emit("data", "[out#1/mp3] Output file does not contain any stream\n");
+        return child.emit("close", 234);
+      }
+      const dir = args.at(-1).replace(/\/(audio\.mp3|frame-%02d\.jpg)$/, "");
       for (let i = 1; i <= frames; i++) await writeFile(join(dir, `frame-${String(i).padStart(2, "0")}.jpg`), Buffer.alloc(frameBytes, i));
-      if (audio) await writeFile(join(dir, "audio.mp3"), Buffer.alloc(500, 9));
+      if (audio && args.at(-1).endsWith("audio.mp3")) await writeFile(join(dir, "audio.mp3"), Buffer.alloc(500, 9));
       child.emit("close", ffmpegCode);
     });
     return child;
@@ -103,11 +108,23 @@ test("ytdlpArgs and ffmpegArgs: the proven recipe, the link after --, near the l
   assert.deepEqual(two.slice(5, 13), ["-live_start_index", "-4", "-i", HLS[0], "-live_start_index", "-4", "-i", HLS[1]]);
   assert.equal(two.filter((a) => a === "-t").length, 2);
   assert.deepEqual(two.slice(two.indexOf("-vf"), two.indexOf("-vf") + 4), ["-vf", "fps=1/5,scale=1280:-2", "-frames:v", String(MAX_FRAMES)]);
-  assert.equal(two[two.lastIndexOf("-map") + 1], "1:a:0", "audio from the audio input");
+  assert.equal(two[two.lastIndexOf("-map") + 1], "1:a:0?", "audio from the audio input, if any");
   assert.deepEqual(two.slice(-7), ["-ac", "1", "-ar", "16000", "-b:a", "32k", "/tmp/d/audio.mp3"]);
   const one = ffmpegArgs([HLS[0]], 10, "/tmp/d");
   assert.equal(one.filter((a) => a === "-i").length, 1);
-  assert.equal(one[one.lastIndexOf("-map") + 1], "0:a:0", "audio from the only input");
+  assert.equal(one[one.lastIndexOf("-map") + 1], "0:a:0?", "audio from the only input, if it has any");
+  const mute = ffmpegArgs([HLS[0]], 10, "/tmp/d", false);
+  assert.deepEqual([mute.filter((a) => a === "-map").length, mute.at(-1), mute.includes("audio.mp3")], [1, "/tmp/d/frame-%02d.jpg", false], "frames only");
+});
+
+test("grabClip: a stream with no audio still gives frames, with audio null", async (t) => {
+  const tmp = await tempRoot(t);
+  const fake = fakeSpawn({ urls: [HLS[0]], mute: true });
+  const clip = await grabClip(streamTarget("https://kick.com/somebody"), 10, { spawn: fake.spawn, tmp });
+  assert.deepEqual([clip.frames.length, clip.audio], [3, null]);
+  assert.deepEqual(fake.calls.map((c) => [c.cmd, c.args.at(-1).split("/").at(-1)]), [["yt-dlp", "somebody"], ["ffmpeg", "audio.mp3"], ["ffmpeg", "frame-%02d.jpg"]]);
+  assert.deepEqual(await readdir(tmp), []);
+  await assert.rejects(grabClip(streamTarget(LIVE), 10, { spawn: fakeSpawn({ ffmpegCode: 1 }).spawn, tmp }), /ffmpeg failed/, "other failures are not retried");
 });
 
 test("grabClip: frames and audio from a fake spawn, cookies written to the temp dir, the temp dir always removed", async (t) => {
