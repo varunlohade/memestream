@@ -100,15 +100,15 @@ function baseUnits(text: string, decimals: number): bigint | null {
 
 /**
  * The floor a trade sends is the minimum the user saw on screen (`shownMinimum`): what they agreed
- * to, slippage included. A quote fetched as the trade is placed checks it still holds: if even its
- * expected amount (`freshReceived`) is below that minimum, the price moved past the slippage, so
- * nothing is sent and the new quote is shown first. A smaller move within the slippage still trades.
+ * to, slippage included. A quote fetched as the trade is placed checks it still holds: unless its
+ * expected amount (`freshReceived`) is strictly above that minimum, the price moved to or past the
+ * slippage (no room left), so nothing is sent and the new quote is shown first. A smaller move still trades.
  */
 export function freshFloor(side: Side, shownMinimum: string | null | undefined, freshReceived: string): { floor: string } | { moved: true } {
   const decimals = side === "buy" ? COIN_DECIMALS : SOL_DECIMALS;
   const expected = baseUnits(freshReceived, decimals);
   const floor = shownMinimum == null ? null : baseUnits(shownMinimum, decimals);
-  if (expected === null || floor === null || shownMinimum == null || expected < floor) return { moved: true };
+  if (expected === null || floor === null || shownMinimum == null || expected <= floor) return { moved: true };
   return { floor: shownMinimum };
 }
 

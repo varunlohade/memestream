@@ -85,14 +85,16 @@ test("slippage labels", () => {
   assert.deepEqual([50, 100, 300, 500].map(slippageLabel), ["0.5%", "1%", "3%", "5%"]);
 });
 
-test("freshFloor: sends the minimum shown while the fresh expected amount still covers it; holds the trade only past the slippage", () => {
+test("freshFloor: sends the minimum shown while the fresh expected amount is above it; holds the trade at or past the slippage", () => {
   // Shown: expect 1010 coins, at least 1000 with 1% slippage.
   assert.deepEqual(freshFloor("buy", "1000", "1005"), { floor: "1000" }, "another buyer moved the price a little: still within the slippage, the floor shown");
-  assert.deepEqual(freshFloor("buy", "1000", "1000"), { floor: "1000" }, "exactly at the line: trades");
-  assert.deepEqual(freshFloor("buy", "1000", "999.999999"), { moved: true }, "just past it: show the new quote");
+  assert.deepEqual(freshFloor("buy", "1000", "1000.000001"), { floor: "1000" }, "just above the line: trades");
+  assert.deepEqual(freshFloor("buy", "1000", "1000"), { moved: true }, "exactly at the line: no room left, show the new quote");
+  assert.deepEqual(freshFloor("buy", "1000", "999.999999"), { moved: true }, "past it: show the new quote");
   assert.deepEqual(freshFloor("buy", "1000", "1020"), { floor: "1000" }, "better: the floor stays what the user agreed to");
   assert.deepEqual(freshFloor("sell", "0.123456789", "0.123456788"), { moved: true }, "SOL compares to the lamport");
-  assert.deepEqual(freshFloor("sell", "0.1", "0.10"), { floor: "0.1" }, "the same amount, written differently");
+  assert.deepEqual(freshFloor("sell", "0.1", "0.10"), { moved: true }, "the same amount, written differently: at the line");
+  assert.deepEqual(freshFloor("sell", "0.1", "0.100000001"), { floor: "0.1" }, "one lamport above: trades");
   assert.deepEqual(freshFloor("sell", null, "0.2"), { moved: true }, "nothing was shown: show it first");
   assert.deepEqual(freshFloor("sell", "0.2", "abc"), { moved: true });
 });
