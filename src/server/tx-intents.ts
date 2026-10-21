@@ -133,8 +133,6 @@ export function intentKey(parsed: ParsedTx): string {
 const TOKEN = /^([0-9a-f]{32})\.([0-9a-f-]{36})$/;
 /** Where the build's issuance is kept (same store, its own key), so reports can be checked against it. */
 const issuedKey = (key: string, id: string) => `issued:${key}.${id}`;
-/** An intent reported confirmed or failed, kept SIGNED_HOLD_MS: a late wallet-error or rejection report then changes nothing. */
-const doneKey = (key: string, id: string) => `done:${key}.${id}`;
 export const isIntentToken = (token: string) => TOKEN.test(token);
 
 export function txIntents(store: IntentStore) {
@@ -175,7 +173,6 @@ export function txIntents(store: IntentStore) {
         const match = TOKEN.exec(token);
         if (!match) return;
         const [, key, id] = match;
-        if (await store.get(doneKey(key, id))) return;
         const record = await store.get(key);
         if (record && record.id === id && !record.signature && !record.maybeSent) await store.del(key);
       }, undefined),
@@ -190,7 +187,6 @@ export function txIntents(store: IntentStore) {
         const match = TOKEN.exec(token);
         if (!match) return;
         const [, key, id] = match;
-        if (await store.get(doneKey(key, id))) return;
         const record = await store.get(key);
         const issued = record ?? (await store.get(issuedKey(key, id)));
         if (!issued || issued.id !== id || record?.signature) return;
@@ -211,26 +207,22 @@ export function txIntents(store: IntentStore) {
           // The popup outlasted the build hold. Hold it again only for an intent this server really
           // built with this blockhash (never from a token someone made up), until SIGNED_HOLD_MS after
           // that build. Never overwrites.
+          if (!signature || status === "confirmed" || status === "failed") return;
           const issued = await store.get(issuedKey(key, id));
           if (!issued || issued.id !== id || issued.blockhash !== blockhash) return;
-          if (status === "confirmed" || status === "failed") return store.set(doneKey(key, id), issued, SIGNED_HOLD_MS);
-          if (!signature) return;
           const left = SIGNED_HOLD_MS - (now - issued.at);
           if (left > 0) await store.add(key, { ...issued, signature }, left);
           return;
         }
         if (record.id !== id || record.blockhash !== blockhash) return;
-        if (status === "confirmed" || status === "failed") {
-          await store.set(doneKey(key, id), record, SIGNED_HOLD_MS);
-          return store.del(key);
-        }
+        if (status === "confirmed" || status === "failed") return store.del(key);
         const left = SIGNED_HOLD_MS - (now - record.at);
         if (signature && !record.signature && left > 0) await store.set(key, { ...record, signature }, left);
       }, undefined),
   };
 }
 
-export const DUPLICATE_MESSAGE = "This trade may still be on its way. Wait up to 2 minutes or check your wallet before trying again.";
+export const DUPLICATE_MESSAGE = "This trade may still be on its way. Wait up to 3 minutes or check your wallet before trying again.";
 export const duplicateResponse = (pendingSignature: string | null) =>
   Response.json({ error: DUPLICATE_MESSAGE, duplicate: true, pendingSignature }, { status: 409 });
 
