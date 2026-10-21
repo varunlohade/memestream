@@ -414,8 +414,8 @@ export function applyReviewPaused(state: Game, target: ReviewTarget, now: number
   });
 }
 
-/** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has. */
-export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; hashes: string[] };
+/** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has, `afterLock` how many were grabbed after the lock. */
+export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; hashes: string[]; afterLock: number };
 /** A result to check: its question, the outcome someone else gave, the frames grabbed before, and which run this is. */
 export type CheckTarget = { id: string; text: string; rule: string | null; outcome: Side; frames: FrameNote[]; tries: number };
 /**
@@ -534,7 +534,9 @@ export function startAi(state: Game, now: number, env: Env): Result & { rules: R
       } else if (grabDue(live, now) || joins(live)) {
         live.grabAt = now;
         const kind = now >= live.lockAt ? "after" : live.frames?.length ? "live" : "launch";
-        captures.push({ id: live.id, text: live.text, rule, kind, at: now, hashes: (live.frames ?? []).flatMap((f) => (f.hash ? [f.hash] : [])) });
+        const frames = live.frames ?? [];
+        const afterLock = frames.filter((f) => f.text && (f.kind === "after" || f.kind === "lock")).length;
+        captures.push({ id: live.id, text: live.text, rule, kind, at: now, hashes: frames.flatMap((f) => (f.hash ? [f.hash] : [])), afterLock });
       }
     }
     for (const p of game.resolved) {

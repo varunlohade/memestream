@@ -10,7 +10,7 @@
  * Answers are checked strictly, as review.ts does; anything malformed or unsure is never a NO or YES.
  */
 import "server-only";
-import type { FrameKind, FrameNote } from "@/lib/predictions/engine";
+import type { FrameNote } from "@/lib/predictions/engine";
 import { CHECK_RULE_MAX, FRAME_NOTE_MAX } from "@/lib/predictions/rules";
 import { type Clip, clipFromEnv, type ClipSource } from "./clip";
 import { fetchFrame, type Frame, type FrameDeps, frameUrls } from "./frames";
@@ -262,14 +262,11 @@ export function decideClient(deps: ModelDeps) {
     parseHappened(await postJson(TYPESAFE_URL, decideRequest(question, notes, model, rule, lockAt), deps, JEV_TIMEOUT_MS, "Decision", spend), model);
 }
 
-/** Grabs at these moments use a clip when the grabber is set up: once betting closed, and at resolve. */
-const CLIP_MOMENTS = new Set<FrameKind>(["after", "lock", "resolve"]);
-
 /**
  * The evidence source: capture grabs the platform's preview (none: null), skips a picture already
  * seen (same hash, no model call) and describes a new one once for all the questions asked, with the
- * time the CDN says it was made. With a video grabber (`clip`), a grab after the lock or at resolve
- * describes a clip instead (its frames and audio in one call, timed by the grabber); if the clip or
+ * time the CDN says it was made. With a video grabber (`clip`), a grab at a key moment (the first
+ * ones after the lock, or at resolve) describes a clip instead (its frames and audio in one call, timed by the grabber); if the clip or
  * its description fails (not the budget), the preview is used. jev decides; the text model writes the
  * check rule. Every model call (each HTTP attempt) takes one from the budget.
  */
@@ -277,7 +274,7 @@ export function aiCheck(vision: ModelDeps, jev: ModelDeps, frames: FrameDeps = {
   const describe = describeClient(vision);
   return {
     capture: async (streamUrl, asked, seen, spend, moment) => {
-      if (clip && moment && CLIP_MOMENTS.has(moment)) {
+      if (clip && moment) {
         const got = await clip(streamUrl);
         if (got && !seen.includes(got.hash)) {
           try {

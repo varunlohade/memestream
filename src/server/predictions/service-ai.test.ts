@@ -9,7 +9,7 @@ import { loadFengari, luaRedis } from "./lua-harness";
 import { REVIEW_PAUSED_TEXT } from "@/lib/predictions/engine";
 import { ReviewBudgetSpent, TYPESAFE_URL } from "./review";
 import { liveSlotKeys } from "./game-doc";
-import { type CoinFacts, marketFacts, predictionsService, type ServiceDeps, urgentFirst } from "./service";
+import { type CoinFacts, LOCK_CLIPS, marketFacts, predictionsService, type ServiceDeps, urgentFirst } from "./service";
 import { memoryStore, type PredictionStore, redisStore } from "./store";
 
 const MIN = 60_000;
@@ -397,6 +397,20 @@ for (const [name, make] of STORES) {
     assert.match(r.aiReason ?? "", /\[audio\] A girl says hello to chat \(clip\)/, "audio facts count for points");
     const sent = JSON.parse(models.jevBodies[0]).state.frames.at(-1);
     assert.deepEqual([sent.grabbed, sent.taken], ["after", new Date(LOCK + FRAME_GAP_MS).toISOString()], "the clip's time is the grabber's, never after the grab");
+  });
+
+  test(`${name}: clips only for the first ${LOCK_CLIPS} pictures after the lock; later grabs use the preview`, async () => {
+    const { models, viewAt, playToLive } = setup(make, TWITCH, true, undefined, true);
+    models.happened = happenedAnswer("UNCLEAR", 0.95); // the referee waits, so grabbing goes on
+    await playToLive();
+    for (let i = 0; i < 5; i++) {
+      models.picture = 10 + i; // a new preview each time, so each grab is described
+      await viewAt(LOCK + i * FRAME_GAP_MS);
+    }
+    assert.equal(models.calls.clip, LOCK_CLIPS);
+    const described = models.visionBodies.slice(1).map((body) => (body.includes("input_audio") ? "clip" : "preview"));
+    assert.deepEqual(described.slice(0, LOCK_CLIPS), ["clip", "clip"]);
+    assert.ok(described.length > LOCK_CLIPS && described.slice(LOCK_CLIPS).every((d) => d === "preview"), described.join(", "));
   });
 
   test(`${name}: a failing grabber falls back to the preview after the lock; at resolve the check uses a clip`, async () => {

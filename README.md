@@ -93,9 +93,9 @@ watches the stream, with people as the fallback and the court of appeal.
 
 **While betting is open, and a few minutes after**
 - The server grabs pictures of the stream from Twitch and YouTube, skipping repeats.
-- After betting closes, and when the AI checks a result, the server asks the video grabber (a
-  second Railway service, `grabber/`) for a 10-second clip of the live stream: a few frames and its
-  sound. If the clip fails, it uses the preview picture. Kick has no preview, so there only clips work.
+- For the first two pictures after betting closes, and when the AI checks a result, the server asks
+  the video grabber (a second Railway service, `grabber/`) for a 10-second clip of the live stream: a
+  few frames and its sound. Later grabs use the preview. If the clip fails, it uses the preview picture. Kick has no preview, so there only clips work.
 - A vision model (Gemini 2.5 Flash) turns each picture or clip into facts, each tagged with where it
   came from: the game screen, the camera, the audio, an overlay or chat. Overlay and chat text is
   dropped, so a viewer's donation alert can't fake a result. Real-SOL markets also drop audio facts:

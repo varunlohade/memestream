@@ -8,7 +8,7 @@ import { createHmac, randomUUID } from "node:crypto";
 import { isIPv6 } from "node:net";
 import { type Action, AI, apply, AUTO, autoCancelAt, type Env, type Game, GameError, hasUpvoted, isStaff, type Prediction, rankWon, streamerPresent, type Summary, type Witness } from "@/lib/predictions/engine";
 import { applyReview, applyReviewPaused, type ReviewTarget, type ReviewVerdict, reviewsDue, reviewStuck, STAFF, startReviews } from "@/lib/predictions/engine";
-import { aiDue, type AiVerdict, applyAiVerdict, applyFrames, applyReferee, applyRule, releaseAiRun, type CaptureTarget, type CheckTarget, type FrameKind, type FrameNote, freshNotes } from "@/lib/predictions/engine";
+import { aiDue, type AiVerdict, applyAiVerdict, applyFrames, applyReferee, applyRule, releaseAiRun, type CaptureTarget, type CheckTarget, type FrameNote, freshNotes } from "@/lib/predictions/engine";
 import { type RefereeAnswer, refereeState, type RefereeTarget, refereeWhy, type RuleTarget, startAi } from "@/lib/predictions/engine";
 import { applyMarketDone, applyMarketTryFailed, applyMarketUnavailable, hasPendingMarkets, challengeEndsAt, marketFinal, type MarketJob, type MarketState, needsAdmin, proposedOutcome, type MarketOutcome, marketsDue, startMarkets } from "@/lib/predictions/engine";
 import type { MarketRecord } from "@/lib/markets/record";
@@ -50,6 +50,10 @@ export type MarketDeps = {
 
 /** One piece of evidence: what it shows (text only), a hash of the media, and when it was taken, if known. */
 export type Evidence = { hash: string; text: string; shot?: number };
+/** A grab that matters most: one of the first after the lock, or the check at resolve. */
+export type KeyMoment = "lock" | "resolve";
+/** Post-lock pictures taken at a key moment: a market needs MIN_MARKET_PICTURES fresh ones that agree; later grabs are ordinary. */
+export const LOCK_CLIPS = MIN_MARKET_PICTURES;
 
 /**
  * Where the AI referee's evidence comes from, and how it decides: the seam a source plugs into
@@ -61,10 +65,11 @@ export type Evidence = { hash: string; text: string; shot?: number };
 export type EvidenceSource = {
   /**
    * Evidence on the stream now, described once for every question `asked`; null if the stream has
-   * none now or it is the same as one in `seen` (then no model is asked). `moment`: what the grab is
-   * for (a source may use richer evidence once betting closed and at resolve).
+   * none now or it is the same as one in `seen` (then no model is asked). `moment`: set only for a
+   * grab that matters most (one of the first LOCK_CLIPS after the lock, or the check at resolve); a
+   * source may use richer evidence then (a video clip).
    */
-  capture: (streamUrl: string, asked: Asked[], seen: string[], spend: Spend, moment?: FrameKind) => Promise<Evidence | null>;
+  capture: (streamUrl: string, asked: Asked[], seen: string[], spend: Spend, moment?: KeyMoment) => Promise<Evidence | null>;
   /** What happened, from the question, its rule and the notes only (never anyone's outcome); `lockAt`: when betting closed. */
   decide: (question: string, notes: FrameNote[], rule: string | null, lockAt: number | null, spend: Spend) => Promise<{ happened: "yes" | "no" | "unclear"; confidence: number; model: string }>;
   /** The check rule for a question that went live: what on stream decides YES or NO. */
@@ -646,8 +651,8 @@ export function predictionsService(deps: ServiceDeps) {
     const seenByAll = targets[0].hashes.filter((hash) => targets.every((t) => t.hashes.includes(hash)));
     let saved: Evidence | null;
     try {
-      // Grabs claimed together share one moment: "after" when any of them is past its lock.
-      const moment = targets.some((t) => t.kind === "after") ? "after" : targets[0].kind;
+      // Grabs claimed together share one picture: a key moment when any of them is past its lock with fewer than LOCK_CLIPS pictures since.
+      const moment = targets.some((t) => t.kind === "after" && t.afterLock < LOCK_CLIPS) ? "lock" : undefined;
       saved = await ai.capture(streamUrl, targets.map((t) => ({ question: t.text, rule: t.rule })), seenByAll, spend, moment);
       if (!saved) return;
     } catch (error) {

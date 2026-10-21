@@ -177,7 +177,7 @@ test("parseDescription: audio facts count only when audio was sent", () => {
   assert.equal(parseDescription(facts), "[camera] A man jumps", "a still frame has no audio: an audio fact is made up");
 });
 
-test("aiCheck.capture with a grabber: a clip after the lock and at resolve, the preview otherwise or when the clip fails; a spent budget is not retried", async () => {
+test("aiCheck.capture with a grabber: a clip at a key moment (lock, resolve), the preview otherwise or when the clip fails; a spent budget is not retried", async () => {
   const hits: string[] = [];
   const answers: string[] = [];
   const vision = { apiKey: "k", fetch: async (url: string | URL | Request, init?: RequestInit) => (hits.push(String(url)), answers.push(String(init!.body)), json(factsAnswer(["A girl at a desk", "camera"]))) };
@@ -185,7 +185,7 @@ test("aiCheck.capture with a grabber: a clip after the lock and at resolve, the 
   let clips = 0;
   const source = (clip: typeof CLIP | null) => aiCheck(vision, { apiKey: "k" }, frames, async () => (clips++, clip));
   const spend = async () => true;
-  for (const moment of ["after", "resolve"] as const) {
+  for (const moment of ["lock", "resolve"] as const) {
     hits.length = 0;
     const got = await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend, moment);
     assert.deepEqual(got, { hash: CLIP.hash, text: "[camera] A girl at a desk", shot: CLIP.startedAt });
@@ -194,15 +194,15 @@ test("aiCheck.capture with a grabber: a clip after the lock and at resolve, the 
   }
   clips = 0;
   hits.length = 0;
-  for (const moment of ["launch", "live", undefined] as const) await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend, moment);
-  assert.deepEqual([clips, hits.filter((h) => h === FRAME.url).length], [0, 3], "launch and live use the preview");
+  await source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], spend);
+  assert.deepEqual([clips, hits.filter((h) => h === FRAME.url).length], [0, 1], "no key moment: the preview");
   hits.length = 0;
-  const fallback = await source(null).capture("https://twitch.tv/lofigirl", ASK, [], spend, "after");
+  const fallback = await source(null).capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock");
   assert.deepEqual([fallback?.text, hits], ["[camera] A girl at a desk", [FRAME.url, OPENROUTER_URL]], "no clip: the preview");
   let failing = 0;
   const broken = aiCheck({ apiKey: "k", fetch: async (_u, init) => (++failing === 1 && String(init!.body).includes("input_audio") ? json({}, 400) : json(factsAnswer(["A desk", "camera"]))) }, { apiKey: "k" }, frames, async () => CLIP);
-  assert.equal((await broken.capture("https://twitch.tv/lofigirl", ASK, [], spend, "after"))?.text, "[camera] A desk", "the clip's description failed: the preview");
+  assert.equal((await broken.capture("https://twitch.tv/lofigirl", ASK, [], spend, "lock"))?.text, "[camera] A desk", "the clip's description failed: the preview");
   hits.length = 0;
-  await assert.rejects(source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], async () => false, "after"), BudgetSpent);
+  await assert.rejects(source(CLIP).capture("https://twitch.tv/lofigirl", ASK, [], async () => false, "lock"), BudgetSpent);
   assert.deepEqual(hits, [], "budget spent: no model call and no preview");
 });
