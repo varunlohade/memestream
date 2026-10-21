@@ -9,10 +9,10 @@ import { createHash } from "node:crypto";
 import { parseStreamLink } from "@/lib/stream-link";
 import { HASH_CHARS } from "./frames";
 
-/** Seconds of stream per clip: a 10 s clip takes the grabber about 16 s, so the tick's 60 s still fits the description. */
+/** Seconds of stream per clip: a 10 s clip takes the grabber about 16 s. */
 export const CLIP_SECONDS = 10;
-/** The grabber kills its tools at seconds + 40 s; this waits a little longer. */
-const CLIP_EXTRA_MS = 45_000;
+/** The wait for a clip past its seconds: with the description, an AI run fits the routes' 120 s maxDuration. */
+const CLIP_EXTRA_MS = 35_000;
 /** The grabber keeps its answer under about 4 MB of base64; this allows for the JSON around it. */
 export const MAX_CLIP_BYTES = 5 * 1024 * 1024;
 const MAX_CLIP_FRAMES = 6;

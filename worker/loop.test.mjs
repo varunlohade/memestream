@@ -56,7 +56,7 @@ test("nextWait: the rest of the interval after a good call; doubling after failu
 test("targetsFrom: https only, close-due on the same host, timeouts above each route's maxDuration", () => {
   assert.deepEqual(targetsFrom(TICK.url), [TICK]);
   assert.deepEqual(targetsFrom(TICK.url, CLOSE_DUE.url), [TICK, CLOSE_DUE]);
-  assert.ok(TICK_TIMEOUT_MS > 60_000 && CLOSE_DUE_TIMEOUT_MS > 300_000);
+  assert.ok(TICK_TIMEOUT_MS > 120_000 && CLOSE_DUE_TIMEOUT_MS > 300_000);
   assert.throws(() => targetsFrom("http://example.test/api/predictions/tick"), /https/);
   assert.throws(() => targetsFrom(TICK.url, "https://evil.test/api/markets/close-due"), /same host/);
   assert.throws(() => targetsFrom(undefined), /not a URL/);
@@ -70,12 +70,12 @@ test("callOnce: bearer secret, no redirects, one log line with status and time, 
   await advance(1_000);
   assert.equal(await done, true);
   assert.deepEqual([ok.seen.inits[0].headers.authorization, ok.seen.inits[0].redirect, ok.seen.inits[0].method], [`Bearer ${SECRET}`, "error", "POST"]);
-  const slow = fakeFetch({ "*": { status: 200, delayMs: 100_000 } });
+  const slow = fakeFetch({ "*": { status: 200, delayMs: 200_000 } });
   const late = callOnce(TICK, SECRET, { fetch: slow.doFetch, log: (l) => lines.push(l) });
   await advance(TICK_TIMEOUT_MS);
   assert.equal(await late, false);
   assert.match(lines[0], /^tick 200 \d+ms$/);
-  assert.match(lines[1], /^tick failed \(timeout\) 65000ms$/);
+  assert.match(lines[1], /^tick failed \(timeout\) 130000ms$/);
   assert.ok(lines.every((l) => !l.includes(SECRET)));
 });
 

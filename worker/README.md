@@ -7,7 +7,7 @@ close-due route if you set one. It uses the cron secret as a bearer token.
 
 - Each route has its own loop: a slow or failing close-due never delays the tick.
 - One call at a time per route: the next starts only after the last one ends.
-- Each call waits a little longer than its route may run: 65 s for the tick, 305 s for close-due.
+- Each call waits a little longer than its route may run: 130 s for the tick, 305 s for close-due.
 - After a failed call that route waits longer: 2, 4, 8, then at most 10 minutes. One good call resets it.
 - Both URLs must be https and on the same host. Redirects are refused, so the secret only goes there.
 - It logs one line per call: the name, the status and the time taken. It never logs the secret.

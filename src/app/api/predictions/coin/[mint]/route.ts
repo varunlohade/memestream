@@ -5,6 +5,9 @@ import { sharedLimiter } from "@/server/shared-limit";
 import { jsonBody, jsonError, ok } from "../../../respond";
 import { gate, predictionsError, signedInWallet } from "../../respond";
 
+/** Seconds a view or an action may run, its after-work included: the AI run it starts may grab a video clip. */
+export const maxDuration = 120;
+
 /** A signed-in wallet's actions, across all its tabs and devices. */
 const perWallet = sharedLimiter("predictions-wallet", 10, 1);
 

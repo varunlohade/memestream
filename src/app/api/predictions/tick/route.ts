@@ -3,8 +3,11 @@ import { busy, type RpcGuard, withRpcGuard } from "@/server/rpc-guard";
 import { jsonError, ok } from "../../respond";
 import { gate, predictionsError } from "../respond";
 
-/** Seconds a sweep may run: each coin's AI steps (frame, description, jev) have their own timeouts, well under this. */
-export const maxDuration = 60;
+/**
+ * Seconds a sweep may run, its after-work included: each coin's AI steps (a frame or a video clip,
+ * its description, jev) have their own timeouts, under this.
+ */
+export const maxDuration = 120;
 /** Coins swept per call (a random pick of those with a live prediction, so each gets its turn). */
 const COINS_PER_CALL = 10;
 /** RPC calls drawn per coin: its cached coin facts and the tick's reads. */

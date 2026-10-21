@@ -8,8 +8,8 @@
  */
 
 export const INTERVAL_MS = 60_000;
-/** The tick route's maxDuration is 60 s, close-due's 300 s: each target waits a little longer. */
-export const TICK_TIMEOUT_MS = 65_000;
+/** The tick route's maxDuration is 120 s (a video clip and its description), close-due's 300 s: each target waits a little longer. */
+export const TICK_TIMEOUT_MS = 130_000;
 export const CLOSE_DUE_TIMEOUT_MS = 305_000;
 export const MAX_BACKOFF_MS = 10 * 60_000;
 
