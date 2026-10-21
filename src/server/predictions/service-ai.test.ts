@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { AI_CHECK_RETRY_MS, FLAG_WINDOW_MS, REVIEW_RETRY_MS, FRAME_GAP_MS, FRAMES_AFTER_LOCK_MS } from "@/lib/predictions/rules";
 import { newProfile } from "@/lib/predictions/watch";
 import { aiCheck, OPENROUTER_URL } from "./ai-check";
-import { clipClient } from "./clip";
+import { CLIP_LAG_MS, clipClient } from "./clip";
 import { factsAnswer, happenedAnswer, visionAnswer } from "./jev-fake";
 import { loadFengari, luaRedis } from "./lua-harness";
 import { REVIEW_PAUSED_TEXT } from "@/lib/predictions/engine";
@@ -391,12 +391,16 @@ for (const [name, make] of STORES) {
     await viewAt(LOCK + FRAME_GAP_MS);
     assert.deepEqual([models.calls.clip, models.calls.vision], [1, 2], "the grab after the lock is a clip, described in one call");
     assert.match(models.visionBodies.at(-1)!, /"type":"input_audio","input_audio":\{"data":"AAAA","format":"mp3"\}/);
-    const decided = await viewAt(LOCK + FRAME_GAP_MS + 1_000);
+    assert.equal((await viewAt(LOCK + FRAME_GAP_MS + 1_000)).live.length, 1, "50 s after the lock the clip may still show pre-lock footage: not fresh, the referee waits");
+    assert.equal(models.calls.jev, 0);
+    await viewAt(LOCK + 2 * FRAME_GAP_MS);
+    assert.deepEqual([models.calls.clip, models.calls.vision], [2, 3], "the second clip");
+    const decided = await viewAt(LOCK + 2 * FRAME_GAP_MS + 1_000);
     const r = decided.resolved[0];
     assert.deepEqual([r.outcome, r.resolvedBy.role], ["yes", "ai"]);
     assert.match(r.aiReason ?? "", /\[audio\] A girl says hello to chat \(clip\)/, "audio facts count for points");
     const sent = JSON.parse(models.jevBodies[0]).state.frames.at(-1);
-    assert.deepEqual([sent.grabbed, sent.taken], ["after", undefined], "a clip has no picture time (its media may start before the grab)");
+    assert.deepEqual([sent.grabbed, sent.taken], ["after", new Date(LOCK + 2 * FRAME_GAP_MS - CLIP_LAG_MS).toISOString()], "a clip's time is its earliest possible footage");
   });
 
   test(`${name}: clips only for the first ${LOCK_CLIPS} pictures after the lock; later grabs use the preview`, async () => {

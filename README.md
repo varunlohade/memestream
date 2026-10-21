@@ -100,7 +100,8 @@ watches the stream, with people as the fallback and the court of appeal.
   came from: the game screen, the camera, the audio, an overlay or chat. Overlay and chat text is
   dropped, so a viewer's donation alert can't fake a result. Text-to-speech and alert sounds are
   dropped for the same reason. Real-SOL markets also drop the stream's own audio (anyone on stream
-  can say anything into the mic), and a clip never counts as a fresh market picture.
+  can say anything into the mic). A clip counts as taken after betting closed only if its earliest
+  possible footage (60 s before it was cut) was.
 - Only pictures taken after betting closed count as evidence.
 
 **When betting closes**

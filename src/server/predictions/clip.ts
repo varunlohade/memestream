@@ -2,8 +2,8 @@
  * Short video clips of a coin's stream for the AI check, from the video grabber (grabber/, a Railway
  * service): the last few seconds as a few JPEG frames and a small mp3. Only a validated stream link
  * is sent, to one https grabber set in the environment, with its shared secret; the answer is time-
- * and size-capped and checked strictly. Any failure is `{ failed: reason }`, so the caller can say why
- * it falls back to the preview.
+ * and size-capped and checked strictly. At most MAX_CLIPS_AT_ONCE run at once in this server. Any
+ * failure is `{ failed: reason, ms }`, so the caller can say why and knows how long it took.
  */
 import "server-only";
 import { createHash } from "node:crypto";
@@ -17,18 +17,28 @@ const CLIP_EXTRA_MS = 35_000;
 /** The grabber keeps its answer under about 4 MB of base64; this allows for the JSON around it. */
 export const MAX_CLIP_BYTES = 5 * 1024 * 1024;
 const MAX_CLIP_FRAMES = 6;
+/** Clip requests in flight at once in this server instance; more answer "busy" at once. */
+export const MAX_CLIPS_AT_ONCE = 4;
+/**
+ * How much earlier than the grabber's start a clip's footage may begin: ffmpeg reads from 4 HLS
+ * segments back (up to about 4 x 6 s), plus the platform's own live delay, rounded up. A clip's
+ * picture time is its start minus this, so it counts as after a lock only if all of it surely was.
+ */
+export const CLIP_LAG_MS = 60_000;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
 
 export type ClipFrame = { mime: "image/jpeg"; base64: string };
 export type ClipAudio = { format: "mp3"; base64: string };
+/** `hash`: a short hash of the frames' and audio's bytes. `startedAt`: when the grabber began the cut (its clock; the footage may start up to CLIP_LAG_MS before). */
+export type Clip = { frames: ClipFrame[]; audio: ClipAudio | null; startedAt: number; hash: string };
+export type ClipDeps = { url: string; secret: string; fetch?: typeof fetch; timeoutMs?: number; seconds?: number; maxAtOnce?: number; now?: () => number };
 /**
- * `hash`: a short hash of the frames' and audio's bytes. No time: the media starts some segments
- * before the grabber's own clock, plus the platform's delay, so no clip proves it was after a lock.
+ * Why there is no clip: "HTTP 429" (any status), "timeout", "error", "too big", "malformed", "bad link"
+ * or "busy" (never a URL or the secret); `ms`: how long finding that out took.
  */
-export type Clip = { frames: ClipFrame[]; audio: ClipAudio | null; hash: string };
-export type ClipDeps = { url: string; secret: string; fetch?: typeof fetch; timeoutMs?: number; seconds?: number };
-/** A clip of the stream now, or why not: "HTTP 429", "timeout", "error", "too big", "malformed" or "bad link" (never a URL or the secret). */
-export type ClipSource = (streamUrl: string) => Promise<Clip | { failed: string }>;
+export type ClipFailure = { failed: string; ms: number };
+/** A clip of the stream now, or why not. */
+export type ClipSource = (streamUrl: string) => Promise<Clip | ClipFailure>;
 
 const isBase64 = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length % 4 === 0 && BASE64.test(value);
 
@@ -45,6 +55,7 @@ export function parseClip(body: unknown): Clip | null {
   return {
     frames: (frames as ClipFrame[]).map(({ base64 }) => ({ mime: "image/jpeg", base64 })),
     audio: audio ? { format: "mp3", base64: (audio as ClipAudio).base64 } : null,
+    startedAt,
     hash: hash.digest("hex").slice(0, HASH_CHARS),
   };
 }
@@ -70,9 +81,15 @@ async function readCapped(response: Response, max: number): Promise<string | nul
 
 export function clipClient(deps: ClipDeps): ClipSource {
   const seconds = deps.seconds ?? CLIP_SECONDS;
+  const now = deps.now ?? Date.now;
+  let running = 0;
   return async (streamUrl) => {
+    const started = now();
+    const failed = (why: string): ClipFailure => ({ failed: why, ms: now() - started });
     const link = parseStreamLink(streamUrl);
-    if (!link) return { failed: "bad link" };
+    if (!link) return failed("bad link");
+    if (running >= (deps.maxAtOnce ?? MAX_CLIPS_AT_ONCE)) return failed("busy");
+    running++;
     const abort = new AbortController();
     const timer = setTimeout(() => abort.abort(), deps.timeoutMs ?? seconds * 1000 + CLIP_EXTRA_MS);
     try {
@@ -85,15 +102,16 @@ export function clipClient(deps: ClipDeps): ClipSource {
       });
       if (!response.ok) {
         await response.body?.cancel().catch(() => {});
-        return { failed: `HTTP ${response.status}` };
+        return failed(`HTTP ${response.status}`);
       }
       const text = await readCapped(response, MAX_CLIP_BYTES);
-      if (text === null) return { failed: "too big" };
-      return parseClip(JSON.parse(text)) ?? { failed: "malformed" };
+      if (text === null) return failed("too big");
+      return parseClip(JSON.parse(text)) ?? failed("malformed");
     } catch (error) {
-      return { failed: abort.signal.aborted ? "timeout" : error instanceof SyntaxError ? "malformed" : "error" };
+      return failed(abort.signal.aborted ? "timeout" : error instanceof SyntaxError ? "malformed" : "error");
     } finally {
       clearTimeout(timer);
+      running--;
     }
   };
 }

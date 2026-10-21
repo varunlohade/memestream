@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
-import { CLIP_SECONDS, clipClient, clipFromEnv, MAX_CLIP_BYTES, parseClip } from "./clip";
+import { CLIP_SECONDS, clipClient, clipFromEnv, MAX_CLIP_BYTES, MAX_CLIPS_AT_ONCE, parseClip } from "./clip";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const GOOD = { frames: [{ mime: "image/jpeg", base64: "AAEC" }], audio: { format: "mp3", base64: "AAAA" }, startedAt: 1_760_000_000_000, endedAt: 1_760_000_010_000 };
@@ -11,7 +11,7 @@ const SECRET = "g".repeat(32);
 test("parseClip: the grabber's answer checked strictly; hash = sha256 of the frames' and audio's bytes", () => {
   const clip = parseClip(GOOD)!;
   const expected = createHash("sha256").update(Buffer.from("AAEC", "base64")).update(Buffer.from("AAAA", "base64")).digest("hex").slice(0, 16);
-  assert.deepEqual(clip, { frames: GOOD.frames, audio: GOOD.audio, hash: expected }, "no time: a clip proves nothing about the lock");
+  assert.deepEqual(clip, { frames: GOOD.frames, audio: GOOD.audio, startedAt: GOOD.startedAt, hash: expected });
   assert.equal(parseClip({ ...GOOD, audio: null })!.audio, null);
   for (const bad of [
     null,
@@ -29,7 +29,14 @@ test("parseClip: the grabber's answer checked strictly; hash = sha256 of the fra
 
 test("clipClient: posts the normalized link, the seconds and the secret, no redirects; any failure says why, never a URL", async () => {
   const inits: RequestInit[] = [];
-  const client = (answer: () => Response | Promise<Response>) => clipClient({ url: URL_, secret: SECRET, fetch: async (url, init) => (assert.equal(String(url), URL_), inits.push(init!), answer()) });
+  const client = (answer: () => Response | Promise<Response>) => {
+    const fetch: typeof globalThis.fetch = async (url, init) => (assert.equal(String(url), URL_), inits.push(init!), answer());
+    const get = clipClient({ url: URL_, secret: SECRET, fetch });
+    return async (link: string) => {
+      const got = await get(link);
+      return "failed" in got ? { failed: got.failed } : got;
+    };
+  };
   assert.ok("frames" in (await client(() => json(GOOD))("https://www.twitch.tv/LofiGirl")));
   assert.deepEqual(JSON.parse(String(inits[0].body)), { url: "https://twitch.tv/LofiGirl", seconds: CLIP_SECONDS });
   assert.deepEqual([(inits[0].headers as Record<string, string>)["x-grabber-secret"], inits[0].redirect], [SECRET, "error"]);
@@ -41,7 +48,25 @@ test("clipClient: posts the normalized link, the seconds and the secret, no redi
   assert.deepEqual(await client(() => json({ ...GOOD, pad: "x".repeat(MAX_CLIP_BYTES) }))("https://kick.com/somebody"), { failed: "too big" });
   assert.deepEqual(await client(() => Promise.reject(new TypeError("down")))("https://kick.com/somebody"), { failed: "error" });
   const hang: typeof fetch = (_u, init) => new Promise((_, reject) => init!.signal!.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError"))));
-  assert.deepEqual(await clipClient({ url: URL_, secret: SECRET, fetch: hang, timeoutMs: 20 })("https://kick.com/somebody"), { failed: "timeout" });
+  const timedOut = await clipClient({ url: URL_, secret: SECRET, fetch: hang, timeoutMs: 20 })("https://kick.com/somebody");
+  assert.ok("failed" in timedOut && timedOut.failed === "timeout" && timedOut.ms >= 0);
+});
+
+test("clipClient: at most MAX_CLIPS_AT_ONCE clips in flight; one more is busy at once; slots free after", async () => {
+  assert.equal(MAX_CLIPS_AT_ONCE, 4);
+  const answers: ((r: Response) => void)[] = [];
+  const get = clipClient({ url: URL_, secret: SECRET, maxAtOnce: 2, fetch: () => new Promise((resolve) => answers.push(resolve)) });
+  const first = get("https://kick.com/alpha");
+  const second = get("https://kick.com/bravo");
+  const busy = await get("https://kick.com/charlie");
+  assert.ok("failed" in busy && busy.failed === "busy", JSON.stringify(busy));
+  assert.equal(answers.length, 2, "the busy ones never reached the grabber");
+  for (const answer of answers) answer(json(GOOD));
+  assert.ok("frames" in (await first) && "frames" in (await second));
+  const third = get("https://kick.com/delta");
+  assert.equal(answers.length, 3, "a slot is free again");
+  answers[2](json(GOOD));
+  await third;
 });
 
 test("clipFromEnv: only an https grabber with a 32+ character secret", (t) => {

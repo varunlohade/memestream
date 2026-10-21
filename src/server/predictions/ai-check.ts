@@ -12,7 +12,7 @@
 import "server-only";
 import type { FrameNote } from "@/lib/predictions/engine";
 import { CHECK_RULE_MAX, FRAME_NOTE_MAX } from "@/lib/predictions/rules";
-import { type Clip, clipFromEnv, type ClipSource } from "./clip";
+import { type Clip, CLIP_LAG_MS, clipFromEnv, type ClipSource } from "./clip";
 import { fetchFrame, type Frame, type FrameDeps, frameUrls } from "./frames";
 import { TYPESAFE_URL, validChoice } from "./review";
 import type { AiCheckDeps } from "./service";
@@ -50,10 +50,10 @@ export type Decision = { happened: Happened; confidence: number; model: string }
 export type ModelDeps = { apiKey: string | undefined; model?: string; fetch?: typeof fetch; sleep?: (ms: number) => Promise<void>; timeoutMs?: number };
 
 /**
- * Posts JSON with the key; retries a busy answer twice. Each attempt first takes one call from the
+ * Posts JSON with the key; retries a busy answer `retries` times (at most twice). Each attempt first takes one call from the
  * budget (`spend`), so retries count too. Failures never carry the key or the response body.
  */
-async function postJson(url: string, body: unknown, deps: ModelDeps, timeoutMs: number, label: string, spend?: Spend): Promise<unknown> {
+async function postJson(url: string, body: unknown, deps: ModelDeps, timeoutMs: number, label: string, spend?: Spend, retries = RETRY_PAUSES_MS.length): Promise<unknown> {
   if (!deps.apiKey) throw new AiCheckFailed(`${label} is not set up`);
   const doFetch = deps.fetch ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -72,7 +72,7 @@ async function postJson(url: string, body: unknown, deps: ModelDeps, timeoutMs: 
     } finally {
       clearTimeout(timer);
     }
-    if (RETRY_STATUSES.has(response.status) && attempt < RETRY_PAUSES_MS.length) {
+    if (RETRY_STATUSES.has(response.status) && attempt < Math.min(retries, RETRY_PAUSES_MS.length)) {
       await sleep(RETRY_PAUSES_MS[attempt]);
       continue;
     }
@@ -200,10 +200,21 @@ export function parseDescription(body: unknown, heard = false): string {
 /** Reads the written check rule; throws AiCheckFailed if it is missing or empty. */
 export const parseRule = (body: unknown) => parseChatText(body, CHECK_RULE_MAX, "rule");
 
+/** A clip's description retries a busy answer once, so a run with a clip stays short (see aiCheck). */
+const CLIP_VISION_RETRIES = 1;
+
 export function describeClient(deps: ModelDeps) {
   return async (asked: Asked[], media: Media, spend?: Spend) =>
     parseDescription(
-      await postJson(OPENROUTER_URL, describeRequest(asked, media, deps.model || DEFAULT_VISION_MODEL), deps, VISION_TIMEOUT_MS, "Vision", spend),
+      await postJson(
+        OPENROUTER_URL,
+        describeRequest(asked, media, deps.model || DEFAULT_VISION_MODEL),
+        deps,
+        VISION_TIMEOUT_MS,
+        "Vision",
+        spend,
+        "frames" in media ? CLIP_VISION_RETRIES : undefined,
+      ),
       "frames" in media && media.audio !== null,
     );
 }
@@ -268,26 +279,36 @@ export function decideClient(deps: ModelDeps) {
  * The evidence source: capture grabs the platform's preview (none: null), skips a picture already
  * seen (same hash, no model call) and describes a new one once for all the questions asked, with the
  * time the CDN says it was made. With a video grabber (`clip`), a grab at a key moment (the first
- * ones after the lock, or at resolve) describes a clip instead (its frames and audio in one call, with no picture time); if the clip or
- * its description fails (not the budget), the preview is used. jev decides; the text model writes the
- * check rule. Every model call (each HTTP attempt) takes one from the budget.
+ * ones after the lock, or at resolve) describes a clip instead: its frames and audio in one call,
+ * timed CLIP_LAG_MS before the grabber's start (the earliest its footage may be). A clip that fails
+ * quickly (under CLIP_FALLBACK_MS) falls back to the preview; one that fails slowly gives nothing this
+ * run, and a clip whose description fails fails the run (the next run retries). jev decides; the text
+ * model writes the check rule. Every model call (each HTTP attempt) takes one from the budget.
+ *
+ * Worst case, every step timing out, so a run stays under the AI run lease (2 min) and the routes'
+ * 120 s maxDuration, with room to commit:
+ * - clip: grabber 10 + 35 = 45 s, then its description (2 tries of 15 s + 0.25 s) = 75.25 s;
+ * - clip failing fast (< 15 s), then the preview (2 x 5 s) and its description (3 x 15 s + 0.75 s) = 70.75 s;
+ * - clip failing slowly: 45 s, nothing more;
+ * - the check at resolve adds jev (3 x 8 s + 0.75 s = 24.75 s): at most 75.25 + 24.75 = 100 s (< 110 s).
+ * The rule and referee steps run beside capture in the same run, not after it.
  */
+/** A clip failure quicker than this (busy, refused, offline) still leaves time for the preview. */
+export const CLIP_FALLBACK_MS = 15_000;
+
 export function aiCheck(vision: ModelDeps, jev: ModelDeps, frames: FrameDeps = {}, clip: ClipSource | null = null): AiCheckDeps {
   const describe = describeClient(vision);
   return {
     capture: async (streamUrl, asked, seen, spend, moment) => {
       if (clip && moment) {
         const got = await clip(streamUrl);
-        if ("failed" in got) console.warn(`predictions: no clip at ${moment} (${got.failed}); using the preview`);
-        else if (!seen.includes(got.hash)) {
-          try {
-            // No `shot`: a clip can't prove it was taken after the lock, so it is never a fresh market picture.
-            return { hash: got.hash, text: await describe(asked, got, spend) };
-          } catch (error) {
-            if (error instanceof BudgetSpent) throw error;
-            console.warn(`predictions: clip description failed (${(error as Error).message}); using the preview`);
-          }
+        if (!("failed" in got)) {
+          if (seen.includes(got.hash)) return null;
+          return { hash: got.hash, text: await describe(asked, got, spend), shot: got.startedAt - CLIP_LAG_MS };
         }
+        const late = got.ms >= CLIP_FALLBACK_MS;
+        console.warn(`predictions: no clip at ${moment} (${got.failed}); ${late ? "too late for the preview" : "using the preview"}`);
+        if (late) return null;
       }
       const frame = await fetchFrame(frameUrls(streamUrl), frames);
       if (!frame || seen.includes(frame.hash)) return null;
