@@ -23,7 +23,7 @@ const nextConfig: NextConfig = {
     ];
   },
   // The judges' old Vercel address goes to the DEVNET site, never mainnet (src/lib/legacy-redirect.ts;
-  // MEMESTREAM_LEGACY_REDIRECT, default https://devnet.memestream.lol). Never remove this redirect.
+  // MEMESTREAM_LEGACY_REDIRECT; default devnet.memestream.lol on mainnet, www on devnet). Never remove this redirect.
   async redirects() {
     const target = legacyRedirectTarget(process.env);
     if (!target) return [];
