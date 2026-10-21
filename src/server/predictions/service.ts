@@ -115,8 +115,9 @@ export type ServiceDeps = {
 };
 
 /**
- * A market (real SOL) decides on the game screen and the camera only: facts of unknown source are
- * dropped too, and so are audio facts (anyone on stream can say anything into the mic).
+ * What a market (real SOL) is judged on, by the referee and by the check of someone else's result:
+ * the game screen and the camera only. Facts of unknown source are dropped too, and so are audio
+ * facts (anyone on stream can say anything into the mic).
  */
 export const marketFacts = (note: FrameNote): FrameNote => ({
   ...note,
@@ -715,7 +716,7 @@ export function predictionsService(deps: ServiceDeps) {
 
   /**
    * One check run on a result someone else gave: new evidence at resolve (if any), then jev's
-   * unbiased answer, compared with that outcome. No evidence at all, or no budget: no check. A failed
+   * unbiased answer, compared with that outcome. A market's check sees only marketFacts. No evidence at all, or no budget: no check. A failed
    * run gives its lease back and is tried again; the last failed run ends as "couldn't tell". A
    * failure is never a disagree.
    */
@@ -727,7 +728,7 @@ export function predictionsService(deps: ServiceDeps) {
       if (atResolve) notes.push({ kind: "resolve", at: now(), ...atResolve });
       if (notes.length === 0) verdict = null;
       else {
-        const { happened } = await ai.decide(target.text, notes, target.rule, null, spend);
+        const { happened } = await ai.decide(target.text, target.market ? notes.map(marketFacts) : notes, target.rule, null, spend);
         verdict = happened === "unclear" ? "unclear" : happened === target.outcome ? "agree" : "disagree";
       }
     } catch (error) {

@@ -416,8 +416,8 @@ export function applyReviewPaused(state: Game, target: ReviewTarget, now: number
 
 /** A frame to grab for a live prediction: claimed at `at`; `hashes` are the pictures it already has, `afterLock` how many were grabbed after the lock. */
 export type CaptureTarget = { id: string; text: string; rule: string | null; kind: FrameKind; at: number; hashes: string[]; afterLock: number };
-/** A result to check: its question, the outcome someone else gave, the frames grabbed before, and which run this is. */
-export type CheckTarget = { id: string; text: string; rule: string | null; outcome: Side; frames: FrameNote[]; tries: number };
+/** A result to check: its question, the outcome someone else gave, the frames grabbed before, which run this is, and whether it has a real-SOL market. */
+export type CheckTarget = { id: string; text: string; rule: string | null; outcome: Side; frames: FrameNote[]; tries: number; market: boolean };
 /**
  * A locked prediction for the referee to decide, from its frames; `tries` is this run's number (its
  * answer counts only while it is the latest run). `market`: a real-SOL market rides on it, so the
@@ -542,7 +542,7 @@ export function startAi(state: Game, now: number, env: Env): Result & { rules: R
     for (const p of game.resolved) {
       if (!p.check || !checkDue(p.check, now) || p.outcome === "cancel") continue;
       p.check = { ...p.check, tries: p.check.tries + 1, at: now };
-      checks.push({ id: p.id, text: p.text, rule: p.check.rule ?? null, outcome: p.outcome, frames: p.check.frames, tries: p.check.tries });
+      checks.push({ id: p.id, text: p.text, rule: p.check.rule ?? null, outcome: p.outcome, frames: p.check.frames, tries: p.check.tries, market: hasMarket(p) });
     }
   });
   return { ...result, rules, captures, referees, checks };

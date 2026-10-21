@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { MarketRecord } from "@/lib/markets/record";
 import { CHALLENGE_BOND, FLAG_WINDOW_MS, MARKET_CHALLENGE_MS, MARKET_CREATE_MAX_TRIES, MARKET_FAILED_RETRY_MS, MARKET_RETRY_MS, OVERTURN_REWARD } from "@/lib/predictions/rules";
-import { type MarketDeps, MarketUnavailable, predictionsService } from "./service";
+import { type AiCheckDeps, type MarketDeps, MarketUnavailable, predictionsService } from "./service";
 import { memoryStore, type PredictionStore } from "./store";
 
 const MIN = 60_000;
@@ -54,7 +54,7 @@ const ADMIN = "admin1";
 /** The memestream oracle: the admin who resolves. */
 const ORACLE = "oracle";
 
-function setup(markets: MarketDeps | null, closeWaitMs = 0, wrap: (store: PredictionStore) => PredictionStore = (s) => s) {
+function setup(markets: MarketDeps | null, closeWaitMs = 0, wrap: (store: PredictionStore) => PredictionStore = (s) => s, ai: AiCheckDeps | null = null) {
   const clock = { t: T0 };
   /** The betting window the fake review picks. */
   let aiWindow = 1;
@@ -65,11 +65,12 @@ function setup(markets: MarketDeps | null, closeWaitMs = 0, wrap: (store: Predic
     now: () => clock.t,
     secret: "test-secret-test-secret-test-secret",
     domain: "memestream.lol",
-    coin: async () => ({ creator: STREAMER, status: "trading", symbol: "MIRA" }),
+    coin: async () => ({ creator: STREAMER, status: "trading", symbol: "MIRA", ...(ai ? { streamUrl: "https://twitch.tv/lofigirl" } : {}) }),
     holds: async () => true,
     review: async () => ({ approved: true, windowMin: aiWindow }),
     defer: (task) => void deferred.push(task),
     markets,
+    ai,
     closeWaitMs,
     admins: [ADMIN, ORACLE],
   });
@@ -440,4 +441,27 @@ test("audit 3: a market created while the sweep decides a coin is done keeps the
   await service.sweepMarkets(10);
   assert.ok(second && calls.includes(`create ${second} MIRA`), "the new market was created mid-sweep");
   assert.deepEqual(await listed(), [COIN], "the coin stays listed for its new market");
+});
+
+test("a market's AI check of a result never hears the stream: a streamer's spoken claim can't confirm it", async () => {
+  const { deps } = fakeMarkets();
+  const decided: string[][] = [];
+  /** A gullible model: believes any note that says the streamer won; else can't tell. Only audio says so here. */
+  const ai: AiCheckDeps = {
+    capture: async (_url, _asked, seen, _spend, moment) => (seen.includes(moment ?? "live") ? null : { hash: moment ?? "live", text: "[audio] The streamer says: I won this round" }),
+    decide: async (_q, notes) => (decided.push(notes.map((n) => n.text ?? "")), { happened: notes.some((n) => n.text?.includes("I won")) ? "yes" : "unclear", confidence: 0.9, model: "fake" }),
+    rule: async () => "YES if the scoreboard shows a round win",
+  };
+  const { clock, service, launch, look } = setup(deps, 0, undefined, ai);
+  const id = await launch();
+  const lockAt = (await look()).live[0].lockAt;
+  clock.t = lockAt;
+  await look();
+  await service.act(COIN, ORACLE, { kind: "resolve", id, outcome: "yes" });
+  await look();
+  clock.t += 1_000; // the check's run starts once the lock's grab is done
+  const view = await look();
+  const checked = decided.at(-1)!;
+  assert.ok(checked.length > 0 && checked.every((t) => !t.includes("[audio]")), checked.join(" | "));
+  assert.notEqual(view.resolved[0].ai, "agree", "audio alone never confirms a market's result");
 });
