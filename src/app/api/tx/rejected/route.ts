@@ -6,8 +6,9 @@ import { fail, jsonError, ok } from "../../respond";
 const PUBLIC_URL = (process.env.MEMESTREAM_PUBLIC_URL ?? "").replace(/\/$/, "");
 
 /**
- * POST /api/tx/rejected?intent= : the wallet rejected this build, so the double-pay hold on it is
- * dropped and the same trade can be built again at once. Only the matching, still unsigned intent
+ * POST /api/tx/rejected?intent= : the wallet rejected this build, or failed before sending it
+ * (walletFailure in lib/tx-flow.ts), so the double-pay hold on it is dropped and the same trade can be
+ * built again at once. Only the matching, still unsigned intent
  * is dropped (tx-intents.ts release); the token is unguessable and names one wallet's intent.
  * No RPC calls; the per-client limit bounds abuse.
  */

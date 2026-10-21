@@ -9,7 +9,7 @@ import { useWallet } from "@/components/wallet/WalletProvider";
 import { solscanTx } from "@/lib/explorer";
 import type { PreparedTx, TxAction, TxStatus } from "@/lib/api-types";
 import { fetchJson, postJson } from "@/lib/http";
-import { isBusy, isUserRejection, type LastResult, MESSAGES, POLL_MS } from "@/lib/tx-flow";
+import { isBusy, type LastResult, MESSAGES, POLL_MS, walletFailure } from "@/lib/tx-flow";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -69,15 +69,16 @@ export function TxProvider({ children }: { children: ReactNode }) {
       try {
         signature = await signAndSend(prepared.transaction);
       } catch (error) {
-        if (!isUserRejection(error)) {
+        const failure = walletFailure(error);
+        if (failure === "maybe-sent") {
           // It may have been sent anyway: keep the server's double-pay hold as long as for a signed one.
-          console.warn("wallet error:", (error as Error).message);
+          console.warn("wallet error:", (error as Error | null)?.message);
           if (prepared.intent) await fetch(`/api/tx/wallet-error?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
           throw new Error(WALLET_ERROR);
         }
-        // Nothing was signed: drop the server's double-pay hold so a retry works at once.
+        // Nothing went out: drop the server's double-pay hold so a retry works at once.
         if (prepared.intent) await fetch(`/api/tx/rejected?${new URLSearchParams({ intent: prepared.intent })}`, { method: "POST" }).catch(() => {});
-        throw new Error(MESSAGES.rejected);
+        throw new Error(failure === "rejected" ? MESSAGES.rejected : (error as Error | null)?.message || "Your wallet couldn't send it");
       }
       onStage("Confirming");
       const answer = await waitForResult(signature, prepared.blockhash, prepared.intent);

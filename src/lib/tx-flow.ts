@@ -108,6 +108,26 @@ export const MESSAGES = {
 
 /** Only an explicit user rejection counts; message text is never trusted. */
 export const isUserRejection = (error: unknown) => (error as { code?: unknown } | null)?.code === 4001;
+/** Wallet codes that mean nothing was signed: the user rejected it (4001), or the app isn't allowed / the wallet is disconnected (4100, 4900). */
+const NOT_SENT_CODES = new Set([4001, 4100, 4900]);
+/** How wallets word a rejection when they don't use code 4001. */
+const REJECTED_TEXT = /user rejected|rejected the request|user denied|denied by (the )?user|user (cancel+ed|declined)|request (was )?cancel+ed|approval denied/i;
+/** Failures a wallet reports before it sends anything: no wallet, a failed simulation, too little SOL. */
+const NOT_SENT_TEXT = /connect a wallet first|simulation failed|failed to simulate|insufficient (funds|lamports|balance)|not enough sol|wallet not connected|wallet is locked/i;
+
+/**
+ * Why signing failed, for the server's double-pay hold. "rejected" and "not-sent": nothing went out,
+ * so the hold is dropped and the same trade may be built again at once. "maybe-sent": an unknown
+ * error from the sign-and-send call itself, which may come after the wallet sent it, so the hold is
+ * kept as for a signed trade.
+ */
+export function walletFailure(error: unknown): "rejected" | "not-sent" | "maybe-sent" {
+  const code = (error as { code?: unknown } | null)?.code;
+  const message = String((error as { message?: unknown } | null)?.message ?? "");
+  if (code === 4001 || REJECTED_TEXT.test(message)) return "rejected";
+  if ((typeof code === "number" && NOT_SENT_CODES.has(code)) || NOT_SENT_TEXT.test(message)) return "not-sent";
+  return "maybe-sent";
+}
 /** "Busy" answers (rate limited / RPC budget spent) don't count as failures. */
 export const isBusy = (error: unknown) => [429, 503].includes((error as { status?: unknown } | null)?.status as number);
 

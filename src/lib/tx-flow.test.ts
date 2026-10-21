@@ -11,6 +11,7 @@ import {
   EXPIRY_GRACE_MS,
   isBusy,
   isUserRejection,
+  walletFailure,
   type Ledger,
   lateSignature,
   lockOwner,
@@ -210,4 +211,20 @@ test("unlock never shows sooner than the minimum after the wallet prompt opened 
     l = applyEvent(l, "a", status("expired"), t);
     assert.equal(view(l, t).kind, "confirming", `no unlock at +${t - T0} ms`);
   }
+});
+
+test("walletFailure: rejections and known pre-send failures release the hold; only an unknown wallet error may have sent it", () => {
+  for (const rejected of [{ code: 4001 }, new Error("User rejected the request."), new Error("Transaction rejected the request"), new Error("User denied transaction signature"), new Error("User cancelled")])
+    assert.equal(walletFailure(rejected), "rejected", String((rejected as Error).message ?? "4001"));
+  for (const notSent of [
+    new Error("Connect a wallet first"),
+    new Error("Transaction simulation failed: Error processing Instruction 2"),
+    new Error("Attempt to debit an account but found no record of a prior credit. insufficient lamports"),
+    new Error("Insufficient funds for fee"),
+    { code: 4100, message: "The requested method and/or account has not been authorized" },
+    { code: 4900, message: "Disconnected" },
+  ])
+    assert.equal(walletFailure(notSent), "not-sent", (notSent as Error).message);
+  for (const unknown of [new Error("Unexpected error"), { code: -32603, message: "Internal JSON-RPC error." }, new Error(""), null, "boom"])
+    assert.equal(walletFailure(unknown), "maybe-sent", String(unknown));
 });
