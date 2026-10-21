@@ -98,7 +98,7 @@ function TradeList({ trades, symbol }: { trades: TradeView[]; symbol: string }) 
  */
 function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Holdings | null; onDone: () => void }) {
   const { address } = useWallet();
-  const { run: runTx, locked } = useTx();
+  const { run: runTx } = useTx();
   const [status, setStatus] = useState<{ error: boolean; text: string } | null>(null);
   /** The running action and its stage ("Check your wallet"...), shown on that action's button only. */
   const [running, setRunning] = useState<{ action: string; stage: string } | null>(null);
@@ -132,7 +132,7 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
         <>
           <div className="lbl mute">Your earnings</div>
           <div className="cap num" style={{ fontSize: 34 }}>{formatSol(coin.streamerUnclaimedSol)} SOL</div>
-          <button type="button" className="mbtn buy" disabled={!canClaim || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim", "Earnings sent to your wallet")}>
+          <button type="button" className="mbtn buy" disabled={!canClaim || Boolean(stage)} onClick={() => runAction("claim", "Earnings sent to your wallet")}>
             {labelFor("claim", "Claim earnings")}
           </button>
         </>
@@ -144,13 +144,13 @@ function CoinActions({ coin, holdings, onDone }: { coin: CoinView; holdings: Hol
             {formatSol(lpFees.sol)} SOL
             {Number(lpFees.coins) > 0 && <span className="mute"> + {compact(Number(lpFees.coins))} {coin.symbol}</span>}
           </div>
-          <button type="button" className="mbtn buy" disabled={!canClaimLp || Boolean(stage) || Boolean(locked)} onClick={() => runAction("claim-lp", "Pool fees sent to your wallet")}>
+          <button type="button" className="mbtn buy" disabled={!canClaimLp || Boolean(stage)} onClick={() => runAction("claim-lp", "Pool fees sent to your wallet")}>
             {labelFor("claim-lp", "Claim pool fees")}
           </button>
         </>
       )}
       {canGraduate && (
-        <button type="button" className="mbtn buy" disabled={Boolean(stage) || Boolean(locked)} onClick={() => runAction("graduate", "Graduated to Meteora")}>
+        <button type="button" className="mbtn buy" disabled={Boolean(stage)} onClick={() => runAction("graduate", "Graduated to Meteora")}>
           {labelFor("graduate", "Graduate to Meteora")}
         </button>
       )}

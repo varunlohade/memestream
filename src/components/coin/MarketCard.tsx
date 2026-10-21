@@ -2,8 +2,8 @@
 /**
  * A prediction's on-chain market, as card A (the Polymarket card): the question, a YES/NO bar, odds
  * and volume, two big BUY buttons, the wallet's position, and after resolution the result and
- * Redeem. Bets and redemptions go through the app's money flow (useTx().run), so the lock against
- * paying twice and the banners with Solscan links apply. The server decides everything; this only
+ * Redeem. Bets and redemptions go through the app's money flow (useTx().run), so the server's
+ * double-pay hold and the banner with its Solscan link apply. The server decides everything; this only
  * shows its answers.
  */
 import { type ReactNode, useCallback, useEffect, useState } from "react";
@@ -123,7 +123,7 @@ type CardProps = {
 export function MarketCard(props: CardProps) {
   const { mint, predictionId, text, now, canBet, poll, children, source, betWindow, verdict } = props;
   const { address, chain } = useWallet();
-  const { run, locked } = useTx();
+  const { run } = useTx();
   const { market, error, refresh } = useMarket(mint, predictionId, address, poll ? ODDS_POLL_MS : null);
   const [ticket, setTicket] = useState<Side | null>(props.initialTicket ?? null);
   const [status, setStatus] = useState<string | null>(null);
@@ -197,7 +197,7 @@ export function MarketCard(props: CardProps) {
               type="button"
               className={`mbtn ${side === "yes" ? "buy" : "mk-no"}`}
               aria-pressed={ticket === side}
-              disabled={busy || locked}
+              disabled={busy}
               onClick={() => setTicket(ticket === side ? null : side)}
             >
               BUY {side.toUpperCase()} · {percent(market.probability[side])}
@@ -227,7 +227,7 @@ export function MarketCard(props: CardProps) {
             {result.text}
           </span>
           {result.redeem && (
-            <button type="button" className="mbtn buy" disabled={busy || locked} onClick={redeem}>
+            <button type="button" className="mbtn buy" disabled={busy} onClick={redeem}>
               {busy ? (status ?? "Preparing") : `Redeem #${predictionId}`}
             </button>
           )}
@@ -242,7 +242,7 @@ export function MarketCard(props: CardProps) {
 
 /** The amount box: SOL in for a buy (or shares for a sell), chips, the preview, and Confirm. */
 function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: string; predictionId: string; side: Side; market: MarketView; wallet: string; onDone: () => Promise<void> }) {
-  const { run, locked } = useTx();
+  const { run } = useTx();
   const mine = market.position?.[side] ?? "0";
   const [action, setAction] = useState<Action>("buy");
   const [amount, setAmount] = useState(BUY_CHIPS[0]);
@@ -357,8 +357,8 @@ function Ticket({ mint, predictionId, side, market, wallet, onDone }: { mint: st
           {error}
         </p>
       )}
-      <button type="button" className={`mbtn ${side === "yes" ? "buy" : "mk-no"} mk-confirm`} disabled={!preview || locked || stage !== null} onClick={confirm}>
-        {stage ?? (locked ? "Paused: checking your last trade" : "Confirm")}
+      <button type="button" className={`mbtn ${side === "yes" ? "buy" : "mk-no"} mk-confirm`} disabled={!preview || stage !== null} onClick={confirm}>
+        {stage ?? "Confirm"}
       </button>
     </div>
   );

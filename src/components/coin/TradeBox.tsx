@@ -43,7 +43,7 @@ function asSlippage(value: string | null): number | null {
 
 export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holdings: Holdings | null; onTraded: () => void }) {
   const { address } = useWallet();
-  const { run, locked } = useTx();
+  const { run } = useTx();
   const [side, setSide] = useState<Side>("buy");
 
   const [pickedUnits, setPickedUnits] = useState<Partial<Record<Side, Unit>>>({});
@@ -121,9 +121,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
       ? "Can't buy your own coin"
       : busy
         ? status.text
-        : locked
-          ? "Paused: checking your last trade"
-          : "Place trade";
+        : "Place trade";
 
   return (
     <section className="p" aria-label="Trade">
@@ -214,7 +212,7 @@ export function TradeBox({ coin, holdings, onTraded }: { coin: CoinView; holding
       <button
         type="button"
         className={`mbtn ${side} tb-place`}
-        disabled={!address || blocked || !preview || busy || Boolean(locked)}
+        disabled={!address || blocked || !preview || busy}
         onClick={submit}
       >
         {label}

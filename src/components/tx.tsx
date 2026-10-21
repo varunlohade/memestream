@@ -9,7 +9,7 @@ import { useWallet } from "@/components/wallet/WalletProvider";
 import { solscanTx } from "@/lib/explorer";
 import type { PreparedTx, TxAction, TxStatus } from "@/lib/api-types";
 import { fetchJson, postJson } from "@/lib/http";
-import { isBusy, isUserRejection, type LastResult, MESSAGES, POLL_MS, type View } from "@/lib/tx-flow";
+import { isBusy, isUserRejection, type LastResult, MESSAGES, POLL_MS } from "@/lib/tx-flow";
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -22,10 +22,8 @@ const WALLET_ERROR = "Your wallet gave an error. The trade may still land; check
 export type Stage = "Preparing" | "Check your wallet" | "Confirming";
 
 type TxState = {
-  view: View;
-  /** Always false: kept so callers don't change. */
-  locked: boolean;
-  unlock: (id: string) => void;
+  /** The last result in this tab (went through / failed), until dismissed. */
+  last: LastResult | null;
   dismiss: () => void;
   run: <T extends PreparedTx>(action: TxAction, label: string, body: unknown, onStage: (stage: Stage) => void) => Promise<T>;
 };
@@ -95,41 +93,18 @@ export function TxProvider({ children }: { children: ReactNode }) {
   );
 
   const dismiss = useCallback(() => setLast(null), []);
-  const value = useMemo<TxState>(() => ({ view: { kind: "free", last }, locked: false, unlock: () => {}, dismiss, run }), [last, dismiss, run]);
+  const value = useMemo<TxState>(() => ({ last, dismiss, run }), [last, dismiss, run]);
   return <TxContext.Provider value={value}>{children}</TxContext.Provider>;
 }
 
 /** Under the top bar: the last result (went through / failed), with a link to Solscan. */
 export function TxBanner() {
-  const { view, unlock, dismiss } = useTx();
+  const { last, dismiss } = useTx();
   const { chain } = useWallet();
-  let text: string | null = null;
-  let signature: string | null = null;
-  let error = false;
-  let action: ReactNode = null;
-  if (view.kind === "confirming") text = `Confirming "${view.label}". Trading is paused until we know, so you can't pay twice.`;
-  if (view.kind === "other-tab") text = "A trade is in progress in another tab. Trading is paused until it finishes (at most 10 minutes).";
-  if (view.kind === "check-wallet") {
-    text = view.message;
-    error = true;
-    signature = view.signature;
-    action = (
-      <button type="button" className="mbtn" style={{ height: 44, fontSize: 14 }} onClick={() => unlock(view.id)}>
-        I checked, unlock
-      </button>
-    );
-  }
-  if (view.kind === "free" && view.last && view.last.kind !== "rejected") {
-    text = view.last.text;
-    error = view.last.kind === "failed";
-    signature = view.last.signature ?? null;
-    action = (
-      <button type="button" className="mbtn" style={{ height: 44, fontSize: 14 }} onClick={dismiss} aria-label="Dismiss">
-        OK
-      </button>
-    );
-  }
-  if (!text) return null;
+  if (!last || last.kind === "rejected") return null;
+  const text = last.text;
+  const error = last.kind === "failed";
+  const signature = last.signature ?? null;
   return (
     <div className="tx-banner" role={error ? "alert" : "status"}>
       <div className={`notice${error ? " err" : ""}`} style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
@@ -139,7 +114,9 @@ export function TxBanner() {
             View on Solscan
           </a>
         )}
-        {action}
+        <button type="button" className="mbtn" style={{ height: 44, fontSize: 14 }} onClick={dismiss} aria-label="Dismiss">
+          OK
+        </button>
       </div>
     </div>
   );

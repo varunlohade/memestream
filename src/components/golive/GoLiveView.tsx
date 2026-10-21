@@ -41,7 +41,7 @@ export function GoLiveView() {
   const launchFeeSol = useLaunchFee();
   const feeKnown = launchFeeSol !== null;
   const { address } = useWallet();
-  const { run, locked } = useTx();
+  const { run } = useTx();
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [streamUrl, setStreamUrl] = useState("");
@@ -49,7 +49,7 @@ export function GoLiveView() {
 
   const platform = parseStreamLink(streamUrl)?.platform;
   const linkProblem = streamUrl.trim() && platform !== "youtube" && platform !== "twitch" ? "Use a YouTube or Twitch live link" : null;
-  const ready = feeKnown && address && name.trim() && symbol.trim() && streamUrl.trim() && !linkProblem && !status?.busy && !locked;
+  const ready = feeKnown && address && name.trim() && symbol.trim() && streamUrl.trim() && !linkProblem && !status?.busy;
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();

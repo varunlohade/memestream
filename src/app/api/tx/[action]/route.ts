@@ -39,9 +39,10 @@ async function build(parsed: ParsedTx): Promise<PreparedTx> {
 }
 
 /**
- * An identical request from the same wallet while an earlier one is held (built in the last 30 s,
- * or signed and not yet confirmed, failed or expired) answers 409 (tx-intents.ts). The answer
- * carries `intent`, which the client sends back on its status polls (or to /api/tx/rejected).
+ * An identical request from the same wallet while an earlier one is held answers 409 (tx-intents.ts):
+ * built in the last BUILD_HOLD_MS (60 s), or signed (or possibly sent after a wallet error) and not
+ * yet confirmed or failed, up to SIGNED_HOLD_MS (150 s) after its build. The answer carries `intent`,
+ * which the client sends back on its status polls (or to /api/tx/rejected or /api/tx/wallet-error).
  */
 export const POST = withRpcGuard({ name: "tx-build", burst: 10, perSecond: 1 }, async (request: Request, { params }: RouteContext<"/api/tx/[action]">, guard) => {
   try {
