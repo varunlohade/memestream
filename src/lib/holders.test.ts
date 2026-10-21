@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import bs58 from "bs58";
-import { mintSupply, OWNER_AMOUNT_SLICE, slicedOwnerAmount, tokenAccountOwner, toHolders } from "./holders";
+import type { HolderView } from "./api-types";
+import { holdersNote, mintSupply, OWNER_AMOUNT_SLICE, slicedOwnerAmount, tokenAccountOwner, toHolders } from "./holders";
 
 const key = (n: number) => bs58.encode(new Uint8Array(32).fill(n));
 /** A token account's data: mint, owner, amount (the rest of the layout isn't read). */
@@ -71,4 +72,12 @@ test("holders: no supply means no list; the list stops at the limit", () => {
   const top = toHolders(many, BigInt(1000), roles, 10);
   assert.equal(top.length, 10);
   assert.equal(top[0].owner, key(39));
+});
+
+test("holdersNote: loading, a failed load (retrying), none yet; stale rows stay on screen after a failed poll", () => {
+  const row = { owner: "o", percent: 1 } as HolderView;
+  assert.equal(holdersNote(null, null), "Loading holders");
+  assert.equal(holdersNote(null, "HTTP 500"), "Couldn't load holders. Retrying…");
+  assert.equal(holdersNote([], null), "No holders yet.");
+  assert.equal(holdersNote([row], "HTTP 500"), null, "the last good list stays");
 });

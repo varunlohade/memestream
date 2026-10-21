@@ -11,6 +11,7 @@ import { UnverifiedTag } from "@/components/UnverifiedTag";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { ago, compact, formatSol, shortAddress, SIDE_LABEL, signedPercent } from "@/lib/format";
 import { solscanAccount, solscanTx } from "@/lib/explorer";
+import { holdersNote } from "@/lib/holders";
 import { priceSeries } from "@/lib/price-series";
 import { parseStreamLink } from "@/lib/stream-link";
 import { Predictions } from "./Predictions";
@@ -168,10 +169,10 @@ type CoinTab = "trades" | "predictions" | "holders";
 const HOLDER_ROLE_LABEL = { curve: "bonding curve", pool: "Meteora pool", streamer: "streamer" } as const;
 
 /** Who holds the coin: owners linked to Solscan, with the curve or pool vault and the streamer named. */
-function HolderList({ holders, limit }: { holders: HolderView[] | null; limit?: number }) {
+function HolderList({ holders, error, limit }: { holders: HolderView[] | null; error: string | null; limit?: number }) {
   const { chain } = useWallet();
-  if (!holders) return <p className="mute holders-empty">Loading holders</p>;
-  if (holders.length === 0) return <p className="mute holders-empty">No holders yet.</p>;
+  const note = holdersNote(holders, error);
+  if (note || !holders) return <p className="mute holders-empty">{note}</p>;
   return (
     <ol className="holder-list num">
       {holders.slice(0, limit).map((h, i) => (
@@ -232,7 +233,7 @@ export function CoinPageView({
   const detail = data ?? initial;
   const { change } = usePriceTrend(detail);
   const points = useMemo(() => priceSeries(detail.trades), [detail.trades]);
-  const { data: holderData } = useHolders(mint);
+  const { data: holderData, error: holdersError } = useHolders(mint);
   const holders = holderData?.holders ?? null;
   // Predictions are the main product: their tab is first and open by default.
   const [tab, setTab] = useState<CoinTab>(predictions ? "predictions" : "trades");
@@ -311,7 +312,7 @@ export function CoinPageView({
           )}
           {tab === "holders" && (
             <section className="p" aria-label="Holders">
-              <HolderList holders={holders} />
+              <HolderList holders={holders} error={holdersError} />
             </section>
           )}
         </div>
@@ -333,7 +334,7 @@ export function CoinPageView({
         </div>
         <section className="p cp-holders" aria-label="Holder distribution">
           <h2>holder distribution</h2>
-          <HolderList holders={holders} limit={10} />
+          <HolderList holders={holders} error={holdersError} limit={10} />
         </section>
       </aside>
     </div>

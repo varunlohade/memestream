@@ -55,3 +55,9 @@ export function toHolders(balances: TokenBalance[], supply: bigint, roles: Holde
     .slice(0, limit)
     .map(([owner, amount]) => ({ owner, percent: Number((amount * BigInt(1_000_000)) / supply) / 10_000, role: role(owner) }));
 }
+
+/** What the holders list says when it has no rows to show: loading, a failed load (polling retries it), or none yet. Null with rows (stale ones stay on screen). */
+export function holdersNote(holders: HolderView[] | null, error: string | null): string | null {
+  if (holders) return holders.length === 0 ? "No holders yet." : null;
+  return error ? "Couldn't load holders. Retrying…" : "Loading holders";
+}
