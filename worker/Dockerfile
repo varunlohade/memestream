@@ -1,5 +1,4 @@
-# node:22-slim (Debian), so ffmpeg and streamlink can be added later for the video grabber:
-#   RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg python3-pip && pip install --break-system-packages streamlink
+# node:22-slim (Debian). The video grabber (ffmpeg + yt-dlp) is its own service: ../grabber.
 FROM node:22-slim
 WORKDIR /app
 COPY package.json loop.mjs index.mjs ./

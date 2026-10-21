@@ -93,9 +93,13 @@ watches the stream, with people as the fallback and the court of appeal.
 
 **While betting is open, and a few minutes after**
 - The server grabs pictures of the stream from Twitch and YouTube, skipping repeats.
-- A vision model (Gemini 2.5 Flash) turns each picture into facts, each tagged with where it came
-  from: the game screen, the camera, an overlay or chat. Overlay and chat text is dropped, so a
-  viewer's donation alert can't fake a result.
+- After betting closes, and when the AI checks a result, the server asks the video grabber (a
+  second Railway service, `grabber/`) for a 10-second clip of the live stream: a few frames and its
+  sound. If the clip fails, it uses the preview picture. Kick has no preview, so there only clips work.
+- A vision model (Gemini 2.5 Flash) turns each picture or clip into facts, each tagged with where it
+  came from: the game screen, the camera, the audio, an overlay or chat. Overlay and chat text is
+  dropped, so a viewer's donation alert can't fake a result. Real-SOL markets also drop audio facts:
+  anyone on stream can say anything into the mic.
 - Only pictures taken after betting closed count as evidence.
 
 **When betting closes**
@@ -113,12 +117,14 @@ watches the stream, with people as the fallback and the court of appeal.
 **Running it**
 - A small worker on Railway calls the oracle every minute (`/api/predictions/tick`, guarded by a
   secret), so questions resolve even when nobody has the page open.
+- The video grabber runs in the same Railway project. The site calls it with its own secret
+  (`MEMESTREAM_GRABBER_URL`, `MEMESTREAM_GRABBER_SECRET`). Without them the referee uses only
+  preview pictures. See [grabber/README.md](grabber/README.md).
 - A daily budget caps AI calls, per coin and in total. It costs well under 1 cent per question.
 - memestream's 16% share of coin trading fees pays for the AI referee.
 - All AI keys stay on the server. The browser never sees them.
 
-**Next:** the referee gets a fresh frame every minute and a 30-second clip with sound when betting
-closes, so it can judge fast moments that a still picture misses.
+**Next:** a fresh frame every minute while betting is open, not only clips after it closes.
 
 ## How we use each Meteora feature
 

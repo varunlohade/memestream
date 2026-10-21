@@ -166,6 +166,8 @@ Set:
 | `TYPESAFE_API_KEY` | as today | **yes** |
 | `OPENROUTER_API_KEY` | as today | **yes** |
 | `MEMESTREAM_CRON_SECRET` | a NEW random value, 32+ characters (`openssl rand -hex 32`). The Railway worker sends it to call the AI referee every minute | **yes** |
+| `MEMESTREAM_GRABBER_URL` | optional: the video grabber's https URL on Railway (see `grabber/README.md`). Without it and the secret, the referee uses preview pictures only | no |
+| `MEMESTREAM_GRABBER_SECRET` | optional: the grabber's `GRABBER_SECRET`, 32+ characters | **yes** |
 | `KV_*` | from a NEW Upstash database (below) | **yes** |
 
 Remove (they must not exist on mainnet):

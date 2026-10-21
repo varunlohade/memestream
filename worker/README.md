@@ -12,8 +12,10 @@ close-due route if you set one. It uses the cron secret as a bearer token.
 - Both URLs must be https and on the same host. Redirects are refused, so the secret only goes there.
 - It logs one line per call: the name, the status and the time taken. It never logs the secret.
 
-No npm dependencies. Node 22. The Dockerfile starts from `node:22-slim`, so ffmpeg and streamlink
-can be added later for the video grabber.
+No npm dependencies. Node 22. The Dockerfile starts from `node:22-slim`.
+
+The video grabber (`../grabber/`) is a second service in the same Railway project, with its own
+secret. It cuts short clips for the AI referee; see [its README](../grabber/README.md).
 
 ## Settings
 
